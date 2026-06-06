@@ -50,7 +50,7 @@ export function PortalSelectionScreen() {
       <PrimaryButton
         label="Se déconnecter"
         onPress={logout}
-        variant="secondary"
+        variant="danger"
       />
     </ScreenContainer>
   );

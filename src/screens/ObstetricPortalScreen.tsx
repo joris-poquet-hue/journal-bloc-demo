@@ -190,7 +190,7 @@ export function ObstetricPortalScreen() {
         <PrimaryButton
           label="Se déconnecter"
           onPress={logout}
-          variant="secondary"
+          variant="danger"
         />
       </div>
     </ScreenContainer>

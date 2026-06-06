@@ -1531,10 +1531,7 @@ export function AdminScreen() {
         subtitle="Création et modification des interventions disponibles dans le journal."
         frameWidth="wide"
       >
-        <SectionCard
-          title="Créer une nouvelle intervention"
-          description="Ajoute une intervention possible dans le journal de bord chirurgical."
-        >
+        <SectionCard title="Créer une nouvelle intervention">
           <form
             className="admin-create-form"
             onSubmit={handleCreateSurgicalIntervention}
@@ -1599,7 +1596,9 @@ export function AdminScreen() {
                 }
                 type="checkbox"
               />
-              <span>Cette intervention nécessite de préciser la latéralité</span>
+              <span className="admin-checkbox-card__plain-label">
+                Cette intervention nécessite de préciser la latéralité
+              </span>
             </label>
 
             {surgicalInterventionForm.requiresLaterality ? (
@@ -1701,25 +1700,21 @@ export function AdminScreen() {
                       setDraggedStepLabel(null);
                     }}
                   >
-                    <span>Étape {index + 1}</span>
+                    <span className="admin-step-order-item__index">
+                      Étape {index + 1}
+                    </span>
                     <strong>{stepLabel}</strong>
+                    <label className="admin-step-order-item__key">
+                      <input
+                        checked={surgicalInterventionForm.keyStepLabels.includes(
+                          stepLabel
+                        )}
+                        onChange={() => toggleKeyStepLabel(stepLabel)}
+                        type="checkbox"
+                      />
+                      <span>Étape clé</span>
+                    </label>
                   </article>
-                ))}
-              </div>
-            </div>
-
-            <div className="field-stack">
-              <span className="field-stack__label">Étapes clés de l’intervention</span>
-              <div className="admin-key-step-list">
-                {previewChecklistStepLabels.map((stepLabel) => (
-                  <label className="admin-checkbox-card" key={stepLabel}>
-                    <input
-                      checked={surgicalInterventionForm.keyStepLabels.includes(stepLabel)}
-                      onChange={() => toggleKeyStepLabel(stepLabel)}
-                      type="checkbox"
-                    />
-                    <span>{stepLabel}</span>
-                  </label>
                 ))}
               </div>
             </div>
@@ -1779,9 +1774,6 @@ export function AdminScreen() {
                     >
                       <div className="admin-created-intervention__header">
                         <strong>{intervention.name}</strong>
-                        <span>
-                          {isBuiltInIntervention ? 'Intervention de base' : 'Créée'}
-                        </span>
                       </div>
                       <span>{intervention.checklistSteps.length} étape(s)</span>
                       <span>{intervention.keyStepIds.length} étape(s) clé(s)</span>
@@ -1892,9 +1884,19 @@ export function AdminScreen() {
         description="Cet espace centralise la création de profils et la consultation des données."
       >
         <PrimaryButton
+          label="Ouvrir administration profil"
+          onPress={() => setView('profiles')}
+          variant="secondary"
+        />
+        <PrimaryButton
+          label="Ouvrir outil de création d'intervention"
+          onPress={() => setView('interventions')}
+          variant="secondary"
+        />
+        <PrimaryButton
           label="Se déconnecter"
           onPress={logout}
-          variant="secondary"
+          variant="danger"
         />
       </SectionCard>
 
@@ -1962,33 +1964,8 @@ export function AdminScreen() {
         )}
       </SectionCard>
 
-      <SectionCard
-        title="Administration profil"
-        description="Créer un interne et consulter les profils existants."
-      >
-        <PrimaryButton
-          label="Ouvrir Administration profil"
-          onPress={() => setView('profiles')}
-          variant="secondary"
-        />
-      </SectionCard>
-
-      <SectionCard
-        title="Création intervention"
-        description="Créer ou modifier les interventions disponibles dans le journal."
-      >
-        <PrimaryButton
-          label="Ouvrir Création intervention"
-          onPress={() => setView('interventions')}
-          variant="secondary"
-        />
-      </SectionCard>
-
       {false ? (
-      <SectionCard
-        title="Créer une nouvelle intervention"
-        description="Ajoute une intervention possible dans le journal de bord chirurgical."
-      >
+      <SectionCard title="Créer une nouvelle intervention">
         <form
           className="admin-create-form"
           onSubmit={handleCreateSurgicalIntervention}
@@ -2053,7 +2030,9 @@ export function AdminScreen() {
               }
               type="checkbox"
             />
-            <span>Cette intervention nécessite de préciser la latéralité</span>
+            <span className="admin-checkbox-card__plain-label">
+              Cette intervention nécessite de préciser la latéralité
+            </span>
           </label>
 
           {surgicalInterventionForm.requiresLaterality ? (
@@ -2155,25 +2134,21 @@ export function AdminScreen() {
                     setDraggedStepLabel(null);
                   }}
                 >
-                  <span>Étape {index + 1}</span>
+                  <span className="admin-step-order-item__index">
+                    Étape {index + 1}
+                  </span>
                   <strong>{stepLabel}</strong>
+                  <label className="admin-step-order-item__key">
+                    <input
+                      checked={surgicalInterventionForm.keyStepLabels.includes(
+                        stepLabel
+                      )}
+                      onChange={() => toggleKeyStepLabel(stepLabel)}
+                      type="checkbox"
+                    />
+                    <span>Étape clé</span>
+                  </label>
                 </article>
-              ))}
-            </div>
-          </div>
-
-          <div className="field-stack">
-            <span className="field-stack__label">Étapes clés de l’intervention</span>
-            <div className="admin-key-step-list">
-              {previewChecklistStepLabels.map((stepLabel) => (
-                <label className="admin-checkbox-card" key={stepLabel}>
-                  <input
-                    checked={surgicalInterventionForm.keyStepLabels.includes(stepLabel)}
-                    onChange={() => toggleKeyStepLabel(stepLabel)}
-                    type="checkbox"
-                  />
-                  <span>{stepLabel}</span>
-                </label>
               ))}
             </div>
           </div>
@@ -2233,9 +2208,6 @@ export function AdminScreen() {
                   >
                     <div className="admin-created-intervention__header">
                       <strong>{intervention.name}</strong>
-                      <span>
-                        {isBuiltInIntervention ? 'Intervention de base' : 'Créée'}
-                      </span>
                     </div>
                     <span>{intervention.checklistSteps.length} étape(s)</span>
                     <span>{intervention.keyStepIds.length} étape(s) clé(s)</span>
@@ -2449,7 +2421,7 @@ export function AdminScreen() {
                 </div>
 
                 {filteredInterventions.length ? (
-                  <div className="admin-list">
+                  <div className="admin-list admin-list--scroll">
                     {filteredInterventions.map((intervention) => {
                       const internal = getInternalById(
                         intervention.internalId,
