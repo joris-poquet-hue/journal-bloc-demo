@@ -49,13 +49,23 @@ function GuideFigure({
 }
 
 export function PreBlockScreen() {
-  const { backToWelcome } = useAppContext();
+  const { backToWelcome, preBlockContext } = useAppContext();
   const [view, setView] = useState<GuideView>('menu');
   const [expandedFigure, setExpandedFigure] = useState<ExpandedFigure | null>(null);
   const selectedGuide =
     view === 'menu'
       ? null
       : techniqueGuides.find((guide) => guide.id === view) ?? null;
+  const screenEyebrow =
+    preBlockContext === 'obstetric'
+      ? 'Avant la salle de naissance'
+      : 'Avant le bloc';
+  const menuSubtitle =
+    preBlockContext === 'obstetric'
+      ? 'Les fiches dédiées à la salle de naissance seront regroupées ici.'
+      : 'Choisis la fiche de rappels à consulter avant l’intervention.';
+  const availableGuides =
+    preBlockContext === 'obstetric' ? [] : techniqueGuides;
 
   useEffect(() => {
     if (!expandedFigure) {
@@ -82,23 +92,29 @@ export function PreBlockScreen() {
   if (view === 'menu') {
     return (
       <ScreenContainer
-        eyebrow="Avant le bloc"
+        eyebrow={screenEyebrow}
         title="Fiches techniques"
-        subtitle="Choisis la fiche de rappels à consulter avant l’intervention."
+        subtitle={menuSubtitle}
       >
-        <SectionCard
-          title="Techniques chirurgicales"
-          description={`${techniqueGuides.length} fiches sont déjà disponibles.`}
-        >
-          <div className="action-stack">
-            {techniqueGuides.map((guide) => (
-              <PrimaryButton
-                key={guide.id}
-                label={guide.title}
-                onPress={() => setView(guide.id)}
-              />
-            ))}
-          </div>
+        <SectionCard>
+          {availableGuides.length ? (
+            <>
+              <p>{`${availableGuides.length} fiches sont déjà disponibles.`}</p>
+              <div className="action-stack">
+                {availableGuides.map((guide) => (
+                  <PrimaryButton
+                    key={guide.id}
+                    label={guide.title}
+                    onPress={() => setView(guide.id)}
+                  />
+                ))}
+              </div>
+            </>
+          ) : (
+            <p>
+              Les fiches obstétricales seront ajoutées dans cet espace.
+            </p>
+          )}
         </SectionCard>
 
         <PrimaryButton
@@ -117,7 +133,7 @@ export function PreBlockScreen() {
   if (selectedGuide.kind !== 'geu') {
     return (
       <ScreenContainer
-        eyebrow="Avant le bloc"
+        eyebrow={screenEyebrow}
         title={`${selectedGuide.title} : fiche technique`}
       >
         {(selectedGuide.sections ?? []).map((section) => (
@@ -214,7 +230,7 @@ export function PreBlockScreen() {
 
   return (
     <ScreenContainer
-      eyebrow="Avant le bloc"
+      eyebrow={screenEyebrow}
       title="GEU : fiche technique"
       subtitle="Repères synthétiques pour la prise en charge chirurgicale d’une grossesse extra-utérine."
     >

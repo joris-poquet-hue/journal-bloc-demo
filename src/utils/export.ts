@@ -1,28 +1,34 @@
 import {
   approachOptions,
   checklistLevelOptions,
-  colpoclesisChecklistSteps,
-  complexityOptions,
   contextOptions,
   entryTechniqueOptions,
+  formatComplexityRating,
   formatDisplayName,
   getFixedContextForIntervention,
   getChecklistStepsForIntervention,
   getChoiceLabel,
   getInternalById,
+  getProcedureOptions,
   getSeniorById,
+  getSurgicalInterventionDefinition,
   indicationOptions,
   lateralityOptions,
-  procedureOptions,
   roleOptions,
-  salpingectomyChecklistSteps,
 } from '../data/mockData';
-import { InternalProfile, SavedIntervention } from '../types';
+import {
+  AdminInterventionEvaluation,
+  InternalProfile,
+  SavedIntervention,
+  SurgicalInterventionDefinition,
+} from '../types';
 
 type ExportRowContext = {
   internal: InternalProfile | null;
   seniorLabel: string;
   checklistStepIds: Set<string>;
+  keyStepAutonomyScore: string;
+  adminEvaluation: AdminInterventionEvaluation | undefined;
 };
 
 type CsvColumn = {
@@ -58,15 +64,81 @@ function getChecklistValue(intervention: SavedIntervention, stepId: string) {
   return getChoiceLabel(checklistLevelOptions, value, '');
 }
 
+const adminPerformanceExportLabels: Record<string, string> = {
+  '1': '1 · Interne non préparé',
+  '2': '2 · Connaissance insuffisante de la procédure',
+  '3': '3 · Performance intermédiaire',
+  '4': '4 · Performance compatible avec une future autonomie supervisée',
+  '5': '5 · Performance exceptionnelle',
+};
+
+const adminCategoryDifficultyExportLabels: Record<string, string> = {
+  '1': '1 · Intervention simple',
+  '2': '2 · Intervention de difficulté intermédiaire',
+  '3': '3 · Intervention difficile',
+};
+
+function formatKeyStepAutonomyScore(value: number | null) {
+  if (value == null) {
+    return '';
+  }
+
+  return `${value.toFixed(1).replace('.', ',')} / 4`;
+}
+
+function getKeyStepAutonomyScore(
+  intervention: SavedIntervention,
+  customInterventions: SurgicalInterventionDefinition[]
+) {
+  const interventionDefinition = getSurgicalInterventionDefinition(
+    intervention.procedure,
+    customInterventions
+  );
+
+  if (!interventionDefinition) {
+    return '';
+  }
+
+  const keyStepIdSet = new Set(interventionDefinition.keyStepIds);
+  const checklistSteps = getChecklistStepsForIntervention(
+    intervention.procedure,
+    intervention.indication,
+    intervention.approach,
+    intervention.entryTechnique,
+    customInterventions
+  );
+  const keyScores = checklistSteps
+    .filter((step) => keyStepIdSet.has(step.id))
+    .map((step) => intervention.checklist[step.id])
+    .filter((level): level is '0' | '1' | '2' | '3' | '4' =>
+      ['0', '1', '2', '3', '4'].includes(level ?? '')
+    )
+    .map((level) => Number(level));
+
+  if (keyScores.length === 0) {
+    return '';
+  }
+
+  return formatKeyStepAutonomyScore(
+    keyScores.reduce((total, score) => total + score, 0) / keyScores.length
+  );
+}
+
 export function downloadInterventionsCsv(
   interventions: SavedIntervention[],
-  internalProfiles: InternalProfile[]
+  internalProfiles: InternalProfile[],
+  customInterventions: SurgicalInterventionDefinition[] = [],
+  adminEvaluations: Record<string, AdminInterventionEvaluation> = {}
 ) {
   if (interventions.length === 0) {
     return;
   }
 
-  const hasIndication = interventions.some((intervention) => intervention.indication !== null);
+  const hasIndication = interventions.some(
+    (intervention) =>
+      intervention.indication !== null ||
+      (intervention.customIndication?.trim().length ?? 0) > 0
+  );
   const hasIndicationComment = interventions.some(
     (intervention) => intervention.indicationComment.trim().length > 0
   );
@@ -75,45 +147,44 @@ export function downloadInterventionsCsv(
     (intervention) => intervention.entryTechnique !== null
   );
   const hasLaterality = interventions.some((intervention) => intervention.laterality !== null);
-  const activeSalpingectomyStepIds = new Set<string>();
-  const activeColpoclesisStepIds = new Set<string>();
+  const procedureOptions = getProcedureOptions(customInterventions);
+  const activeChecklistColumns = new Map<
+    string,
+    { procedureLabel: string; stepId: string; stepLabel: string }
+  >();
 
   interventions.forEach((intervention) => {
     const checklistSteps = getChecklistStepsForIntervention(
       intervention.procedure,
       intervention.indication,
       intervention.approach,
-      intervention.entryTechnique
+      intervention.entryTechnique,
+      customInterventions
+    );
+    const procedureLabel = getChoiceLabel(
+      procedureOptions,
+      intervention.procedure,
+      intervention.procedure
     );
 
     checklistSteps.forEach((step) => {
-      if (intervention.procedure === 'salpingectomie') {
-        activeSalpingectomyStepIds.add(step.id);
-        return;
-      }
-
-      if (intervention.procedure === 'colpoclesis') {
-        activeColpoclesisStepIds.add(step.id);
-      }
+      activeChecklistColumns.set(`${intervention.procedure}:${step.id}`, {
+        procedureLabel,
+        stepId: step.id,
+        stepLabel: step.label,
+      });
     });
   });
 
-  const checklistColumns: CsvColumn[] = [
-    ...salpingectomyChecklistSteps
-      .filter((step) => activeSalpingectomyStepIds.has(step.id))
-      .map((step) => ({
-        header: `Checklist salpingectomie - ${step.label}`,
-        getValue: (intervention: SavedIntervention, context: ExportRowContext) =>
-          context.checklistStepIds.has(step.id) ? getChecklistValue(intervention, step.id) : '',
-      })),
-    ...colpoclesisChecklistSteps
-      .filter((step) => activeColpoclesisStepIds.has(step.id))
-      .map((step) => ({
-        header: `Checklist colpoclésis - ${step.label}`,
-        getValue: (intervention: SavedIntervention, context: ExportRowContext) =>
-          context.checklistStepIds.has(step.id) ? getChecklistValue(intervention, step.id) : '',
-      })),
-  ];
+  const checklistColumns: CsvColumn[] = Array.from(
+    activeChecklistColumns.values()
+  ).map((column) => ({
+    header: `Checklist ${column.procedureLabel} - ${column.stepLabel}`,
+    getValue: (intervention: SavedIntervention, context: ExportRowContext) =>
+      context.checklistStepIds.has(column.stepId)
+        ? getChecklistValue(intervention, column.stepId)
+        : '',
+  }));
 
   const columns: CsvColumn[] = [
     {
@@ -157,6 +228,7 @@ export function downloadInterventionsCsv(
           {
             header: 'Indication',
             getValue: (intervention: SavedIntervention) =>
+              intervention.customIndication?.trim() ||
               getChoiceLabel(indicationOptions, intervention.indication, ''),
           },
         ]
@@ -211,13 +283,35 @@ export function downloadInterventionsCsv(
         ),
     },
     {
-      header: 'Difficulté',
+      header: 'Difficulté ressentie',
       getValue: (intervention) =>
-        getChoiceLabel(complexityOptions, intervention.complexity, ''),
+        formatComplexityRating(intervention.complexity, ''),
     },
     {
       header: 'Rôle global',
       getValue: (intervention) => getChoiceLabel(roleOptions, intervention.role, ''),
+    },
+    {
+      header: 'Score autonomie étapes clés',
+      getValue: (_intervention, context) => context.keyStepAutonomyScore,
+    },
+    {
+      header: 'Performance chirurgicale globale',
+      getValue: (_intervention, context) =>
+        context.adminEvaluation?.globalPerformance
+          ? adminPerformanceExportLabels[
+              context.adminEvaluation.globalPerformance
+            ] ?? context.adminEvaluation.globalPerformance
+          : '',
+    },
+    {
+      header: 'Difficulté chirurgicale intra-catégorie',
+      getValue: (_intervention, context) =>
+        context.adminEvaluation?.categoryDifficulty
+          ? adminCategoryDifficultyExportLabels[
+              context.adminEvaluation.categoryDifficulty
+            ] ?? context.adminEvaluation.categoryDifficulty
+          : '',
     },
     ...checklistColumns,
   ];
@@ -231,12 +325,18 @@ export function downloadInterventionsCsv(
       intervention.procedure,
       intervention.indication,
       intervention.approach,
-      intervention.entryTechnique
+      intervention.entryTechnique,
+      customInterventions
     );
     const context: ExportRowContext = {
       internal,
       seniorLabel: senior ? `${senior.firstName} ${senior.lastName}` : '',
       checklistStepIds: new Set(checklistSteps.map((step) => step.id)),
+      keyStepAutonomyScore: getKeyStepAutonomyScore(
+        intervention,
+        customInterventions
+      ),
+      adminEvaluation: adminEvaluations[intervention.id],
     };
 
     return createCsvRow(

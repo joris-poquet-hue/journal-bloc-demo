@@ -1,4 +1,6 @@
-import { complexityOptions } from '../data/mockData';
+import type { CSSProperties } from 'react';
+
+import { defaultComplexityRating } from '../data/mockData';
 import { Complexity } from '../types';
 
 type ComplexitySliderProps = {
@@ -6,42 +8,58 @@ type ComplexitySliderProps = {
   onChange: (value: Complexity) => void;
 };
 
-const complexityOrder: Complexity[] = ['simple', 'intermediaire', 'difficile'];
+function getSafeValue(value: Complexity | null) {
+  return value ?? defaultComplexityRating;
+}
+
+function getDifficultyColor(value: Complexity) {
+  if (value <= 3) {
+    return '#2f9e44';
+  }
+
+  if (value <= 5) {
+    return '#f0c341';
+  }
+
+  if (value <= 7) {
+    return '#f58f29';
+  }
+
+  return '#d64545';
+}
 
 export function ComplexitySlider({
   value,
   onChange,
 }: ComplexitySliderProps) {
-  const selectedIndex = value ? complexityOrder.indexOf(value) : 0;
-  const safeIndex = selectedIndex >= 0 ? selectedIndex : 0;
+  const safeValue = getSafeValue(value);
+  const progress = Math.max(8, ((safeValue - 1) / 9) * 100);
+  const sliderStyle = {
+    '--difficulty-color': getDifficultyColor(safeValue),
+    '--difficulty-progress': `${progress}%`,
+  } as CSSProperties;
 
   return (
     <div className="complexity-slider">
+      <div className="complexity-slider__value">
+        Difficulté ressentie : <strong>{safeValue} / 10</strong>
+      </div>
       <input
-        aria-label="Difficulté de l’intervention"
+        aria-label="Difficulté ressentie de l’intervention"
         className="complexity-slider__input"
-        max={2}
-        min={0}
+        max={10}
+        min={1}
         onChange={(event) =>
-          onChange(complexityOrder[Number(event.target.value)])
+          onChange(Number(event.target.value) as Complexity)
         }
+        style={sliderStyle}
         step={1}
         type="range"
-        value={safeIndex}
+        value={safeValue}
       />
-      <div className="complexity-slider__labels">
-        {complexityOptions.map((option) => (
-          <button
-            key={option.value}
-            className={`complexity-slider__label ${
-              value === option.value ? 'complexity-slider__label--active' : ''
-            }`}
-            onClick={() => onChange(option.value)}
-            type="button"
-          >
-            {option.label}
-          </button>
-        ))}
+      <div className="complexity-slider__scale" aria-hidden="true">
+        <span>1</span>
+        <span>10</span>
       </div>
     </div>
   );

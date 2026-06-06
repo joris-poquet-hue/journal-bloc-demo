@@ -15,6 +15,7 @@ import {
   SavedIntervention,
   Senior,
   SurgicalApproach,
+  SurgicalInterventionDefinition,
   SurgeryContext,
   TechniqueGuide,
 } from '../types';
@@ -117,6 +118,31 @@ export const approachOptions: ChoiceOption<SurgicalApproach>[] = [
   { value: 'vnotes', label: 'vNotes' },
 ];
 
+export function getApproachOptionsForIndication(indication: Indication | null) {
+  if (indication === 'geu') {
+    return approachOptions.filter(
+      (option) => option.value !== 'robot' && option.value !== 'vnotes'
+    );
+  }
+
+  if (indication === 'ligature_tubaire') {
+    return approachOptions.filter(
+      (option) => option.value !== 'laparotomie' && option.value !== 'robot'
+    );
+  }
+
+  return approachOptions;
+}
+
+export function isApproachAllowedForIndication(
+  approach: SurgicalApproach,
+  indication: Indication | null
+) {
+  return getApproachOptionsForIndication(indication).some(
+    (option) => option.value === approach
+  );
+}
+
 export const entryTechniqueOptions: ChoiceOption<EntryTechnique>[] = [
   { value: 'trocart_direct', label: 'Trocart direct' },
   { value: 'open', label: 'Open' },
@@ -157,11 +183,38 @@ export function getFixedContextForIntervention(
   return null;
 }
 
-export const complexityOptions: ChoiceOption<Complexity>[] = [
-  { value: 'simple', label: 'Facile' },
-  { value: 'intermediaire', label: 'Moyen' },
-  { value: 'difficile', label: 'Difficile' },
-];
+export function normalizeComplexityRating(
+  value: Complexity | 'simple' | 'intermediaire' | 'difficile' | null
+): Complexity | null {
+  if (typeof value === 'number' && value >= 1 && value <= 10) {
+    return value as Complexity;
+  }
+
+  if (value === 'simple') {
+    return 2;
+  }
+
+  if (value === 'intermediaire') {
+    return 5;
+  }
+
+  if (value === 'difficile') {
+    return 8;
+  }
+
+  return null;
+}
+
+export function formatComplexityRating(
+  value: Complexity | 'simple' | 'intermediaire' | 'difficile' | null,
+  fallbackValue = 'Non renseigné'
+) {
+  const normalizedValue = normalizeComplexityRating(value);
+
+  return normalizedValue ? `${normalizedValue} / 10` : fallbackValue;
+}
+
+export const defaultComplexityRating: Complexity = 5;
 
 export const roleOptions: ChoiceOption<GlobalRole>[] = [
   { value: 'operateur_principal', label: 'Opérateur principal' },
@@ -176,24 +229,37 @@ export const checklistLevelOptions: ChoiceOption<ChecklistLevel>[] = [
   {
     value: '1',
     label: '1',
-    description: 'Réalisé avec aide physique',
+    description: 'Montré et expliqué',
   },
   {
     value: '2',
     label: '2',
-    description: 'Réalisé avec guidage verbal',
+    description: 'Réalisé avec assistance active du senior',
   },
   {
     value: '3',
     label: '3',
-    description: 'Autonomie supervisée',
+    description: 'Réalisé avec assistance passive du senior',
   },
   {
     value: '4',
     label: '4',
-    description: 'Autonomie complète',
+    description: 'Réalisé sous supervision seule',
   },
 ];
+
+export const checklistLevelDetails: Record<ChecklistLevel, string> = {
+  NA: 'Étape non concernée pour cette intervention.',
+  '0': 'Le senior a réalisé l’étape. Je n’ai pas participé techniquement.',
+  '1':
+    'Le senior a réalisé l’étape en me la montrant et en l’expliquant. Ma participation était limitée ou absente.',
+  '2':
+    'J’ai réalisé l’étape avec une aide importante du senior : aide physique, correction du geste, reprise partielle ou guidage rapproché.',
+  '3':
+    'J’ai réalisé l’étape moi-même, avec seulement des consignes verbales ou des conseils ponctuels. Le senior n’est pas intervenu physiquement.',
+  '4':
+    'J’ai réalisé l’étape en autonomie, le senior étant uniquement présent pour superviser et sécuriser si besoin.',
+};
 
 const commonChecklistStepLabels = [
   'Installation de la patiente',
@@ -242,12 +308,81 @@ export const allChecklistSteps: ChecklistStep[] = [
   ...colpoclesisChecklistSteps,
 ];
 
+export const builtInSurgicalInterventions: SurgicalInterventionDefinition[] = [
+  {
+    id: 'salpingectomie',
+    name: 'Salpingectomie',
+    indications: [],
+    allowedApproaches: ['coelioscopie', 'laparotomie', 'robot', 'vnotes'],
+    allowedEntryTechniques: ['trocart_direct', 'open', 'veress'],
+    requiresLaterality: true,
+    checklistSteps: salpingectomyChecklistSteps,
+    keyStepIds: ['step-9', 'step-10', 'step-12'],
+  },
+  {
+    id: 'colpoclesis',
+    name: 'Colpoclésis',
+    indications: [],
+    allowedApproaches: [],
+    allowedEntryTechniques: [],
+    requiresLaterality: false,
+    checklistSteps: colpoclesisChecklistSteps,
+    keyStepIds: ['colpo-step-3', 'colpo-step-4', 'colpo-step-5'],
+  },
+];
+
+export function getSurgicalInterventionDefinitions(
+  customInterventions: SurgicalInterventionDefinition[] = []
+) {
+  const customById = new Map(
+    customInterventions.map((intervention) => [intervention.id, intervention])
+  );
+  const builtInIds = new Set(
+    builtInSurgicalInterventions.map((intervention) => intervention.id)
+  );
+  const resolvedBuiltIns = builtInSurgicalInterventions.map(
+    (intervention) => customById.get(intervention.id) ?? intervention
+  );
+  const additionalCustomInterventions = customInterventions.filter(
+    (intervention) => !builtInIds.has(intervention.id)
+  );
+
+  return [...resolvedBuiltIns, ...additionalCustomInterventions];
+}
+
+export function getProcedureOptions(
+  customInterventions: SurgicalInterventionDefinition[] = []
+): ChoiceOption<InterventionType>[] {
+  return getSurgicalInterventionDefinitions(customInterventions).map((intervention) => ({
+    value: intervention.id,
+    label: intervention.name,
+  }));
+}
+
+export function getSurgicalInterventionDefinition(
+  procedure: InterventionType,
+  customInterventions: SurgicalInterventionDefinition[] = []
+) {
+  return getSurgicalInterventionDefinitions(customInterventions).find(
+    (intervention) => intervention.id === procedure
+  );
+}
+
 export function getChecklistStepsForIntervention(
   procedure: InterventionType,
   indication: Indication | null,
   approach?: SurgicalApproach | null,
-  entryTechnique?: EntryTechnique | null
+  entryTechnique?: EntryTechnique | null,
+  customInterventions: SurgicalInterventionDefinition[] = []
 ) {
+  const customIntervention = customInterventions.find(
+    (intervention) => intervention.id === procedure
+  );
+
+  if (customIntervention) {
+    return customIntervention.checklistSteps;
+  }
+
   if (
     procedure === 'salpingectomie' &&
     (indication === 'geu' || indication === 'ligature_tubaire')
@@ -325,11 +460,12 @@ function createSavedSalpingectomyIntervention({
     procedure: 'salpingectomie',
     indication,
     indicationComment: '',
+    customIndication: null,
     approach,
     entryTechnique,
     laterality,
     context: getFixedContextForIntervention('salpingectomie', indication),
-    complexity: 'intermediaire',
+    complexity: defaultComplexityRating,
     role: 'operateur_principal',
     checklist: createChecklistState(checklistSteps, level),
   };
@@ -359,11 +495,12 @@ function createSavedColpoclesisIntervention({
     procedure: 'colpoclesis',
     indication: null,
     indicationComment: '',
+    customIndication: null,
     approach: null,
     entryTechnique: null,
     laterality: null,
     context: getFixedContextForIntervention('colpoclesis', null),
-    complexity: 'intermediaire',
+    complexity: defaultComplexityRating,
     role: 'operateur_principal',
     checklist: createChecklistState(colpoclesisChecklistSteps, level),
   };
@@ -1070,10 +1207,18 @@ export function getChoiceLabel<T extends string>(
   return options.find((option) => option.value === value)?.label ?? fallback;
 }
 
-export function getProcedureChecklistTitle(procedure: InterventionType) {
-  return procedure === 'colpoclesis'
-    ? 'Checklist technique colpoclésis'
-    : 'Checklist technique salpingectomie';
+export function getProcedureChecklistTitle(
+  procedure: InterventionType,
+  customInterventions: SurgicalInterventionDefinition[] = []
+) {
+  const intervention = getSurgicalInterventionDefinition(
+    procedure,
+    customInterventions
+  );
+
+  return intervention
+    ? `Checklist technique ${intervention.name.toLowerCase()}`
+    : 'Checklist technique';
 }
 
 export function getInternalById(

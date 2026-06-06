@@ -1,14 +1,12 @@
+import { PrimaryButton } from '../components/PrimaryButton';
+import { ProgressBadgeCard } from '../components/ProgressBadgeCard';
+import { ScreenContainer } from '../components/ScreenContainer';
+import { SectionCard } from '../components/SectionCard';
 import { useAppContext } from '../context/AppContext';
 import {
   formatDisplayName,
-  getChoiceLabel,
   getProgressBadgesForInternal,
-  indicationOptions,
 } from '../data/mockData';
-import { ProgressBadgeCard } from '../components/ProgressBadgeCard';
-import { PrimaryButton } from '../components/PrimaryButton';
-import { ScreenContainer } from '../components/ScreenContainer';
-import { SectionCard } from '../components/SectionCard';
 import { formatIsoDate } from '../utils/date';
 
 function getSemesterTone(semester: string) {
@@ -25,19 +23,17 @@ function getSemesterTone(semester: string) {
   return 'gold';
 }
 
-export function WelcomeScreen() {
+export function ObstetricPortalScreen() {
   const {
     selectedInternal,
     savedInterventions,
-    surgicalProcedureOptions,
+    savedObstetricGestures,
     goToBadges,
-    goToForm,
+    goToObstetricJournal,
     goToPortalSelection,
     goToPreBlock,
-    goToSurgeryHistory,
     logout,
-  } =
-    useAppContext();
+  } = useAppContext();
 
   if (!selectedInternal) {
     return null;
@@ -64,23 +60,22 @@ export function WelcomeScreen() {
         ...inProgressBadges,
       ].slice(0, 3)
     : [];
-  const latestInterventions = savedInterventions
-    .filter((intervention) => intervention.internalId === selectedInternal.id)
+  const latestGestures = savedObstetricGestures
+    .filter((gesture) => gesture.internalId === selectedInternal.id)
     .sort((left, right) => right.savedAt.localeCompare(left.savedAt))
     .slice(0, 5);
 
   return (
     <ScreenContainer
-      eyebrow="Accueil"
-      title="Journal de bord du bloc"
-      subtitle="Journal de bord des internes en gynécologie-obstétrique du CHU de Nantes"
+      eyebrow="Portail obstétrique"
+      title="Portail obstétrique"
     >
       <section className="welcome-hero-card">
         <div className="welcome-hero-card__copy">
           <p>
-            Ce journal de bord permet de tracer les interventions réalisées au
-            bloc, d’objectiver la progression opératoire de l’interne et de
-            structurer le suivi de sa formation.
+            Ce portail rassemble les repères utiles autour de la salle de
+            naissance, du suivi des gestes et de la progression clinique de
+            l’interne.
           </p>
         </div>
       </section>
@@ -103,53 +98,38 @@ export function WelcomeScreen() {
         </div>
       </article>
 
-      <SectionCard title="Dernières interventions">
-        {latestInterventions.length ? (
+      <SectionCard title="Derniers gestes">
+        {latestGestures.length ? (
           <div className="intervention-row">
-            {latestInterventions.map((intervention) => {
-              const procedureLabel = getChoiceLabel(
-                surgicalProcedureOptions,
-                intervention.procedure
-              );
-              const indicationLabel =
-                intervention.customIndication?.trim() ||
-                (intervention.indication === 'autre' &&
-                intervention.indicationComment.trim()
-                  ? intervention.indicationComment.trim()
-                  : getChoiceLabel(indicationOptions, intervention.indication, ''));
-
-              return (
-                <article
-                  key={intervention.id}
-                  className="intervention-card intervention-card--compact"
-                >
-                  <span className="intervention-card__date">
-                    {formatIsoDate(intervention.date)}
-                  </span>
-                  <strong className="intervention-card__title">
-                    {procedureLabel}
-                  </strong>
-                  {indicationLabel ? (
-                    <span className="intervention-card__meta">
-                      {indicationLabel}
-                    </span>
-                  ) : null}
-                </article>
-              );
-            })}
+            {latestGestures.map((gesture) => (
+              <article
+                key={gesture.id}
+                className="intervention-card intervention-card--compact"
+              >
+                <span className="intervention-card__date">
+                  {formatIsoDate(gesture.date)}
+                </span>
+                <strong className="intervention-card__title">
+                  {gesture.gesture}
+                </strong>
+                <span className="intervention-card__meta">
+                  {[
+                    gesture.instrumentalExtraction,
+                    gesture.vacuumType,
+                    gesture.forcepsType,
+                    gesture.indication,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+              </article>
+            ))}
           </div>
         ) : (
           <p className="field-helper">
-            Aucune intervention enregistrée pour le moment
+            Aucun geste enregistré pour le moment
           </p>
         )}
-        <div className="badge-section-action">
-          <PrimaryButton
-            label="Historique des blocs"
-            onPress={goToSurgeryHistory}
-            variant="secondary"
-          />
-        </div>
       </SectionCard>
 
       <SectionCard title="Badges de progression">
@@ -179,19 +159,20 @@ export function WelcomeScreen() {
       </SectionCard>
 
       <div className="section-heading">
-        <span className="section-heading__eyebrow">Avant le bloc</span>
+        <span className="section-heading__eyebrow">Avant la salle de naissance</span>
         <h2 className="section-heading__title">Fiches techniques</h2>
       </div>
 
       <section className="welcome-hero-card welcome-hero-card--action">
         <div className="welcome-hero-card__copy">
           <p>
-            Consulte des fiches de rappels.
+            Retrouve ici les fiches dédiées aux prises en charge et aux gestes
+            en salle de naissance lorsqu’elles seront disponibles.
           </p>
         </div>
         <PrimaryButton
           label="Consulter"
-          onPress={goToPreBlock}
+          onPress={() => goToPreBlock('obstetric')}
           variant="secondary"
         />
       </section>
@@ -199,7 +180,7 @@ export function WelcomeScreen() {
       <div className="action-stack">
         <PrimaryButton
           label="Continuer vers le journal"
-          onPress={goToForm}
+          onPress={goToObstetricJournal}
         />
         <PrimaryButton
           label="Retour au choix des portails"

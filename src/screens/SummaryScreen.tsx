@@ -5,18 +5,18 @@ import { useAppContext } from '../context/AppContext';
 import {
   approachOptions,
   checklistLevelOptions,
-  complexityOptions,
   contextOptions,
   entryTechniqueOptions,
+  formatComplexityRating,
   formatDisplayName,
   getFixedContextForIntervention,
   getChecklistStepsForIntervention,
   getChoiceLabel,
   getInternalById,
   getSeniorById,
+  getSurgicalInterventionDefinition,
   indicationOptions,
   lateralityOptions,
-  procedureOptions,
   roleOptions,
 } from '../data/mockData';
 import { formatIsoDate } from '../utils/date';
@@ -29,6 +29,8 @@ export function SummaryScreen() {
     draft,
     lastSavedIntervention,
     savedInterventions,
+    customSurgicalInterventions,
+    surgicalProcedureOptions,
     saveIntervention,
     backToForm,
     startNewIntervention,
@@ -53,17 +55,25 @@ export function SummaryScreen() {
   const internal = getInternalById(internalId, internalProfiles);
   const senior = getSeniorById(intervention.seniorId);
   const isSalpingectomy = intervention.procedure === 'salpingectomie';
+  const interventionDefinition = getSurgicalInterventionDefinition(
+    intervention.procedure,
+    customSurgicalInterventions
+  );
   const checklistSteps = getChecklistStepsForIntervention(
     intervention.procedure,
     intervention.indication,
     intervention.approach,
-    intervention.entryTechnique
+    intervention.entryTechnique,
+    customSurgicalInterventions
   );
   const hasChecklist = checklistSteps.length > 0;
   const resolvedContext =
     intervention.context ??
     getFixedContextForIntervention(intervention.procedure, intervention.indication);
-  const procedureLabel = getChoiceLabel(procedureOptions, intervention.procedure);
+  const procedureLabel = getChoiceLabel(
+    surgicalProcedureOptions,
+    intervention.procedure
+  );
   const confirmedProcedureLabel =
     intervention.procedure === 'colpoclesis'
       ? `${procedureLabel} validé`
@@ -72,6 +82,7 @@ export function SummaryScreen() {
     intervention.indication === 'autre' && intervention.indicationComment.trim()
       ? `Autre · ${intervention.indicationComment.trim()}`
       : getChoiceLabel(indicationOptions, intervention.indication);
+  const customIndicationLabel = intervention.customIndication?.trim() ?? '';
 
   return (
     <ScreenContainer
@@ -123,9 +134,14 @@ export function SummaryScreen() {
           value={senior ? `${senior.firstName} ${senior.lastName}` : 'Non renseigné'}
         />
         <SummaryRow label="Intervention" value={procedureLabel} />
-        {isSalpingectomy ? (
+        {isSalpingectomy || customIndicationLabel ? (
+          <SummaryRow
+            label="Indication"
+            value={isSalpingectomy ? indicationLabel : customIndicationLabel}
+          />
+        ) : null}
+        {isSalpingectomy || interventionDefinition?.isCustom ? (
           <>
-            <SummaryRow label="Indication" value={indicationLabel} />
             <SummaryRow
               label="Voie d’abord"
               value={getChoiceLabel(approachOptions, intervention.approach)}
@@ -150,8 +166,8 @@ export function SummaryScreen() {
           />
         ) : null}
         <SummaryRow
-          label="Difficulté"
-          value={getChoiceLabel(complexityOptions, intervention.complexity)}
+          label="Difficulté ressentie"
+          value={formatComplexityRating(intervention.complexity)}
         />
         <SummaryRow
           label="Rôle global"

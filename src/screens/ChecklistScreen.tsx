@@ -5,13 +5,12 @@ import { SectionCard } from '../components/SectionCard';
 import { useAppContext } from '../context/AppContext';
 import {
   approachOptions,
+  checklistLevelDetails,
   checklistLevelOptions,
-  getProcedureChecklistTitle,
   getChecklistStepsForIntervention,
   getChoiceLabel,
   getSeniorById,
   indicationOptions,
-  procedureOptions,
 } from '../data/mockData';
 import { formatIsoDate } from '../utils/date';
 
@@ -20,10 +19,12 @@ export function ChecklistScreen() {
     selectedInternal,
     draft,
     checklistProgress,
+    customSurgicalInterventions,
+    surgicalProcedureOptions,
     backToForm,
     goToSummary,
-    setChecklistLevel,
     setAllChecklistLevels,
+    setChecklistLevel,
   } = useAppContext();
 
   if (!selectedInternal) {
@@ -43,15 +44,16 @@ export function ChecklistScreen() {
     draft.indication === 'autre' && draft.indicationComment.trim()
       ? `Autre · ${draft.indicationComment.trim()}`
       : getChoiceLabel(indicationOptions, draft.indication);
+  const customIndicationLabel = draft.customIndication?.trim() ?? '';
   const isSalpingectomy = draft.procedure === 'salpingectomie';
+  const hasCustomIndication = !isSalpingectomy && customIndicationLabel.length > 0;
   const checklistSteps = getChecklistStepsForIntervention(
     draft.procedure,
     draft.indication,
     draft.approach,
-    draft.entryTechnique
+    draft.entryTechnique,
+    customSurgicalInterventions
   );
-  const checklistTitle = getProcedureChecklistTitle(draft.procedure);
-
   return (
     <ScreenContainer
       eyebrow="Étape 2 sur 3"
@@ -69,15 +71,20 @@ export function ChecklistScreen() {
           />
           <InfoBlock
             label="Intervention"
-            value={getChoiceLabel(procedureOptions, draft.procedure)}
+            value={getChoiceLabel(surgicalProcedureOptions, draft.procedure)}
           />
-          {isSalpingectomy ? (
+          {isSalpingectomy || hasCustomIndication ? (
             <>
-              <InfoBlock label="Indication" value={indicationLabel} />
               <InfoBlock
-                label="Voie"
-                value={getChoiceLabel(approachOptions, draft.approach)}
+                label="Indication"
+                value={isSalpingectomy ? indicationLabel : customIndicationLabel}
               />
+              {isSalpingectomy ? (
+                <InfoBlock
+                  label="Voie"
+                  value={getChoiceLabel(approachOptions, draft.approach)}
+                />
+              ) : null}
             </>
           ) : null}
         </div>
@@ -87,25 +94,25 @@ export function ChecklistScreen() {
         <>
           <SectionCard
             title="Barème"
-            description={`${checklistProgress.completed} / ${checklistProgress.total} étape(s) renseignée(s).`}
+            description={`${checklistProgress.completed} / ${checklistProgress.total} étape(s) renseignée(s). Le score reste attribué étape par étape par l’interne.`}
           >
-            <div className="legend-list">
+            <div className="legend-list legend-list--scale">
               {checklistLevelOptions.map((level) => (
-                <p key={level.value}>
-                  <strong>{level.label}</strong> · {level.description}
-                </p>
+                <article className="legend-item" key={level.value}>
+                  <div className="legend-item__header">
+                    <strong>{level.label}</strong>
+                    <span>{level.description}</span>
+                  </div>
+                  <p>{checklistLevelDetails[level.value]}</p>
+                </article>
               ))}
             </div>
           </SectionCard>
 
           <SectionCard
-            title={checklistTitle}
-            description="Niveau déclaré pour chaque étape."
+            title="Remplissage rapide"
+            description="Applique un niveau à toutes les étapes, puis ajuste les étapes une par une si besoin."
           >
-            <></>
-          </SectionCard>
-
-          <SectionCard title="Remplissage rapide">
             <div className="choice-grid choice-grid--checklist">
               {checklistLevelOptions.map((level) => (
                 <ChoiceChip
@@ -113,11 +120,7 @@ export function ChecklistScreen() {
                   compact
                   label={level.label}
                   onPress={() => setAllChecklistLevels(level.value)}
-                  selected={
-                    checklistSteps.every(
-                      (step) => draft.checklist[step.id] === level.value
-                    )
-                  }
+                  selected={false}
                 />
               ))}
             </div>

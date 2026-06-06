@@ -3,7 +3,6 @@ import { ChangeEvent } from 'react';
 import { ChoiceGroup } from '../components/ChoiceGroup';
 import { ComplexitySlider } from '../components/ComplexitySlider';
 import { PrimaryButton } from '../components/PrimaryButton';
-import { ProgressSummaryCard } from '../components/ProgressSummaryCard';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionCard } from '../components/SectionCard';
 import { useAppContext } from '../context/AppContext';
@@ -11,11 +10,12 @@ import {
   approachOptions,
   entryTechniqueOptions,
   formatDisplayName,
+  getApproachOptionsForIndication,
   getChoiceLabel,
   getChecklistStepsForIntervention,
+  getSurgicalInterventionDefinition,
   indicationOptions,
   lateralityOptions,
-  procedureOptions,
   roleOptions,
   seniors,
 } from '../data/mockData';
@@ -25,10 +25,11 @@ export function InterventionFormScreen() {
     selectedInternal,
     draft,
     formMissingFields,
+    customSurgicalInterventions,
+    surgicalProcedureOptions,
     goToChecklist,
     goToSummary,
     backToWelcome,
-    savedInterventions,
     updateDraftField,
   } = useAppContext();
 
@@ -52,29 +53,50 @@ export function InterventionFormScreen() {
     updateDraftField('indicationComment', event.target.value);
   };
 
-  const internalInterventions = savedInterventions.filter(
-    (intervention) => intervention.internalId === selectedInternal.id
-  );
-
-  const baselineStats = selectedInternal.baselineStats ?? {
-    totalInterventions: 0,
-    primaryOperatorCount: 0,
-    primaryAssistantCount: 0,
-  };
   const isSalpingectomy = draft.procedure === 'salpingectomie';
+  const interventionDefinition = getSurgicalInterventionDefinition(
+    draft.procedure,
+    customSurgicalInterventions
+  );
+  const isCustomIntervention = Boolean(interventionDefinition?.isCustom);
+  const customIndicationOptions = (interventionDefinition?.indications ?? []).map(
+    (indication) => ({
+      value: indication,
+      label: indication,
+    })
+  );
+  const salpingectomyApproachOptions =
+    isSalpingectomy && interventionDefinition?.isCustom
+      ? getApproachOptionsForIndication(draft.indication).filter((option) =>
+          interventionDefinition.allowedApproaches.includes(option.value)
+        )
+      : getApproachOptionsForIndication(draft.indication);
+  const availableApproachOptions = isSalpingectomy
+    ? salpingectomyApproachOptions
+    : approachOptions.filter((option) =>
+        interventionDefinition?.allowedApproaches.includes(option.value)
+      );
+  const availableEntryTechniqueOptions = isCustomIntervention
+    ? entryTechniqueOptions.filter((option) =>
+        interventionDefinition?.allowedEntryTechniques.includes(option.value)
+      )
+    : entryTechniqueOptions;
+  const shouldShowApproach =
+    isSalpingectomy || availableApproachOptions.length > 0;
+  const shouldShowEntryTechnique =
+    draft.approach === 'coelioscopie' || draft.approach === 'robot';
+  const shouldShowLaterality =
+    isSalpingectomy || Boolean(interventionDefinition?.requiresLaterality);
+  const shouldShowCustomIndication =
+    !isSalpingectomy && isCustomIntervention && customIndicationOptions.length > 0;
   const checklistSteps = getChecklistStepsForIntervention(
     draft.procedure,
     draft.indication,
     draft.approach,
-    draft.entryTechnique
+    draft.entryTechnique,
+    customSurgicalInterventions
   );
   const hasChecklist = checklistSteps.length > 0;
-
-  const totalInterventions =
-    baselineStats.totalInterventions + internalInterventions.length;
-  const primaryOperatorCount = internalInterventions.filter(
-    (intervention) => intervention.role === 'operateur_principal'
-  ).length + baselineStats.primaryOperatorCount;
 
   return (
     <ScreenContainer
@@ -82,11 +104,6 @@ export function InterventionFormScreen() {
       title="Ajouter une intervention"
       subtitle={`${formatDisplayName(selectedInternal.firstName, selectedInternal.lastName)} · ${selectedInternal.currentRotation}`}
     >
-      <ProgressSummaryCard
-        primaryOperatorCount={primaryOperatorCount}
-        totalInterventions={totalInterventions}
-      />
-
       <SectionCard
         title="Date du bloc"
         description="Date préremplie à aujourd’hui, modifiable si nécessaire."
@@ -116,7 +133,7 @@ export function InterventionFormScreen() {
       <ChoiceGroup
         description="Choisis l’intervention à enregistrer."
         onChange={(value) => updateDraftField('procedure', value)}
-        options={procedureOptions}
+        options={surgicalProcedureOptions}
         title="Intervention"
         value={draft.procedure}
       />
@@ -148,35 +165,51 @@ export function InterventionFormScreen() {
             </SectionCard>
           ) : null}
 
-          <ChoiceGroup
-            onChange={(value) => updateDraftField('approach', value)}
-            options={approachOptions}
-            title="Voie d’abord"
-            value={draft.approach}
-          />
-
-          {draft.approach === 'coelioscopie' || draft.approach === 'robot' ? (
-            <ChoiceGroup
-              description="Champ obligatoire pour la cœlioscopie et le robot."
-              onChange={(value) => updateDraftField('entryTechnique', value)}
-              options={entryTechniqueOptions}
-              title="Technique d’entrée"
-              value={draft.entryTechnique}
-            />
-          ) : null}
-
-          <ChoiceGroup
-            columns={3}
-            onChange={(value) => updateDraftField('laterality', value)}
-            options={lateralityOptions}
-            title="Latéralité"
-            value={draft.laterality}
-          />
         </>
       ) : null}
 
+      {shouldShowCustomIndication ? (
+        <ChoiceGroup
+          description="Indication principale de l’intervention."
+          onChange={(value) => updateDraftField('customIndication', value)}
+          options={customIndicationOptions}
+          title="Indication"
+          value={draft.customIndication}
+        />
+      ) : null}
+
+      {shouldShowApproach ? (
+        <ChoiceGroup
+          onChange={(value) => updateDraftField('approach', value)}
+          options={availableApproachOptions}
+          title="Voie d’abord"
+          value={draft.approach}
+        />
+      ) : null}
+
+      {shouldShowEntryTechnique ? (
+        <ChoiceGroup
+          description="Champ obligatoire pour la cœlioscopie et le robot."
+          onChange={(value) => updateDraftField('entryTechnique', value)}
+          options={availableEntryTechniqueOptions}
+          title="Technique d’entrée"
+          value={draft.entryTechnique}
+        />
+      ) : null}
+
+      {shouldShowLaterality ? (
+        <ChoiceGroup
+          columns={3}
+          onChange={(value) => updateDraftField('laterality', value)}
+          options={lateralityOptions}
+          title="Latéralité"
+          value={draft.laterality}
+        />
+      ) : null}
+
       <SectionCard
-        title="Difficulté de l’intervention"
+        title="Difficulté ressentie de l’intervention"
+        description="Évaluez la difficulté globale de cette intervention selon votre ressenti, de 1 à 10."
       >
         <ComplexitySlider
           onChange={(value) => updateDraftField('complexity', value)}

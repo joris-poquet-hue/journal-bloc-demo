@@ -1,15 +1,21 @@
 export type AppScreen =
+  | 'portal-selection'
   | 'welcome'
   | 'badges'
   | 'preblock'
+  | 'surgery-history'
   | 'form'
+  | 'obstetric-journal'
   | 'checklist'
   | 'summary'
-  | 'admin';
+  | 'admin'
+  | 'obstetric-portal';
 
 export type SessionRole = 'internal' | 'admin';
 
 export type SummaryMode = 'review' | 'confirmed';
+
+export type PreBlockContext = 'surgery' | 'obstetric';
 
 export type ChoiceOption<T extends string = string> = {
   value: T;
@@ -106,7 +112,7 @@ export type Senior = {
   lastName: string;
 };
 
-export type InterventionType = 'salpingectomie' | 'colpoclesis';
+export type InterventionType = 'salpingectomie' | 'colpoclesis' | `custom-${string}`;
 export type Indication =
   | 'geu'
   | 'ligature_tubaire'
@@ -119,7 +125,7 @@ export type SurgicalApproach =
 export type EntryTechnique = 'trocart_direct' | 'open' | 'veress';
 export type Laterality = 'droite' | 'gauche' | 'bilateral';
 export type SurgeryContext = 'urgence' | 'programme';
-export type Complexity = 'simple' | 'intermediaire' | 'difficile';
+export type Complexity = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 export type GlobalRole =
   | 'operateur_principal'
   | 'aide_principal'
@@ -132,6 +138,36 @@ export type ChecklistStep = {
   label: string;
 };
 
+export type SurgicalInterventionDefinition = {
+  id: InterventionType;
+  name: string;
+  indications: string[];
+  allowedApproaches: SurgicalApproach[];
+  allowedEntryTechniques: EntryTechnique[];
+  requiresLaterality: boolean;
+  checklistSteps: ChecklistStep[];
+  keyStepIds: string[];
+  isCustom?: boolean;
+  createdAt?: string;
+};
+
+export type CreateSurgicalInterventionInput = {
+  name: string;
+  indications: string[];
+  allowedApproaches: SurgicalApproach[];
+  allowedEntryTechniques: EntryTechnique[];
+  requiresLaterality: boolean;
+  customChecklistSteps: string[];
+  keyStepLabels: string[];
+  stepOrderLabels: string[];
+};
+
+export type CreateSurgicalInterventionResult = {
+  success: boolean;
+  message: string;
+  intervention?: SurgicalInterventionDefinition;
+};
+
 export type InterventionDraft = {
   date: string;
   internalId: string | null;
@@ -139,6 +175,7 @@ export type InterventionDraft = {
   procedure: InterventionType;
   indication: Indication | null;
   indicationComment: string;
+  customIndication: string | null;
   approach: SurgicalApproach | null;
   entryTechnique: EntryTechnique | null;
   laterality: Laterality | null;
@@ -149,6 +186,32 @@ export type InterventionDraft = {
 };
 
 export type SavedIntervention = InterventionDraft & {
+  id: string;
+  savedAt: string;
+};
+
+export type AdminPerformanceRating = '1' | '2' | '3' | '4' | '5';
+export type AdminCategoryDifficultyRating = '1' | '2' | '3';
+
+export type AdminInterventionEvaluation = {
+  interventionId: string;
+  globalPerformance: AdminPerformanceRating | null;
+  categoryDifficulty: AdminCategoryDifficultyRating | null;
+  updatedAt: string | null;
+};
+
+export type ObstetricJournalDraft = {
+  date: string;
+  internalId: string | null;
+  seniorId: string | null;
+  gesture: string;
+  instrumentalExtraction: string | null;
+  vacuumType: string | null;
+  forcepsType: string | null;
+  indication: string;
+};
+
+export type SavedObstetricGesture = ObstetricJournalDraft & {
   id: string;
   savedAt: string;
 };
