@@ -12,16 +12,32 @@ import {
   indicationOptions,
   roleOptions,
 } from '../data/mockData';
-import { SavedIntervention } from '../types';
+import {
+  AdminInterventionEvaluation,
+  InterventionType,
+  SavedIntervention,
+} from '../types';
+import {
+  calculateAutonomyScore,
+  formatAutonomyScore,
+} from '../utils/autonomyScore';
 import { formatIsoDate } from '../utils/date';
 
 type HistoryPeriod = 'day' | 'week' | 'month';
+type HistoryScoreMode = 'global' | 'procedure';
 
 type HistoryBucket = {
   key: string;
   label: string;
-  operatorCount: number;
+  scoreAverage: number | null;
+  scoreCount: number;
+  scoreTotal: number;
   volumeCount: number;
+};
+
+type ScoredHistoryIntervention = {
+  autonomyScore: number | null;
+  intervention: SavedIntervention;
 };
 
 const periodOptions: Array<{ value: HistoryPeriod; label: string }> = [
@@ -29,6 +45,34 @@ const periodOptions: Array<{ value: HistoryPeriod; label: string }> = [
   { value: 'week', label: 'Semaine' },
   { value: 'month', label: 'Mois' },
 ];
+const scoreModeOptions: Array<{ value: HistoryScoreMode; label: string }> = [
+  { value: 'global', label: 'Global' },
+  { value: 'procedure', label: 'Par type d’intervention' },
+];
+const ADMIN_EVALUATIONS_STORAGE_KEY =
+  'journal-bord:admin-intervention-evaluations:v1';
+
+function loadStoredAdminEvaluations() {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(ADMIN_EVALUATIONS_STORAGE_KEY);
+
+    if (!rawValue) {
+      return {};
+    }
+
+    const parsedValue = JSON.parse(rawValue);
+
+    return parsedValue && typeof parsedValue === 'object'
+      ? (parsedValue as Record<string, AdminInterventionEvaluation>)
+      : {};
+  } catch {
+    return {};
+  }
+}
 
 function parseIsoDate(value: string) {
   const [year, month, day] = value.split('-').map(Number);
@@ -80,24 +124,28 @@ function getBucketLabel(key: string, period: HistoryPeriod) {
 }
 
 function buildBuckets(
-  interventions: SavedIntervention[],
+  interventions: ScoredHistoryIntervention[],
   period: HistoryPeriod
 ) {
   const bucketMap = new Map<string, HistoryBucket>();
 
-  interventions.forEach((intervention) => {
+  interventions.forEach(({ autonomyScore, intervention }) => {
     const key = getBucketKey(intervention.date, period);
     const bucket = bucketMap.get(key) ?? {
       key,
       label: getBucketLabel(key, period),
-      operatorCount: 0,
+      scoreAverage: null,
+      scoreCount: 0,
+      scoreTotal: 0,
       volumeCount: 0,
     };
 
     bucket.volumeCount += 1;
 
-    if (intervention.role === 'operateur_principal') {
-      bucket.operatorCount += 1;
+    if (autonomyScore != null) {
+      bucket.scoreCount += 1;
+      bucket.scoreTotal += autonomyScore;
+      bucket.scoreAverage = Math.round(bucket.scoreTotal / bucket.scoreCount);
     }
 
     bucketMap.set(key, bucket);
@@ -127,14 +175,23 @@ function getBarHeight(count: number, maxCount: number) {
   return count === 0 ? '0%' : `${Math.max(8, (count / maxCount) * 100)}%`;
 }
 
+function getScoreBarHeight(score: number | null) {
+  return score == null ? '0%' : `${Math.max(8, score)}%`;
+}
+
 export function SurgeryHistoryScreen() {
   const {
+    customSurgicalInterventions,
     selectedInternal,
     savedInterventions,
     surgicalProcedureOptions,
     goToSurgeryPortal,
   } = useAppContext();
   const [period, setPeriod] = useState<HistoryPeriod>('week');
+  const [scoreMode, setScoreMode] = useState<HistoryScoreMode>('global');
+  const [selectedProcedure, setSelectedProcedure] =
+    useState<InterventionType | ''>('salpingectomie');
+  const [adminEvaluations] = useState(loadStoredAdminEvaluations);
 
   if (!selectedInternal) {
     return (
@@ -151,12 +208,33 @@ export function SurgeryHistoryScreen() {
   const interventions = savedInterventions
     .filter((intervention) => intervention.internalId === selectedInternal.id)
     .sort((left, right) => right.date.localeCompare(left.date));
-  const buckets = buildBuckets(interventions, period);
-  const maxCount = Math.max(
+  const scoredInterventions = interventions.map((intervention) => ({
+    intervention,
+    autonomyScore:
+      calculateAutonomyScore(
+        intervention,
+        customSurgicalInterventions,
+        adminEvaluations[intervention.id]
+      ) ?? intervention.autonomyScore,
+  }));
+  const procedureForStats =
+    selectedProcedure || surgicalProcedureOptions[0]?.value || 'salpingectomie';
+  const chartInterventions =
+    scoreMode === 'procedure'
+      ? scoredInterventions.filter(
+          ({ intervention }) => intervention.procedure === procedureForStats
+        )
+      : scoredInterventions;
+  const scoreByInterventionId = new Map(
+    scoredInterventions.map(({ autonomyScore, intervention }) => [
+      intervention.id,
+      autonomyScore,
+    ])
+  );
+  const buckets = buildBuckets(chartInterventions, period);
+  const maxVolumeCount = Math.max(
     1,
-    ...buckets.map((bucket) =>
-      Math.max(bucket.volumeCount, bucket.operatorCount)
-    )
+    ...buckets.map((bucket) => bucket.volumeCount)
   );
 
   return (
@@ -167,7 +245,7 @@ export function SurgeryHistoryScreen() {
     >
       <SectionCard
         title="Histogramme"
-        description="Nombre de blocs enregistrés selon la période choisie."
+        description="Volume et score moyen d’autonomie opératoire selon la période choisie."
       >
         <div className="history-toolbar" aria-label="Période de l’histogramme">
           {periodOptions.map((option) => (
@@ -184,12 +262,46 @@ export function SurgeryHistoryScreen() {
           ))}
         </div>
 
+        <div className="history-toolbar" aria-label="Mode de calcul du score">
+          {scoreModeOptions.map((option) => (
+            <button
+              key={option.value}
+              className={`history-period-button ${
+                scoreMode === option.value ? 'history-period-button--selected' : ''
+              }`}
+              onClick={() => setScoreMode(option.value)}
+              type="button"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
+        {scoreMode === 'procedure' ? (
+          <label className="field-stack">
+            <span className="field-stack__label">Type d’intervention</span>
+            <select
+              className="field-input"
+              onChange={(event) =>
+                setSelectedProcedure(event.target.value as InterventionType)
+              }
+              value={procedureForStats}
+            >
+              {surgicalProcedureOptions.map((procedure) => (
+                <option key={procedure.value} value={procedure.value}>
+                  {procedure.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
         <div className="history-chart-legend">
           <span className="history-chart-legend__item history-chart-legend__item--volume">
             Volume
           </span>
-          <span className="history-chart-legend__item history-chart-legend__item--operator">
-            Op. principal
+          <span className="history-chart-legend__item history-chart-legend__item--score">
+            Score moyen
           </span>
         </div>
 
@@ -201,20 +313,24 @@ export function SurgeryHistoryScreen() {
                   <span
                     className="history-chart__bar history-chart__bar--volume"
                     style={{
-                      height: getBarHeight(bucket.volumeCount, maxCount),
+                      height: getBarHeight(bucket.volumeCount, maxVolumeCount),
                     }}
                     title={`Volume : ${bucket.volumeCount}`}
                   >
                     <span>{bucket.volumeCount}</span>
                   </span>
                   <span
-                    className="history-chart__bar history-chart__bar--operator"
+                    className="history-chart__bar history-chart__bar--score"
                     style={{
-                      height: getBarHeight(bucket.operatorCount, maxCount),
+                      height: getScoreBarHeight(bucket.scoreAverage),
                     }}
-                    title={`Op. principal : ${bucket.operatorCount}`}
+                    title={`Score moyen : ${
+                      bucket.scoreAverage == null
+                        ? 'Non calculable'
+                        : `${bucket.scoreAverage} / 100`
+                    }`}
                   >
-                    <span>{bucket.operatorCount}</span>
+                    <span>{bucket.scoreAverage ?? '—'}</span>
                   </span>
                 </div>
                 <span className="history-chart__label">{bucket.label}</span>
@@ -237,6 +353,7 @@ export function SurgeryHistoryScreen() {
             {interventions.map((intervention) => {
               const senior = getSeniorById(intervention.seniorId);
               const indicationLabel = getIndicationLabel(intervention);
+              const autonomyScore = scoreByInterventionId.get(intervention.id) ?? null;
 
               return (
                 <article key={intervention.id} className="history-list-item">
@@ -264,6 +381,10 @@ export function SurgeryHistoryScreen() {
                     ) : null}
                     <span>
                       Rôle : {getChoiceLabel(roleOptions, intervention.role)}
+                    </span>
+                    <span>
+                      Score d’autonomie opératoire :{' '}
+                      {formatAutonomyScore(autonomyScore)}
                     </span>
                   </div>
                 </article>

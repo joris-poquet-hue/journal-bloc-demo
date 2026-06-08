@@ -11,7 +11,7 @@ export type AppScreen =
   | 'admin'
   | 'obstetric-portal';
 
-export type SessionRole = 'internal' | 'admin';
+export type SessionRole = 'internal' | 'admin' | 'senior';
 
 export type SummaryMode = 'review' | 'confirmed';
 
@@ -110,6 +110,8 @@ export type Senior = {
   id: string;
   firstName: string;
   lastName: string;
+  loginId: string;
+  password: string;
 };
 
 export type InterventionType = 'salpingectomie' | 'colpoclesis' | `custom-${string}`;
@@ -188,6 +190,7 @@ export type InterventionDraft = {
 export type SavedIntervention = InterventionDraft & {
   id: string;
   savedAt: string;
+  autonomyScore: number | null;
 };
 
 export type AdminPerformanceRating = '1' | '2' | '3' | '4' | '5';

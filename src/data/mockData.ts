@@ -90,8 +90,20 @@ export const internalProfiles: InternalProfile[] = [
 ];
 
 export const seniors: Senior[] = [
-  { id: 'sen-1', firstName: 'Sophie', lastName: 'Le Goff' },
-  { id: 'sen-2', firstName: 'Camille', lastName: 'Durand' },
+  {
+    id: 'sen-1',
+    firstName: 'Senior1',
+    lastName: '',
+    loginId: 'Senior1',
+    password: 'Senior1',
+  },
+  {
+    id: 'sen-2',
+    firstName: 'Senior2',
+    lastName: '',
+    loginId: 'Senior2',
+    password: 'Senior2',
+  },
 ];
 
 export const procedureOptions: ChoiceOption<InterventionType>[] = [
@@ -468,6 +480,7 @@ function createSavedSalpingectomyIntervention({
     complexity: defaultComplexityRating,
     role: 'operateur_principal',
     checklist: createChecklistState(checklistSteps, level),
+    autonomyScore: null,
   };
 }
 
@@ -503,6 +516,7 @@ function createSavedColpoclesisIntervention({
     complexity: defaultComplexityRating,
     role: 'operateur_principal',
     checklist: createChecklistState(colpoclesisChecklistSteps, level),
+    autonomyScore: null,
   };
 }
 
@@ -1537,6 +1551,19 @@ export function isAdminCredentials(loginId: string, password: string) {
   const normalizedPassword = normalizeCredentialValue(password);
 
   return normalizedLoginId === 'admin' && normalizedPassword === 'admin';
+}
+
+export function getSeniorByCredentials(loginId: string, password: string) {
+  const normalizedLoginId = normalizeCredentialValue(loginId);
+  const normalizedPassword = normalizeCredentialValue(password);
+
+  return (
+    seniors.find(
+      (senior) =>
+        normalizeCredentialValue(senior.loginId) === normalizedLoginId &&
+        normalizeCredentialValue(senior.password) === normalizedPassword
+    ) ?? null
+  );
 }
 
 export function getSeniorById(id: string | null | undefined) {

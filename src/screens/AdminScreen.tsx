@@ -38,6 +38,7 @@ import {
   SurgicalInterventionDefinition,
 } from '../types';
 import { formatIsoDate } from '../utils/date';
+import { calculateAutonomyScore } from '../utils/autonomyScore';
 import { downloadInterventionsCsv } from '../utils/export';
 
 type AdminView = 'home' | 'badges' | 'profile' | 'profiles' | 'interventions';
@@ -353,10 +354,14 @@ export function AdminScreen() {
     deleteInternalProfile,
     deleteSavedInterventions,
     internalProfiles,
+    isAdmin,
+    isSenior,
     logout,
     savedInterventions,
+    selectedSenior,
     surgicalProcedureOptions,
     updateSurgicalIntervention,
+    updateSavedInterventionAutonomyScore,
   } = useAppContext();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [view, setView] = useState<AdminView>('home');
@@ -403,6 +408,17 @@ export function AdminScreen() {
       ),
     [savedInterventions]
   );
+  const interventionsToEvaluate = useMemo(() => {
+    if (isSenior) {
+      return selectedSenior
+        ? sortedInterventions.filter(
+            (intervention) => intervention.seniorId === selectedSenior.id
+          )
+        : [];
+    }
+
+    return sortedInterventions;
+  }, [isSenior, selectedSenior, sortedInterventions]);
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const filteredInterventions = useMemo(
@@ -544,7 +560,9 @@ export function AdminScreen() {
   const isEditingSurgicalIntervention = editingSurgicalInterventionId !== null;
   const selectedEvaluationIntervention =
     sortedInterventions.find(
-      (intervention) => intervention.id === selectedEvaluationInterventionId
+      (intervention) =>
+        intervention.id === selectedEvaluationInterventionId &&
+        (!isSenior || intervention.seniorId === selectedSenior?.id)
     ) ?? null;
   const selectedEvaluationInternal = selectedEvaluationIntervention
     ? getInternalById(selectedEvaluationIntervention.internalId, internalProfiles)
@@ -648,6 +666,8 @@ export function AdminScreen() {
       return;
     }
 
+    const timestamp = new Date().toISOString();
+
     setAdminEvaluations((current) => {
       const currentEvaluation = current[selectedEvaluationIntervention.id] ?? {
         interventionId: selectedEvaluationIntervention.id,
@@ -655,14 +675,25 @@ export function AdminScreen() {
         categoryDifficulty: null,
         updatedAt: null,
       };
+      const nextEvaluation = {
+        ...currentEvaluation,
+        [field]: value,
+        updatedAt: timestamp,
+      };
+      const nextAutonomyScore = calculateAutonomyScore(
+        selectedEvaluationIntervention,
+        customSurgicalInterventions,
+        nextEvaluation
+      );
+
+      updateSavedInterventionAutonomyScore(
+        selectedEvaluationIntervention.id,
+        nextAutonomyScore
+      );
 
       return {
         ...current,
-        [selectedEvaluationIntervention.id]: {
-          ...currentEvaluation,
-          [field]: value,
-          updatedAt: new Date().toISOString(),
-        },
+        [selectedEvaluationIntervention.id]: nextEvaluation,
       };
     });
     setEvaluationFeedback({
@@ -964,13 +995,13 @@ export function AdminScreen() {
   if (selectedEvaluationInterventionId && !selectedEvaluationIntervention) {
     return (
       <ScreenContainer
-        eyebrow="Administration"
+        eyebrow={isSenior ? 'Senior' : 'Administration'}
         title="Intervention introuvable"
         subtitle="Cette intervention n’est plus disponible dans le journal."
         frameWidth="wide"
       >
         <PrimaryButton
-          label="Retour à l’espace administrateur"
+          label={isSenior ? 'Retour à l’espace senior' : 'Retour à l’espace administrateur'}
           onPress={() => setSelectedEvaluationInterventionId(null)}
           variant="secondary"
         />
@@ -994,7 +1025,7 @@ export function AdminScreen() {
 
     return (
       <ScreenContainer
-        eyebrow="Évaluation administrateur"
+        eyebrow={isSenior ? 'Évaluation senior' : 'Évaluation administrateur'}
         title="Évaluer l’interne"
         subtitle={
           selectedEvaluationInternal
@@ -1173,7 +1204,7 @@ export function AdminScreen() {
 
         <div className="action-stack">
           <PrimaryButton
-            label="Retour à l’espace administrateur"
+            label={isSenior ? 'Retour à l’espace senior' : 'Retour à l’espace administrateur'}
             onPress={() => {
               setSelectedEvaluationInterventionId(null);
               setEvaluationFeedback(null);
@@ -1185,7 +1216,7 @@ export function AdminScreen() {
     );
   }
 
-  if (view === 'profile' && selectedProfile && selectedProfileStats) {
+  if (isAdmin && view === 'profile' && selectedProfile && selectedProfileStats) {
     return (
       <ScreenContainer
         eyebrow="Administration"
@@ -1333,7 +1364,7 @@ export function AdminScreen() {
     );
   }
 
-  if (view === 'profiles') {
+  if (isAdmin && view === 'profiles') {
     return (
       <ScreenContainer
         eyebrow="Administration"
@@ -1514,7 +1545,7 @@ export function AdminScreen() {
 
         <div className="action-stack">
           <PrimaryButton
-            label="Retour à l’espace administrateur"
+            label={isSenior ? 'Retour à l’espace senior' : 'Retour à l’espace administrateur'}
             onPress={() => setView('home')}
             variant="secondary"
           />
@@ -1812,7 +1843,7 @@ export function AdminScreen() {
 
         <div className="action-stack">
           <PrimaryButton
-            label="Retour à l’espace administrateur"
+            label={isSenior ? 'Retour à l’espace senior' : 'Retour à l’espace administrateur'}
             onPress={() => setView('home')}
             variant="secondary"
           />
@@ -1821,7 +1852,7 @@ export function AdminScreen() {
     );
   }
 
-  if (view === 'badges') {
+  if (isAdmin && view === 'badges') {
     return (
       <ScreenContainer
         eyebrow="Administration"
@@ -1875,24 +1906,40 @@ export function AdminScreen() {
 
   return (
     <ScreenContainer
-      eyebrow="Administration"
-      title="Espace administrateur"
+      eyebrow={isSenior ? 'Senior' : 'Administration'}
+      title={isSenior ? 'Espace senior' : 'Espace administrateur'}
       frameWidth="wide"
     >
       <SectionCard
-        title="Accès administrateur"
-        description="Cet espace centralise la création de profils et la consultation des données."
+        title={isSenior ? 'Accès senior' : 'Accès administrateur'}
+        description={
+          isSenior && selectedSenior
+            ? `Connecté : ${formatDisplayName(
+                selectedSenior.firstName,
+                selectedSenior.lastName
+              )}.`
+            : 'Cet espace centralise la création de profils et la consultation des données.'
+        }
       >
+        {isAdmin ? (
+          <PrimaryButton
+            label="Ouvrir administration profil"
+            onPress={() => setView('profiles')}
+            variant="secondary"
+          />
+        ) : null}
         <PrimaryButton
-          label="Ouvrir administration profil"
-          onPress={() => setView('profiles')}
-          variant="secondary"
-        />
-        <PrimaryButton
-          label="Ouvrir outil de création d'intervention"
+          label="Ouvrir outil de création des interventions"
           onPress={() => setView('interventions')}
           variant="secondary"
         />
+        {isAdmin ? (
+          <PrimaryButton
+            label="Ouvrir catalogue des badges"
+            onPress={() => setView('badges')}
+            variant="secondary"
+          />
+        ) : null}
         <PrimaryButton
           label="Se déconnecter"
           onPress={logout}
@@ -1902,11 +1949,15 @@ export function AdminScreen() {
 
       <SectionCard
         title="Interventions à évaluer"
-        description="Chaque intervention ajoutée par un interne apparaît ici."
+        description={
+          isSenior
+            ? 'Seules les interventions attribuées au senior connecté apparaissent ici.'
+            : 'Chaque intervention ajoutée par un interne apparaît ici.'
+        }
       >
-        {sortedInterventions.length ? (
+        {interventionsToEvaluate.length ? (
           <div className="admin-list admin-list--scroll">
-            {sortedInterventions.map((intervention) => {
+            {interventionsToEvaluate.map((intervention) => {
               const internal = getInternalById(
                 intervention.internalId,
                 internalProfiles
@@ -1958,7 +2009,9 @@ export function AdminScreen() {
           <div className="validation-box">
             <strong>Aucune intervention à évaluer</strong>
             <span>
-              Les interventions ajoutées par les internes apparaîtront ici.
+              {isSenior
+                ? 'Les interventions attribuées à ce senior apparaîtront ici.'
+                : 'Les interventions ajoutées par les internes apparaîtront ici.'}
             </span>
           </div>
         )}
@@ -2294,16 +2347,7 @@ export function AdminScreen() {
           </SectionCard>
           ) : null}
 
-          <SectionCard
-            title="Catalogue des badges"
-          >
-            <PrimaryButton
-              label="Voir tous les badges"
-              onPress={() => setView('badges')}
-              variant="secondary"
-            />
-          </SectionCard>
-
+          {isAdmin ? (
           <SectionCard
             title="Interventions enregistrées"
             description={`${filteredCountLabel} · export CSV compatible Excel.`}
@@ -2497,6 +2541,7 @@ export function AdminScreen() {
               </>
             )}
           </SectionCard>
+          ) : null}
       {profileToDelete ? (
         <div
           aria-modal="true"

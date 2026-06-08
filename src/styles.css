@@ -672,7 +672,7 @@ button {
   background: #9aa3ad;
 }
 
-.history-chart-legend__item--operator::before {
+.history-chart-legend__item--score::before {
   background: #2f9e68;
 }
 
@@ -718,7 +718,7 @@ button {
   background: #9aa3ad;
 }
 
-.history-chart__bar--operator {
+.history-chart__bar--score {
   background: #2f9e68;
 }
 

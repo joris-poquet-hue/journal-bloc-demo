@@ -7,6 +7,8 @@ import {
   getChecklistStepsForIntervention,
   getInternalByCredentials,
   getProcedureOptions,
+  getSeniorByCredentials,
+  getSeniorById,
   getSurgicalInterventionDefinitions,
   getSurgicalInterventionDefinition,
   internalProfiles as seededInternalProfiles,
@@ -30,6 +32,7 @@ import {
   PreBlockContext,
   SavedObstetricGesture,
   SavedIntervention,
+  Senior,
   SessionRole,
   SurgicalInterventionDefinition,
   SummaryMode,
@@ -41,11 +44,13 @@ type AppContextValue = {
   screen: AppScreen;
   isAuthenticated: boolean;
   isAdmin: boolean;
+  isSenior: boolean;
   sessionRole: SessionRole | null;
   summaryMode: SummaryMode;
   preBlockContext: PreBlockContext;
   internalProfiles: InternalProfile[];
   selectedInternal: InternalProfile | null;
+  selectedSenior: Senior | null;
   draft: InterventionDraft;
   obstetricDraft: ObstetricJournalDraft;
   lastSavedIntervention: SavedIntervention | null;
@@ -85,6 +90,10 @@ type AppContextValue = {
   deleteCustomSurgicalIntervention: (interventionId: string) => void;
   deleteInternalProfile: (profileId: string) => void;
   deleteSavedInterventions: (ids: string[]) => void;
+  updateSavedInterventionAutonomyScore: (
+    interventionId: string,
+    autonomyScore: number | null
+  ) => void;
   updateDraftField: <K extends keyof InterventionDraft>(
     field: K,
     value: InterventionDraft[K]
@@ -151,6 +160,7 @@ function hydrateSavedInterventions(interventions: SavedIntervention[]) {
   return interventions.map((intervention) => ({
     ...intervention,
     customIndication: intervention.customIndication ?? null,
+    autonomyScore: intervention.autonomyScore ?? null,
     complexity:
       normalizeComplexityRating(
         intervention.complexity as Parameters<typeof normalizeComplexityRating>[0]
@@ -262,6 +272,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     )
   );
   const [selectedInternalId, setSelectedInternalId] = useState<string | null>(null);
+  const [selectedSeniorId, setSelectedSeniorId] = useState<string | null>(null);
   const [draft, setDraft] = useState<InterventionDraft>(createInitialDraft(null));
   const [obstetricDraft, setObstetricDraft] =
     useState<ObstetricJournalDraft>(createInitialObstetricDraft(null));
@@ -294,6 +305,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   const selectedInternal =
     internalProfiles.find((profile) => profile.id === selectedInternalId) ?? null;
+  const selectedSenior = getSeniorById(selectedSeniorId);
   const surgicalProcedureOptions = getProcedureOptions(customSurgicalInterventions);
 
   const formMissingFields = getMissingFormFields(
@@ -306,6 +318,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
   const isAuthenticated = sessionRole !== null;
   const isAdmin = sessionRole === 'admin';
+  const isSenior = sessionRole === 'senior';
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -355,6 +368,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (isAdminCredentials(loginId, password)) {
       setSessionRole('admin');
       setSelectedInternalId(null);
+      setSelectedSeniorId(null);
+      setDraft(createInitialDraft(null));
+      setObstetricDraft(createInitialObstetricDraft(null));
+      setLastSavedIntervention(null);
+      setSummaryMode('review');
+      setPreBlockContext('surgery');
+      setScreen('admin');
+
+      return true;
+    }
+
+    const senior = getSeniorByCredentials(loginId, password);
+
+    if (senior) {
+      setSessionRole('senior');
+      setSelectedInternalId(null);
+      setSelectedSeniorId(senior.id);
       setDraft(createInitialDraft(null));
       setObstetricDraft(createInitialObstetricDraft(null));
       setLastSavedIntervention(null);
@@ -385,6 +415,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
     setSessionRole('internal');
     setSelectedInternalId(profile.id);
+    setSelectedSeniorId(null);
     setDraft(createInitialDraft(profile.id));
     setObstetricDraft(createInitialObstetricDraft(profile.id));
     setLastSavedIntervention(null);
@@ -398,6 +429,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     setSessionRole(null);
     setSelectedInternalId(null);
+    setSelectedSeniorId(null);
     setDraft(createInitialDraft(null));
     setObstetricDraft(createInitialObstetricDraft(null));
     setLastSavedIntervention(null);
@@ -550,6 +582,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         draft.context,
       internalId,
       id: `${Date.now()}`,
+      autonomyScore: null,
       savedAt: new Date().toISOString(),
     };
 
@@ -854,6 +887,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   };
 
+  const updateSavedInterventionAutonomyScore = (
+    interventionId: string,
+    autonomyScore: number | null
+  ) => {
+    setSavedInterventions((current) =>
+      current.map((intervention) =>
+        intervention.id === interventionId
+          ? {
+              ...intervention,
+              autonomyScore,
+            }
+          : intervention
+      )
+    );
+    setLastSavedIntervention((current) =>
+      current?.id === interventionId
+        ? {
+            ...current,
+            autonomyScore,
+          }
+        : current
+    );
+  };
+
   const deleteCustomSurgicalIntervention = (interventionId: string) => {
     setCustomSurgicalInterventions((current) =>
       current.filter((intervention) => intervention.id !== interventionId)
@@ -1067,11 +1124,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         screen,
         isAuthenticated,
         isAdmin,
+        isSenior,
         sessionRole,
         summaryMode,
         preBlockContext,
         internalProfiles,
         selectedInternal,
+        selectedSenior,
         draft,
         obstetricDraft,
         lastSavedIntervention,
@@ -1104,6 +1163,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         deleteCustomSurgicalIntervention,
         deleteInternalProfile,
         deleteSavedInterventions,
+        updateSavedInterventionAutonomyScore,
         updateDraftField,
         updateObstetricDraftField,
         setChecklistLevel,

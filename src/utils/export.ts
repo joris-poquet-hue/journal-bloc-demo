@@ -22,12 +22,14 @@ import {
   SavedIntervention,
   SurgicalInterventionDefinition,
 } from '../types';
+import { calculateAutonomyScore } from './autonomyScore';
 
 type ExportRowContext = {
   internal: InternalProfile | null;
   seniorLabel: string;
   checklistStepIds: Set<string>;
   keyStepAutonomyScore: string;
+  autonomyScore: number | null;
   adminEvaluation: AdminInterventionEvaluation | undefined;
 };
 
@@ -296,6 +298,11 @@ export function downloadInterventionsCsv(
       getValue: (_intervention, context) => context.keyStepAutonomyScore,
     },
     {
+      header: 'Score d’autonomie opératoire',
+      getValue: (_intervention, context) =>
+        context.autonomyScore == null ? '' : `${context.autonomyScore}`,
+    },
+    {
       header: 'Performance chirurgicale globale',
       getValue: (_intervention, context) =>
         context.adminEvaluation?.globalPerformance
@@ -336,6 +343,12 @@ export function downloadInterventionsCsv(
         intervention,
         customInterventions
       ),
+      autonomyScore:
+        calculateAutonomyScore(
+          intervention,
+          customInterventions,
+          adminEvaluations[intervention.id]
+        ) ?? intervention.autonomyScore,
       adminEvaluation: adminEvaluations[intervention.id],
     };
 
