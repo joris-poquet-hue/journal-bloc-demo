@@ -32,7 +32,6 @@ export function WelcomeScreen() {
     surgicalProcedureOptions,
     goToBadges,
     goToForm,
-    goToPortalSelection,
     goToPreBlock,
     goToSurgeryHistory,
     logout,
@@ -200,11 +199,6 @@ export function WelcomeScreen() {
         <PrimaryButton
           label="Continuer vers le journal"
           onPress={goToForm}
-        />
-        <PrimaryButton
-          label="Retour au choix des portails"
-          onPress={goToPortalSelection}
-          variant="secondary"
         />
         <PrimaryButton
           label="Se déconnecter"

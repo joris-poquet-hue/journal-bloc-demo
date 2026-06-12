@@ -7,7 +7,6 @@ import { formatDisplayName } from '../data/mockData';
 export function PortalSelectionScreen() {
   const {
     selectedInternal,
-    goToObstetricPortal,
     goToSurgeryPortal,
     logout,
   } = useAppContext();
@@ -26,8 +25,8 @@ export function PortalSelectionScreen() {
       )}.`}
     >
       <SectionCard
-        title="Accès aux portails"
-        description="Choisis l’espace que tu veux ouvrir."
+        title="Accès au portail"
+        description="Le portail chirurgie est disponible pour cette version."
       >
         <div className="portal-selection">
           <button
@@ -36,13 +35,6 @@ export function PortalSelectionScreen() {
             type="button"
           >
             Portail chirurgie
-          </button>
-          <button
-            className="portal-selection__button portal-selection__button--obstetric"
-            onClick={goToObstetricPortal}
-            type="button"
-          >
-            Portail obstétrique
           </button>
         </div>
       </SectionCard>

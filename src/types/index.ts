@@ -1,5 +1,4 @@
 export type AppScreen =
-  | 'portal-selection'
   | 'welcome'
   | 'badges'
   | 'preblock'
@@ -121,6 +120,7 @@ export type Indication =
   | 'autre';
 export type SurgicalApproach =
   | 'coelioscopie'
+  | 'hysteroscopie'
   | 'laparotomie'
   | 'robot'
   | 'vnotes';
@@ -138,6 +138,7 @@ export type ChecklistLevel = 'NA' | '0' | '1' | '2' | '3' | '4';
 export type ChecklistStep = {
   id: string;
   label: string;
+  applicableApproaches?: SurgicalApproach[];
 };
 
 export type SurgicalInterventionDefinition = {
@@ -162,6 +163,7 @@ export type CreateSurgicalInterventionInput = {
   customChecklistSteps: string[];
   keyStepLabels: string[];
   stepOrderLabels: string[];
+  stepApproachLabels: Record<string, SurgicalApproach[]>;
 };
 
 export type CreateSurgicalInterventionResult = {

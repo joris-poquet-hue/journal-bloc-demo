@@ -9,6 +9,7 @@ import {
   formatDisplayName,
   getChoiceLabel,
   getSeniorById,
+  hydrateAdminInterventionEvaluations,
   indicationOptions,
   roleOptions,
 } from '../data/mockData';
@@ -24,7 +25,7 @@ import {
 import { formatIsoDate } from '../utils/date';
 
 type HistoryPeriod = 'day' | 'week' | 'month';
-type HistoryScoreMode = 'global' | 'procedure';
+type HistoryStatsScope = 'global' | InterventionType;
 
 type HistoryBucket = {
   key: string;
@@ -45,32 +46,30 @@ const periodOptions: Array<{ value: HistoryPeriod; label: string }> = [
   { value: 'week', label: 'Semaine' },
   { value: 'month', label: 'Mois' },
 ];
-const scoreModeOptions: Array<{ value: HistoryScoreMode; label: string }> = [
-  { value: 'global', label: 'Global' },
-  { value: 'procedure', label: 'Par type d’intervention' },
-];
 const ADMIN_EVALUATIONS_STORAGE_KEY =
   'journal-bord:admin-intervention-evaluations:v1';
 
 function loadStoredAdminEvaluations() {
   if (typeof window === 'undefined') {
-    return {};
+    return hydrateAdminInterventionEvaluations();
   }
 
   try {
     const rawValue = window.localStorage.getItem(ADMIN_EVALUATIONS_STORAGE_KEY);
 
     if (!rawValue) {
-      return {};
+      return hydrateAdminInterventionEvaluations();
     }
 
     const parsedValue = JSON.parse(rawValue);
 
     return parsedValue && typeof parsedValue === 'object'
-      ? (parsedValue as Record<string, AdminInterventionEvaluation>)
-      : {};
+      ? hydrateAdminInterventionEvaluations(
+          parsedValue as Record<string, AdminInterventionEvaluation>
+        )
+      : hydrateAdminInterventionEvaluations();
   } catch {
-    return {};
+    return hydrateAdminInterventionEvaluations();
   }
 }
 
@@ -188,9 +187,8 @@ export function SurgeryHistoryScreen() {
     goToSurgeryPortal,
   } = useAppContext();
   const [period, setPeriod] = useState<HistoryPeriod>('week');
-  const [scoreMode, setScoreMode] = useState<HistoryScoreMode>('global');
-  const [selectedProcedure, setSelectedProcedure] =
-    useState<InterventionType | ''>('salpingectomie');
+  const [selectedStatsScope, setSelectedStatsScope] =
+    useState<HistoryStatsScope>('global');
   const [adminEvaluations] = useState(loadStoredAdminEvaluations);
 
   if (!selectedInternal) {
@@ -217,14 +215,21 @@ export function SurgeryHistoryScreen() {
         adminEvaluations[intervention.id]
       ) ?? intervention.autonomyScore,
   }));
-  const procedureForStats =
-    selectedProcedure || surgicalProcedureOptions[0]?.value || 'salpingectomie';
   const chartInterventions =
-    scoreMode === 'procedure'
-      ? scoredInterventions.filter(
-          ({ intervention }) => intervention.procedure === procedureForStats
-        )
-      : scoredInterventions;
+    selectedStatsScope === 'global'
+      ? scoredInterventions
+      : scoredInterventions.filter(
+          ({ intervention }) => intervention.procedure === selectedStatsScope
+        );
+  const statsScopeOptions = [
+    { value: 'global' as const, label: 'Statistiques globales' },
+    ...[...surgicalProcedureOptions]
+      .sort((left, right) => left.label.localeCompare(right.label, 'fr'))
+      .map((procedure) => ({
+        value: procedure.value,
+        label: procedure.label,
+      })),
+  ];
   const scoreByInterventionId = new Map(
     scoredInterventions.map(({ autonomyScore, intervention }) => [
       intervention.id,
@@ -245,7 +250,7 @@ export function SurgeryHistoryScreen() {
     >
       <SectionCard
         title="Histogramme"
-        description="Volume et score moyen d’autonomie opératoire selon la période choisie."
+        description="Volume et autonomie moyenne selon la période choisie."
       >
         <div className="history-toolbar" aria-label="Période de l’histogramme">
           {periodOptions.map((option) => (
@@ -262,46 +267,29 @@ export function SurgeryHistoryScreen() {
           ))}
         </div>
 
-        <div className="history-toolbar" aria-label="Mode de calcul du score">
-          {scoreModeOptions.map((option) => (
-            <button
-              key={option.value}
-              className={`history-period-button ${
-                scoreMode === option.value ? 'history-period-button--selected' : ''
-              }`}
-              onClick={() => setScoreMode(option.value)}
-              type="button"
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-
-        {scoreMode === 'procedure' ? (
-          <label className="field-stack">
-            <span className="field-stack__label">Type d’intervention</span>
-            <select
-              className="field-input"
-              onChange={(event) =>
-                setSelectedProcedure(event.target.value as InterventionType)
-              }
-              value={procedureForStats}
-            >
-              {surgicalProcedureOptions.map((procedure) => (
-                <option key={procedure.value} value={procedure.value}>
-                  {procedure.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        ) : null}
+        <label className="field-stack">
+          <span className="field-stack__label">Statistique affichée</span>
+          <select
+            className="field-input"
+            onChange={(event) =>
+              setSelectedStatsScope(event.target.value as HistoryStatsScope)
+            }
+            value={selectedStatsScope}
+          >
+            {statsScopeOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <div className="history-chart-legend">
           <span className="history-chart-legend__item history-chart-legend__item--volume">
             Volume
           </span>
           <span className="history-chart-legend__item history-chart-legend__item--score">
-            Score moyen
+            Autonomie moyenne (%)
           </span>
         </div>
 
@@ -324,13 +312,17 @@ export function SurgeryHistoryScreen() {
                     style={{
                       height: getScoreBarHeight(bucket.scoreAverage),
                     }}
-                    title={`Score moyen : ${
+                    title={`Autonomie moyenne : ${
                       bucket.scoreAverage == null
                         ? 'Non calculable'
-                        : `${bucket.scoreAverage} / 100`
+                        : `${bucket.scoreAverage} %`
                     }`}
                   >
-                    <span>{bucket.scoreAverage ?? '—'}</span>
+                    <span>
+                      {bucket.scoreAverage == null
+                        ? '—'
+                        : `${bucket.scoreAverage}%`}
+                    </span>
                   </span>
                 </div>
                 <span className="history-chart__label">{bucket.label}</span>

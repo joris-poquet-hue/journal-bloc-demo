@@ -216,46 +216,6 @@ button {
   gap: 10px;
 }
 
-.portal-selection {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.portal-selection__button {
-  min-height: 62px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: white;
-  color: var(--text);
-  font-weight: 800;
-  font-size: 1rem;
-  transition:
-    transform 140ms ease,
-    border-color 140ms ease,
-    background 140ms ease,
-    color 140ms ease,
-    box-shadow 140ms ease;
-}
-
-.portal-selection__button:hover {
-  transform: translateY(-1px);
-}
-
-.portal-selection__button--surgery:hover {
-  background: #e8f7ef;
-  border-color: rgba(30, 142, 90, 0.35);
-  color: #1e8e5a;
-  box-shadow: 0 12px 24px rgba(30, 142, 90, 0.12);
-}
-
-.portal-selection__button--obstetric:hover {
-  background: #fdebf4;
-  border-color: rgba(214, 72, 139, 0.32);
-  color: #c43779;
-  box-shadow: 0 12px 24px rgba(214, 72, 139, 0.12);
-}
-
 .choice-grid {
   display: grid;
   gap: 12px;
@@ -696,13 +656,14 @@ button {
   display: flex;
   align-items: end;
   justify-content: center;
-  gap: 8px;
-  padding: 8px 8px 0;
+  gap: 6px;
+  padding: 28px 6px 0;
   border-bottom: 1px solid var(--border);
 }
 
 .history-chart__bar {
-  width: 22px;
+  position: relative;
+  width: 28px;
   min-height: 8px;
   border-radius: 8px 8px 0 0;
   display: flex;
@@ -710,8 +671,18 @@ button {
   justify-content: center;
   padding-top: 4px;
   color: white;
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 800;
+}
+
+.history-chart__bar span {
+  position: absolute;
+  top: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--text-muted);
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .history-chart__bar--volume {
@@ -1040,6 +1011,12 @@ button {
   line-height: 1.45;
 }
 
+.info-block__helper {
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
 .legend-list {
   display: flex;
   flex-direction: column;
@@ -1255,7 +1232,7 @@ button {
 }
 
 .admin-list--scroll {
-  max-height: 520px;
+  max-height: min(520px, 60vh);
   overflow-y: auto;
   padding-right: 8px;
   scrollbar-color: rgba(64, 125, 146, 0.38) transparent;
@@ -1508,9 +1485,9 @@ button {
 
 .admin-step-order-item {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr) auto;
+  grid-template-columns: 88px minmax(0, 1fr);
   gap: 12px;
-  align-items: center;
+  align-items: start;
   min-height: 54px;
   padding: 12px;
   border: 1px solid var(--border);
@@ -1540,21 +1517,90 @@ button {
   min-width: 0;
 }
 
+.admin-step-order-item__content,
+.admin-step-order-item__controls,
+.admin-step-applicability {
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-step-order-item__content {
+  min-width: 0;
+  gap: 10px;
+}
+
+.admin-step-order-item__controls {
+  gap: 10px;
+}
+
 .admin-step-order-item__key {
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 8px;
   color: var(--text-muted);
   cursor: pointer;
   font-weight: 400;
   line-height: 1.3;
-  white-space: nowrap;
 }
 
 .admin-step-order-item__key input {
   margin: 0;
   accent-color: var(--accent);
+}
+
+.admin-step-applicability {
+  gap: 8px;
+}
+
+.admin-step-applicability__label {
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.admin-step-applicability__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-step-applicability__all,
+.admin-step-applicability__choice {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: #ffffff;
+  color: var(--text-muted);
+  font: inherit;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.admin-step-applicability__all {
+  cursor: pointer;
+}
+
+.admin-step-applicability__choice {
+  gap: 7px;
+  cursor: pointer;
+}
+
+.admin-step-applicability__choice input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.admin-step-applicability__all--selected,
+.admin-step-applicability__choice--selected {
+  border-color: var(--accent);
+  background: #e7f8fb;
+  color: var(--text-primary);
 }
 
 .admin-form-actions,

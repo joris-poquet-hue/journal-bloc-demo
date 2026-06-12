@@ -14,6 +14,7 @@ import {
   internalProfiles as seededInternalProfiles,
   isApproachAllowedForIndication,
   isAdminCredentials,
+  isSeededDemoInterventionId,
   normalizeComplexityRating,
   normalizeCredentialValue,
   seededSavedInterventions,
@@ -34,6 +35,7 @@ import {
   SavedIntervention,
   Senior,
   SessionRole,
+  SurgicalApproach,
   SurgicalInterventionDefinition,
   SummaryMode,
 } from '../types';
@@ -114,9 +116,10 @@ const SAVED_OBSTETRIC_GESTURES_STORAGE_KEY =
   'journal-bord:saved-obstetric-gestures:v1';
 const CUSTOM_SURGICAL_INTERVENTIONS_STORAGE_KEY =
   'journal-bord:custom-surgical-interventions:v1';
+const REMOVED_DEMO_PROFILE_IDS = new Set(['int-3']);
 
-function hydrateInternalProfiles(profiles: InternalProfile[]) {
-  return profiles.map((profile) => ({
+function hydrateInternalProfile(profile: InternalProfile) {
+  return {
     ...profile,
     lastLoginAt: profile.lastLoginAt ?? null,
     achievementBadges: profile.achievementBadges ?? [],
@@ -133,7 +136,30 @@ function hydrateInternalProfiles(profiles: InternalProfile[]) {
       primaryAssistantCount:
         profile.baselineStats?.primaryAssistantCount ?? 0,
     },
-  }));
+  };
+}
+
+function hydrateInternalProfiles(profiles: InternalProfile[]) {
+  const hydratedProfiles = profiles.map(hydrateInternalProfile);
+  const existingById = new Map(
+    hydratedProfiles.map((profile) => [profile.id, profile])
+  );
+  const seededProfileIds = new Set(
+    seededInternalProfiles.map((profile) => profile.id)
+  );
+  const refreshedSeedProfiles = seededInternalProfiles.map((profile) =>
+    hydrateInternalProfile({
+      ...profile,
+      lastLoginAt: existingById.get(profile.id)?.lastLoginAt ?? profile.lastLoginAt,
+    })
+  );
+  const customProfiles = hydratedProfiles.filter(
+    (profile) =>
+      !seededProfileIds.has(profile.id) &&
+      !REMOVED_DEMO_PROFILE_IDS.has(profile.id)
+  );
+
+  return [...refreshedSeedProfiles, ...customProfiles];
 }
 
 function loadStoredArray<T>(storageKey: string, fallbackValue: T[]) {
@@ -156,8 +182,8 @@ function loadStoredArray<T>(storageKey: string, fallbackValue: T[]) {
   }
 }
 
-function hydrateSavedInterventions(interventions: SavedIntervention[]) {
-  return interventions.map((intervention) => ({
+function hydrateSavedIntervention(intervention: SavedIntervention) {
+  return {
     ...intervention,
     customIndication: intervention.customIndication ?? null,
     autonomyScore: intervention.autonomyScore ?? null,
@@ -165,7 +191,26 @@ function hydrateSavedInterventions(interventions: SavedIntervention[]) {
       normalizeComplexityRating(
         intervention.complexity as Parameters<typeof normalizeComplexityRating>[0]
       ) ?? defaultComplexityRating,
-  }));
+  };
+}
+
+function hydrateSavedInterventions(interventions: SavedIntervention[]) {
+  const seededInterventionIds = new Set(
+    seededSavedInterventions.map((intervention) => intervention.id)
+  );
+  const customInterventions = interventions
+    .map(hydrateSavedIntervention)
+    .filter(
+      (intervention) =>
+        !seededInterventionIds.has(intervention.id) &&
+        !isSeededDemoInterventionId(intervention.id) &&
+        !REMOVED_DEMO_PROFILE_IDS.has(intervention.internalId ?? '')
+    );
+
+  return [
+    ...seededSavedInterventions.map(hydrateSavedIntervention),
+    ...customInterventions,
+  ].sort((left, right) => right.savedAt.localeCompare(left.savedAt));
 }
 
 function hydrateSurgicalInterventionDefinitions(
@@ -176,7 +221,12 @@ function hydrateSurgicalInterventionDefinitions(
     indications: intervention.indications ?? [],
     allowedApproaches: intervention.allowedApproaches ?? [],
     allowedEntryTechniques: intervention.allowedEntryTechniques ?? [],
-    checklistSteps: intervention.checklistSteps ?? [],
+    checklistSteps: (intervention.checklistSteps ?? []).map((step) => ({
+      ...step,
+      applicableApproaches: (step.applicableApproaches ?? []).filter((approach) =>
+        (intervention.allowedApproaches ?? []).includes(approach)
+      ),
+    })),
     keyStepIds: intervention.keyStepIds ?? [],
   }));
 }
@@ -191,6 +241,43 @@ const LAPAROSCOPIC_CUSTOM_INTERVENTION_STEP_LABELS = [
   'Mise en place des trocarts',
   'Exsufflation et retrait des trocarts',
 ];
+const PNEUMOPERITONEUM_ENTRY_STEP_LABEL = 'Voie d’abord du pneumopéritoine';
+
+function getDefaultStepApproaches(
+  stepLabel: string,
+  allowedApproaches: SurgicalApproach[]
+) {
+  if (stepLabel === PNEUMOPERITONEUM_ENTRY_STEP_LABEL) {
+    return allowedApproaches.filter((approach) =>
+      approach === 'coelioscopie' ||
+      approach === 'robot' ||
+      approach === 'vnotes'
+    );
+  }
+
+  return LAPAROSCOPIC_CUSTOM_INTERVENTION_STEP_LABELS.includes(stepLabel)
+    ? allowedApproaches.filter((approach) =>
+        approach === 'coelioscopie' || approach === 'robot'
+      )
+    : [];
+}
+
+function getStepApproachesFromInput(
+  input: CreateSurgicalInterventionInput,
+  stepLabel: string
+) {
+  const hasExplicitValue = Object.prototype.hasOwnProperty.call(
+    input.stepApproachLabels,
+    stepLabel
+  );
+  const candidateApproaches = hasExplicitValue
+    ? input.stepApproachLabels[stepLabel] ?? []
+    : getDefaultStepApproaches(stepLabel, input.allowedApproaches);
+
+  return [...new Set(candidateApproaches)].filter((approach) =>
+    input.allowedApproaches.includes(approach)
+  );
+}
 
 function normalizeStepLabels(stepLabels: string[]) {
   const seenLabels = new Set<string>();
@@ -421,7 +508,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLastSavedIntervention(null);
     setSummaryMode('review');
     setPreBlockContext('surgery');
-    setScreen('portal-selection');
+    setScreen('welcome');
 
     return true;
   };
@@ -443,7 +530,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    setScreen('portal-selection');
+    setScreen('welcome');
   };
 
   const goToSurgeryPortal = () => {
@@ -459,7 +546,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    setScreen('obstetric-portal');
+    setScreen('welcome');
   };
 
   const goToObstetricJournal = () => {
@@ -467,12 +554,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    setObstetricDraft((current) => ({
-      ...current,
-      internalId: selectedInternal.id,
-      date: current.date || getTodayIsoDate(),
-    }));
-    setScreen('obstetric-journal');
+    setScreen('welcome');
   };
 
   const goToForm = () => {
@@ -552,9 +634,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setScreen(
       sessionRole === 'admin'
         ? 'admin'
-        : preBlockContext === 'obstetric'
-          ? 'obstetric-portal'
-          : 'welcome'
+        : 'welcome'
     );
   };
 
@@ -796,10 +876,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    const checklistSteps = allStepLabels.map((label, index) => ({
-      id: `${id}-step-${index + 1}`,
-      label,
-    }));
+    const checklistSteps = allStepLabels.map((label, index) => {
+      const applicableApproaches = getStepApproachesFromInput(input, label);
+
+      return {
+        id: `${id}-step-${index + 1}`,
+        label,
+        ...(applicableApproaches.length > 0 ? { applicableApproaches } : {}),
+      };
+    });
     const keyStepIds = checklistSteps
       .filter((step) => keyStepLabels.includes(step.label))
       .map((step) => step.id);

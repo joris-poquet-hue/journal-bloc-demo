@@ -20,6 +20,7 @@ import {
   getSeniorById,
   getSurgicalInterventionDefinition,
   getSurgicalInterventionDefinitions,
+  hydrateAdminInterventionEvaluations,
   indicationOptions,
   roleOptions,
 } from '../data/mockData';
@@ -85,6 +86,7 @@ const EMPTY_SURGICAL_INTERVENTION_FORM: CreateSurgicalInterventionInput = {
   customChecklistSteps: [''],
   keyStepLabels: [],
   stepOrderLabels: [],
+  stepApproachLabels: {},
 };
 
 const ROTATION_SUGGESTIONS = [
@@ -113,6 +115,7 @@ const LAPAROSCOPIC_NEW_INTERVENTION_STEP_LABELS = [
   'Mise en place des trocarts',
   'Exsufflation et retrait des trocarts',
 ];
+const PNEUMOPERITONEUM_ENTRY_STEP_LABEL = 'Voie d’abord du pneumopéritoine';
 
 const ADMIN_PERFORMANCE_OPTIONS: Array<{
   value: AdminPerformanceRating;
@@ -245,6 +248,39 @@ function getAutomaticChecklistStepLabels(approaches: SurgicalApproach[]) {
   ];
 }
 
+function getDefaultStepApproachLabels(
+  stepLabel: string,
+  allowedApproaches: SurgicalApproach[]
+) {
+  if (stepLabel === PNEUMOPERITONEUM_ENTRY_STEP_LABEL) {
+    return allowedApproaches.filter((approach) =>
+      approach === 'coelioscopie' ||
+      approach === 'robot' ||
+      approach === 'vnotes'
+    );
+  }
+
+  return LAPAROSCOPIC_NEW_INTERVENTION_STEP_LABELS.includes(stepLabel)
+    ? allowedApproaches.filter((approach) =>
+        approach === 'coelioscopie' || approach === 'robot'
+      )
+    : [];
+}
+
+function getStepApproachLabels(
+  stepLabel: string,
+  form: CreateSurgicalInterventionInput
+) {
+  const hasExplicitValue = Object.prototype.hasOwnProperty.call(
+    form.stepApproachLabels,
+    stepLabel
+  );
+
+  return hasExplicitValue
+    ? form.stepApproachLabels[stepLabel] ?? []
+    : getDefaultStepApproachLabels(stepLabel, form.allowedApproaches);
+}
+
 function getOrderedChecklistLabels(
   availableLabels: string[],
   requestedOrderLabels: string[]
@@ -274,23 +310,25 @@ function getInterventionKeyStepLabels(
 
 function loadStoredAdminEvaluations() {
   if (typeof window === 'undefined') {
-    return {};
+    return hydrateAdminInterventionEvaluations();
   }
 
   try {
     const rawValue = window.localStorage.getItem(ADMIN_EVALUATIONS_STORAGE_KEY);
 
     if (!rawValue) {
-      return {};
+      return hydrateAdminInterventionEvaluations();
     }
 
     const parsedValue = JSON.parse(rawValue);
 
     return parsedValue && typeof parsedValue === 'object'
-      ? (parsedValue as Record<string, AdminInterventionEvaluation>)
-      : {};
+      ? hydrateAdminInterventionEvaluations(
+          parsedValue as Record<string, AdminInterventionEvaluation>
+        )
+      : hydrateAdminInterventionEvaluations();
   } catch {
-    return {};
+    return hydrateAdminInterventionEvaluations();
   }
 }
 
@@ -728,6 +766,14 @@ export function AdminScreen() {
         allowedEntryTechniques: needsEntryTechnique
           ? current.allowedEntryTechniques
           : [],
+        stepApproachLabels: Object.fromEntries(
+          Object.entries(current.stepApproachLabels).map(
+            ([stepLabel, approaches]) => [
+              stepLabel,
+              approaches.filter((value) => allowedApproaches.includes(value)),
+            ]
+          )
+        ),
       };
     });
     setSurgicalInterventionFeedback(null);
@@ -779,6 +825,28 @@ export function AdminScreen() {
       customChecklistSteps: current.customChecklistSteps.map((step, stepIndex) =>
         stepIndex === index ? value : step
       ),
+      stepApproachLabels: (() => {
+        const previousLabel = current.customChecklistSteps[index]?.trim();
+        const nextLabel = value.trim();
+
+        if (
+          !previousLabel ||
+          !nextLabel ||
+          previousLabel === nextLabel ||
+          !Object.prototype.hasOwnProperty.call(
+            current.stepApproachLabels,
+            previousLabel
+          )
+        ) {
+          return current.stepApproachLabels;
+        }
+
+        const nextStepApproachLabels = { ...current.stepApproachLabels };
+        nextStepApproachLabels[nextLabel] = nextStepApproachLabels[previousLabel];
+        delete nextStepApproachLabels[previousLabel];
+
+        return nextStepApproachLabels;
+      })(),
     }));
     setSurgicalInterventionFeedback(null);
   };
@@ -823,12 +891,28 @@ export function AdminScreen() {
   };
 
   const removeCustomChecklistStep = (index: number) => {
-    setSurgicalInterventionForm((current) => ({
-      ...current,
-      customChecklistSteps: current.customChecklistSteps.filter(
-        (_step, stepIndex) => stepIndex !== index
-      ),
-    }));
+    setSurgicalInterventionForm((current) => {
+      const removedStepLabel = current.customChecklistSteps[index]?.trim();
+      const nextStepApproachLabels = { ...current.stepApproachLabels };
+
+      if (removedStepLabel) {
+        delete nextStepApproachLabels[removedStepLabel];
+      }
+
+      return {
+        ...current,
+        customChecklistSteps: current.customChecklistSteps.filter(
+          (_step, stepIndex) => stepIndex !== index
+        ),
+        keyStepLabels: removedStepLabel
+          ? current.keyStepLabels.filter((label) => label !== removedStepLabel)
+          : current.keyStepLabels,
+        stepOrderLabels: removedStepLabel
+          ? current.stepOrderLabels.filter((label) => label !== removedStepLabel)
+          : current.stepOrderLabels,
+        stepApproachLabels: nextStepApproachLabels,
+      };
+    });
   };
 
   const toggleKeyStepLabel = (label: string) => {
@@ -838,6 +922,41 @@ export function AdminScreen() {
         ? current.keyStepLabels.filter((value) => value !== label)
         : [...current.keyStepLabels, label],
     }));
+    setSurgicalInterventionFeedback(null);
+  };
+
+  const setStepApplicableToAllApproaches = (label: string) => {
+    setSurgicalInterventionForm((current) => ({
+      ...current,
+      stepApproachLabels: {
+        ...current.stepApproachLabels,
+        [label]: [],
+      },
+    }));
+    setSurgicalInterventionFeedback(null);
+  };
+
+  const toggleStepApplicableApproach = (
+    label: string,
+    approach: SurgicalApproach
+  ) => {
+    setSurgicalInterventionForm((current) => {
+      const currentApproaches = getStepApproachLabels(label, current);
+      const nextApproaches = currentApproaches.includes(approach)
+        ? currentApproaches.filter((value) => value !== approach)
+        : [...currentApproaches, approach];
+      const normalizedApproaches = nextApproaches.filter((value) =>
+        current.allowedApproaches.includes(value)
+      );
+
+      return {
+        ...current,
+        stepApproachLabels: {
+          ...current.stepApproachLabels,
+          [label]: normalizedApproaches,
+        },
+      };
+    });
     setSurgicalInterventionFeedback(null);
   };
 
@@ -862,6 +981,12 @@ export function AdminScreen() {
       customChecklistSteps: editableStepLabels.length ? editableStepLabels : [''],
       keyStepLabels: getInterventionKeyStepLabels(intervention),
       stepOrderLabels: stepLabels,
+      stepApproachLabels: Object.fromEntries(
+        intervention.checklistSteps.map((step) => [
+          step.label,
+          step.applicableApproaches ?? [],
+        ])
+      ),
     });
     setEditingSurgicalInterventionId(intervention.id);
     setShowSurgicalInterventionList(false);
@@ -1017,10 +1142,30 @@ export function AdminScreen() {
       surgicalProcedureOptions,
       selectedEvaluationIntervention.procedure
     );
-    const shouldShowEntryTechnique =
-      selectedEvaluationIntervention.approach === 'coelioscopie' ||
-      selectedEvaluationIntervention.approach === 'robot' ||
-      selectedEvaluationIntervention.entryTechnique != null;
+    const priorAutonomyScores = sortedInterventions
+      .filter(
+        (intervention) =>
+          intervention.id !== selectedEvaluationIntervention.id &&
+          intervention.internalId === selectedEvaluationIntervention.internalId &&
+          intervention.procedure === selectedEvaluationIntervention.procedure &&
+          intervention.savedAt < selectedEvaluationIntervention.savedAt
+      )
+      .map(
+        (intervention) =>
+          calculateAutonomyScore(
+            intervention,
+            customSurgicalInterventions,
+            adminEvaluations[intervention.id]
+          ) ?? intervention.autonomyScore
+      )
+      .filter((score): score is number => score != null);
+    const priorAutonomyAverage =
+      priorAutonomyScores.length === 0
+        ? null
+        : Math.round(
+            priorAutonomyScores.reduce((total, score) => total + score, 0) /
+              priorAutonomyScores.length
+          );
     const hasCompleteEvaluation = hasCompleteAdminEvaluation(selectedEvaluation);
 
     return (
@@ -1052,29 +1197,20 @@ export function AdminScreen() {
                 {indicationLabel || 'Non renseignée'}
               </strong>
             </div>
-            <div className="info-block">
-              <span className="info-block__label">Voie d’abord</span>
-              <strong className="info-block__value">
-                {getChoiceLabel(
-                  approachOptions,
-                  selectedEvaluationIntervention.approach
-                )}
-              </strong>
-            </div>
-            {shouldShowEntryTechnique ? (
+            {selectedEvaluationIntervention.approach ? (
               <div className="info-block">
-                <span className="info-block__label">Technique d’entrée</span>
+                <span className="info-block__label">Voie d’abord</span>
                 <strong className="info-block__value">
                   {getChoiceLabel(
-                    entryTechniqueOptions,
-                    selectedEvaluationIntervention.entryTechnique
+                    approachOptions,
+                    selectedEvaluationIntervention.approach
                   )}
                 </strong>
               </div>
             ) : null}
             <div className="info-block">
               <span className="info-block__label">
-                Difficulté ressentie par l’interne
+                Difficulté ressentie
               </span>
               <strong className="info-block__value">
                 {formatComplexityRating(selectedEvaluationIntervention.complexity)}
@@ -1086,17 +1222,30 @@ export function AdminScreen() {
                 {getChoiceLabel(roleOptions, selectedEvaluationIntervention.role)}
               </strong>
             </div>
+            <div className="info-block">
+              <span className="info-block__label">Autonomie préalable (%)</span>
+              <strong className="info-block__value">
+                {priorAutonomyAverage == null
+                  ? 'Non calculable'
+                  : `${priorAutonomyAverage} %`}
+              </strong>
+              {priorAutonomyAverage == null ? (
+                <span className="info-block__helper">
+                  Aucune intervention antérieure évaluée
+                </span>
+              ) : null}
+            </div>
           </div>
         </SectionCard>
 
         <SectionCard title="Répartition des niveaux d’autonomie">
           <div className="validation-box">
             <strong>
-              Score d’autonomie sur les étapes clés :{' '}
+              Score sur temps opératoires clés :{' '}
               {formatKeyStepScore(selectedEvaluationKeyStepScore)}
             </strong>
             <span>
-              Calculé uniquement avec les étapes clés définies pour cette intervention.
+              Calculé uniquement avec les temps opératoires clés définis pour cette intervention.
             </span>
           </div>
           <div className="admin-evaluation-table-wrapper">
@@ -1104,7 +1253,7 @@ export function AdminScreen() {
               <thead>
                 <tr>
                   <th>Niveau d’autonomie</th>
-                  <th>Étapes concernées</th>
+                  <th>Temps opératoires concernés</th>
                 </tr>
               </thead>
               <tbody>
@@ -1114,7 +1263,7 @@ export function AdminScreen() {
                     <td>
                       {row.steps.length
                         ? row.steps.map((step) => step.label).join(', ')
-                        : 'Aucune étape'}
+                        : 'Aucun temps opératoire'}
                     </td>
                   </tr>
                 ))}
@@ -1231,7 +1380,7 @@ export function AdminScreen() {
               <strong className="info-block__value">{selectedProfile.loginId}</strong>
             </div>
             <div className="info-block">
-              <span className="info-block__label">Mot de passe prototype</span>
+              <span className="info-block__label">Mot de passe</span>
               <strong className="info-block__value">{selectedProfile.password}</strong>
             </div>
             <div className="info-block">
@@ -1277,12 +1426,12 @@ export function AdminScreen() {
                 onClick={handleSelectedProfileExport}
                 type="button"
               >
-                Exporter les interventions (.csv)
+                Exporter en CSV
               </button>
             </div>
           </div>
           {selectedProfileInterventions.length ? (
-            <div className="admin-list">
+            <div className="admin-list admin-list--scroll">
               {selectedProfileInterventions.map((intervention) => {
                 const senior = getSeniorById(intervention.seniorId);
                 const evaluation = adminEvaluations[intervention.id];
@@ -1681,7 +1830,7 @@ export function AdminScreen() {
             ) : null}
 
             <div className="field-stack">
-              <span className="field-stack__label">Étapes spécifiques à ajouter</span>
+              <span className="field-stack__label">Temps opératoires spécifiques à ajouter</span>
               <div className="admin-step-editor">
                 {surgicalInterventionForm.customChecklistSteps.map((step, index) => (
                   <div className="admin-step-editor__row" key={index}>
@@ -1690,7 +1839,7 @@ export function AdminScreen() {
                       onChange={(event) =>
                         updateCustomChecklistStep(index, event.target.value)
                       }
-                      placeholder="Nouvelle étape de checklist"
+                      placeholder="Nouveau temps opératoire"
                       type="text"
                       value={step}
                     />
@@ -1710,12 +1859,12 @@ export function AdminScreen() {
                 onClick={addCustomChecklistStep}
                 type="button"
               >
-                Ajouter une étape
+                Ajouter un temps opératoire
               </button>
             </div>
 
             <div className="field-stack">
-              <span className="field-stack__label">Ordre des étapes</span>
+              <span className="field-stack__label">Temps opératoire</span>
               <div className="admin-step-order-list">
                 {previewChecklistStepLabels.map((stepLabel, index) => (
                   <article
@@ -1732,19 +1881,87 @@ export function AdminScreen() {
                     }}
                   >
                     <span className="admin-step-order-item__index">
-                      Étape {index + 1}
+                      Temps {index + 1}
                     </span>
-                    <strong>{stepLabel}</strong>
-                    <label className="admin-step-order-item__key">
-                      <input
-                        checked={surgicalInterventionForm.keyStepLabels.includes(
-                          stepLabel
-                        )}
-                        onChange={() => toggleKeyStepLabel(stepLabel)}
-                        type="checkbox"
-                      />
-                      <span>Étape clé</span>
-                    </label>
+                    <div className="admin-step-order-item__content">
+                      <strong>{stepLabel}</strong>
+                      <div className="admin-step-order-item__controls">
+                        <label className="admin-step-order-item__key">
+                          <input
+                            checked={surgicalInterventionForm.keyStepLabels.includes(
+                              stepLabel
+                            )}
+                            onChange={() => toggleKeyStepLabel(stepLabel)}
+                            type="checkbox"
+                          />
+                          <span>Temps opératoire clé</span>
+                        </label>
+                        {surgicalInterventionForm.allowedApproaches.length > 0 ? (
+                          <div className="admin-step-applicability">
+                            <span className="admin-step-applicability__label">
+                              Applicable pour
+                            </span>
+                            <div className="admin-step-applicability__options">
+                              {(() => {
+                                const selectedApproaches = getStepApproachLabels(
+                                  stepLabel,
+                                  surgicalInterventionForm
+                                );
+
+                                return (
+                                  <>
+                                    <button
+                                      className={`admin-step-applicability__all ${
+                                        selectedApproaches.length === 0
+                                          ? 'admin-step-applicability__all--selected'
+                                          : ''
+                                      }`}
+                                      onClick={() =>
+                                        setStepApplicableToAllApproaches(stepLabel)
+                                      }
+                                      type="button"
+                                    >
+                                      Toutes les voies
+                                    </button>
+                                    {surgicalInterventionForm.allowedApproaches.map(
+                                      (approach) => (
+                                        <label
+                                          className={`admin-step-applicability__choice ${
+                                            selectedApproaches.includes(approach)
+                                              ? 'admin-step-applicability__choice--selected'
+                                              : ''
+                                          }`}
+                                          key={approach}
+                                        >
+                                          <input
+                                            checked={selectedApproaches.includes(
+                                              approach
+                                            )}
+                                            onChange={() =>
+                                              toggleStepApplicableApproach(
+                                                stepLabel,
+                                                approach
+                                              )
+                                            }
+                                            type="checkbox"
+                                          />
+                                          <span>
+                                            {getChoiceLabel(
+                                              approachOptions,
+                                              approach
+                                            )}
+                                          </span>
+                                        </label>
+                                      )
+                                    )}
+                                  </>
+                                );
+                              })()}
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    </div>
                   </article>
                 ))}
               </div>
@@ -1807,7 +2024,7 @@ export function AdminScreen() {
                         <strong>{intervention.name}</strong>
                       </div>
                       <span>{intervention.checklistSteps.length} étape(s)</span>
-                      <span>{intervention.keyStepIds.length} étape(s) clé(s)</span>
+                      <span>{intervention.keyStepIds.length} temps opératoire(s) clé(s)</span>
                       {intervention.indications.length ? (
                         <span>
                           Indications : {intervention.indications.join(', ')}
@@ -2137,7 +2354,7 @@ export function AdminScreen() {
           ) : null}
 
           <div className="field-stack">
-            <span className="field-stack__label">Étapes spécifiques à ajouter</span>
+            <span className="field-stack__label">Temps opératoires spécifiques à ajouter</span>
             <div className="admin-step-editor">
               {surgicalInterventionForm.customChecklistSteps.map((step, index) => (
                 <div className="admin-step-editor__row" key={index}>
@@ -2146,7 +2363,7 @@ export function AdminScreen() {
                     onChange={(event) =>
                       updateCustomChecklistStep(index, event.target.value)
                     }
-                    placeholder="Nouvelle étape de checklist"
+                    placeholder="Nouveau temps opératoire"
                     type="text"
                     value={step}
                   />
@@ -2166,12 +2383,12 @@ export function AdminScreen() {
               onClick={addCustomChecklistStep}
               type="button"
             >
-              Ajouter une étape
+              Ajouter un temps opératoire
             </button>
           </div>
 
           <div className="field-stack">
-            <span className="field-stack__label">Ordre des étapes</span>
+            <span className="field-stack__label">Temps opératoire</span>
             <div className="admin-step-order-list">
               {previewChecklistStepLabels.map((stepLabel, index) => (
                 <article
@@ -2188,19 +2405,87 @@ export function AdminScreen() {
                   }}
                 >
                   <span className="admin-step-order-item__index">
-                    Étape {index + 1}
+                    Temps {index + 1}
                   </span>
-                  <strong>{stepLabel}</strong>
-                  <label className="admin-step-order-item__key">
-                    <input
-                      checked={surgicalInterventionForm.keyStepLabels.includes(
-                        stepLabel
-                      )}
-                      onChange={() => toggleKeyStepLabel(stepLabel)}
-                      type="checkbox"
-                    />
-                    <span>Étape clé</span>
-                  </label>
+                  <div className="admin-step-order-item__content">
+                    <strong>{stepLabel}</strong>
+                    <div className="admin-step-order-item__controls">
+                      <label className="admin-step-order-item__key">
+                        <input
+                          checked={surgicalInterventionForm.keyStepLabels.includes(
+                            stepLabel
+                          )}
+                          onChange={() => toggleKeyStepLabel(stepLabel)}
+                          type="checkbox"
+                        />
+                        <span>Temps opératoire clé</span>
+                      </label>
+                      {surgicalInterventionForm.allowedApproaches.length > 0 ? (
+                        <div className="admin-step-applicability">
+                          <span className="admin-step-applicability__label">
+                            Applicable pour
+                          </span>
+                          <div className="admin-step-applicability__options">
+                            {(() => {
+                              const selectedApproaches = getStepApproachLabels(
+                                stepLabel,
+                                surgicalInterventionForm
+                              );
+
+                              return (
+                                <>
+                                  <button
+                                    className={`admin-step-applicability__all ${
+                                      selectedApproaches.length === 0
+                                        ? 'admin-step-applicability__all--selected'
+                                        : ''
+                                    }`}
+                                    onClick={() =>
+                                      setStepApplicableToAllApproaches(stepLabel)
+                                    }
+                                    type="button"
+                                  >
+                                    Toutes les voies
+                                  </button>
+                                  {surgicalInterventionForm.allowedApproaches.map(
+                                    (approach) => (
+                                      <label
+                                        className={`admin-step-applicability__choice ${
+                                          selectedApproaches.includes(approach)
+                                            ? 'admin-step-applicability__choice--selected'
+                                            : ''
+                                        }`}
+                                        key={approach}
+                                      >
+                                        <input
+                                          checked={selectedApproaches.includes(
+                                            approach
+                                          )}
+                                          onChange={() =>
+                                            toggleStepApplicableApproach(
+                                              stepLabel,
+                                              approach
+                                            )
+                                          }
+                                          type="checkbox"
+                                        />
+                                        <span>
+                                          {getChoiceLabel(
+                                            approachOptions,
+                                            approach
+                                          )}
+                                        </span>
+                                      </label>
+                                    )
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
                 </article>
               ))}
             </div>
@@ -2263,7 +2548,7 @@ export function AdminScreen() {
                       <strong>{intervention.name}</strong>
                     </div>
                     <span>{intervention.checklistSteps.length} étape(s)</span>
-                    <span>{intervention.keyStepIds.length} étape(s) clé(s)</span>
+                    <span>{intervention.keyStepIds.length} temps opératoire(s) clé(s)</span>
                     {intervention.indications.length ? (
                       <span>
                         Indications : {intervention.indications.join(', ')}
@@ -2451,7 +2736,7 @@ export function AdminScreen() {
                       onClick={handleExport}
                       type="button"
                     >
-                      Exporter vers Excel (.csv)
+                      Exporter en CSV
                     </button>
                     <button
                       className="mini-button mini-button--danger"

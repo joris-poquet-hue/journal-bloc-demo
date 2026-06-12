@@ -1,4 +1,7 @@
 import {
+  AdminCategoryDifficultyRating,
+  AdminInterventionEvaluation,
+  AdminPerformanceRating,
   ChecklistLevel,
   ChecklistStep,
   ChoiceOption,
@@ -19,6 +22,7 @@ import {
   SurgeryContext,
   TechniqueGuide,
 } from '../types';
+import { calculateAutonomyScoreFromComponents } from '../utils/autonomyScoreFormula';
 
 export const internalProfiles: InternalProfile[] = [
   {
@@ -53,28 +57,6 @@ export const internalProfiles: InternalProfile[] = [
     semester: 'S5',
     currentRotation: 'Chirurgie',
     createdAt: '2026-05-29T08:05:00.000Z',
-    lastLoginAt: null,
-    baselineStats: {
-      totalInterventions: 0,
-      primaryOperatorCount: 0,
-      primaryAssistantCount: 0,
-    },
-    achievementBadges: [],
-    badgeMetrics: {
-      primarySalpingectomyCount: 0,
-      primaryColpocleisisCount: 0,
-    },
-  },
-  {
-    id: 'int-3',
-    firstName: 'Interne3',
-    lastName: '',
-    loginId: 'Interne3',
-    password: 'Interne3',
-    promotion: 'Promo 2020',
-    semester: 'S12',
-    currentRotation: 'Chirurgie',
-    createdAt: '2026-05-29T08:10:00.000Z',
     lastLoginAt: null,
     baselineStats: {
       totalInterventions: 0,
@@ -125,6 +107,7 @@ export const indicationOptions: ChoiceOption<Indication>[] = [
 
 export const approachOptions: ChoiceOption<SurgicalApproach>[] = [
   { value: 'coelioscopie', label: 'Cœlioscopie' },
+  { value: 'hysteroscopie', label: 'Hystéroscopie' },
   { value: 'laparotomie', label: 'Laparotomie' },
   { value: 'robot', label: 'Robot' },
   { value: 'vnotes', label: 'vNotes' },
@@ -281,8 +264,16 @@ const commonChecklistStepLabels = [
 export const salpingectomyChecklistSteps: ChecklistStep[] = [
   { id: 'step-1', label: commonChecklistStepLabels[0] },
   { id: 'step-2', label: commonChecklistStepLabels[1] },
-  { id: 'step-3', label: 'Voie d’abord du pneumopéritoine' },
-  { id: 'step-4', label: 'Mise en place des trocarts' },
+  {
+    id: 'step-3',
+    label: 'Voie d’abord du pneumopéritoine',
+    applicableApproaches: ['coelioscopie', 'robot', 'vnotes'],
+  },
+  {
+    id: 'step-4',
+    label: 'Mise en place des trocarts',
+    applicableApproaches: ['coelioscopie', 'robot'],
+  },
   { id: 'step-5', label: 'Exploration abdomino-pelvienne initiale' },
   { id: 'step-7', label: 'Exposition des annexes' },
   { id: 'step-8', label: 'Aspiration / lavage si nécessaire' },
@@ -294,9 +285,17 @@ export const salpingectomyChecklistSteps: ChecklistStep[] = [
     id: 'step-10',
     label: 'Section de la trompe au niveau de la corne utérine',
   },
-  { id: 'step-11', label: 'Mise en sac et extraction de la pièce opératoire' },
+  {
+    id: 'step-11',
+    label: 'Mise en sac et extraction de la pièce opératoire',
+    applicableApproaches: ['coelioscopie', 'robot'],
+  },
   { id: 'step-12', label: 'Contrôle de l’hémostase' },
-  { id: 'step-13', label: 'Exsufflation et retrait des trocarts' },
+  {
+    id: 'step-13',
+    label: 'Exsufflation et retrait des trocarts',
+    applicableApproaches: ['coelioscopie', 'robot'],
+  },
   { id: 'step-14', label: 'Fermeture de la voie d’abord' },
   { id: 'step-15', label: 'Fermeture cutanée' },
 ];
@@ -392,7 +391,14 @@ export function getChecklistStepsForIntervention(
   );
 
   if (customIntervention) {
-    return customIntervention.checklistSteps;
+    return customIntervention.checklistSteps.filter((step) => {
+      const applicableApproaches = step.applicableApproaches ?? [];
+
+      return (
+        applicableApproaches.length === 0 ||
+        (approach != null && applicableApproaches.includes(approach))
+      );
+    });
   }
 
   if (
@@ -401,8 +407,15 @@ export function getChecklistStepsForIntervention(
   ) {
     return salpingectomyChecklistSteps.filter((step) => {
       if (
-        (step.id === 'step-3' || step.id === 'step-13') &&
+        step.id === 'step-3' &&
         !['coelioscopie', 'robot', 'vnotes'].includes(approach ?? '')
+      ) {
+        return false;
+      }
+
+      if (
+        ['step-4', 'step-11', 'step-13'].includes(step.id) &&
+        !['coelioscopie', 'robot'].includes(approach ?? '')
       ) {
         return false;
       }
@@ -435,25 +448,94 @@ function createChecklistState(
   }, {});
 }
 
+const salpingectomyKeyStepIds = ['step-9', 'step-10', 'step-12'] as const;
+const colpoclesisKeyStepIds = [
+  'colpo-step-3',
+  'colpo-step-4',
+  'colpo-step-5',
+] as const;
+
+type SeedChecklistLevels = [ChecklistLevel, ChecklistLevel, ChecklistLevel];
+type Interne2SeedCaseBase = {
+  id: string;
+  date: string;
+  savedAt: string;
+  seniorId: string;
+  supportLevel: ChecklistLevel;
+  keyStepLevels: SeedChecklistLevels;
+  globalPerformance: AdminPerformanceRating;
+  categoryDifficulty: AdminCategoryDifficultyRating;
+  complexity: Complexity;
+  role: GlobalRole;
+};
+type Interne2SalpingectomySeedCase = Interne2SeedCaseBase & {
+  indication: Indication;
+  laterality: Laterality;
+};
+type Interne2ColpoclesisSeedCase = Interne2SeedCaseBase;
+
+function createSeedChecklistState(
+  steps: ChecklistStep[],
+  defaultLevel: ChecklistLevel,
+  keyStepIds: readonly string[],
+  keyStepLevels: readonly ChecklistLevel[]
+): Record<string, ChecklistLevel | null> {
+  const checklist = createChecklistState(steps, defaultLevel);
+
+  keyStepIds.forEach((stepId, index) => {
+    if (Object.prototype.hasOwnProperty.call(checklist, stepId)) {
+      checklist[stepId] = keyStepLevels[index] ?? defaultLevel;
+    }
+  });
+
+  return checklist;
+}
+
+function getKeyStepAverageFromLevels(levels: readonly ChecklistLevel[]) {
+  const numericScores = levels
+    .filter((level): level is '0' | '1' | '2' | '3' | '4' =>
+      ['0', '1', '2', '3', '4'].includes(level)
+    )
+    .map((level) => Number(level));
+
+  if (numericScores.length === 0) {
+    return null;
+  }
+
+  return numericScores.reduce((total, score) => total + score, 0) /
+    numericScores.length;
+}
+
+function getSeedAutonomyScore(
+  keyStepLevels: readonly ChecklistLevel[],
+  globalPerformance: AdminPerformanceRating,
+  categoryDifficulty: AdminCategoryDifficultyRating
+) {
+  const keyStepAverage = getKeyStepAverageFromLevels(keyStepLevels);
+
+  return keyStepAverage == null
+    ? null
+    : calculateAutonomyScoreFromComponents(
+        keyStepAverage,
+        globalPerformance,
+        categoryDifficulty
+      );
+}
+
 function createSavedSalpingectomyIntervention({
   id,
-  internalId,
   date,
   savedAt,
   indication,
   seniorId,
   laterality,
-  level,
-}: {
-  id: string;
-  internalId: string;
-  date: string;
-  savedAt: string;
-  indication: Indication;
-  seniorId: string;
-  laterality: Laterality;
-  level: ChecklistLevel;
-}): SavedIntervention {
+  supportLevel,
+  keyStepLevels,
+  globalPerformance,
+  categoryDifficulty,
+  complexity,
+  role,
+}: Interne2SalpingectomySeedCase): SavedIntervention {
   const approach: SurgicalApproach = 'coelioscopie';
   const entryTechnique: EntryTechnique = 'open';
   const checklistSteps = getChecklistStepsForIntervention(
@@ -467,7 +549,7 @@ function createSavedSalpingectomyIntervention({
     id,
     savedAt,
     date,
-    internalId,
+    internalId: 'int-2',
     seniorId,
     procedure: 'salpingectomie',
     indication,
@@ -477,33 +559,39 @@ function createSavedSalpingectomyIntervention({
     entryTechnique,
     laterality,
     context: getFixedContextForIntervention('salpingectomie', indication),
-    complexity: defaultComplexityRating,
-    role: 'operateur_principal',
-    checklist: createChecklistState(checklistSteps, level),
-    autonomyScore: null,
+    complexity,
+    role,
+    checklist: createSeedChecklistState(
+      checklistSteps,
+      supportLevel,
+      salpingectomyKeyStepIds,
+      keyStepLevels
+    ),
+    autonomyScore: getSeedAutonomyScore(
+      keyStepLevels,
+      globalPerformance,
+      categoryDifficulty
+    ),
   };
 }
 
 function createSavedColpoclesisIntervention({
   id,
-  internalId,
   date,
   savedAt,
   seniorId,
-  level,
-}: {
-  id: string;
-  internalId: string;
-  date: string;
-  savedAt: string;
-  seniorId: string;
-  level: ChecklistLevel;
-}): SavedIntervention {
+  supportLevel,
+  keyStepLevels,
+  globalPerformance,
+  categoryDifficulty,
+  complexity,
+  role,
+}: Interne2ColpoclesisSeedCase): SavedIntervention {
   return {
     id,
     savedAt,
     date,
-    internalId,
+    internalId: 'int-2',
     seniorId,
     procedure: 'colpoclesis',
     indication: null,
@@ -513,124 +601,343 @@ function createSavedColpoclesisIntervention({
     entryTechnique: null,
     laterality: null,
     context: getFixedContextForIntervention('colpoclesis', null),
-    complexity: defaultComplexityRating,
-    role: 'operateur_principal',
-    checklist: createChecklistState(colpoclesisChecklistSteps, level),
-    autonomyScore: null,
+    complexity,
+    role,
+    checklist: createSeedChecklistState(
+      colpoclesisChecklistSteps,
+      supportLevel,
+      colpoclesisKeyStepIds,
+      keyStepLevels
+    ),
+    autonomyScore: getSeedAutonomyScore(
+      keyStepLevels,
+      globalPerformance,
+      categoryDifficulty
+    ),
   };
 }
 
 const interne2SalpingectomyDates = [
-  '2026-02-02',
-  '2026-02-12',
-  '2026-02-21',
-  '2026-03-01',
+  '2025-11-05',
+  '2025-11-12',
+  '2025-11-20',
+  '2025-11-27',
+  '2025-12-03',
+  '2025-12-10',
+  '2025-12-18',
+  '2026-01-06',
+  '2026-01-13',
+  '2026-01-21',
+  '2026-01-29',
+  '2026-02-04',
+  '2026-02-10',
+  '2026-02-18',
+  '2026-02-24',
+  '2026-03-03',
   '2026-03-10',
-  '2026-03-19',
-  '2026-03-28',
+  '2026-03-18',
+  '2026-03-25',
+  '2026-04-01',
   '2026-04-08',
-  '2026-04-19',
-  '2026-05-04',
+  '2026-04-15',
+  '2026-04-22',
+  '2026-04-29',
+  '2026-05-05',
+  '2026-05-08',
+  '2026-05-12',
+  '2026-05-15',
+  '2026-05-19',
+  '2026-05-22',
+  '2026-05-26',
+  '2026-05-29',
+  '2026-06-02',
+  '2026-06-03',
+  '2026-06-04',
+  '2026-06-05',
+  '2026-06-08',
+  '2026-06-09',
+  '2026-06-10',
+  '2026-06-11',
+];
+
+function getInterne2SalpingectomyKeyLevels(
+  index: number
+): SeedChecklistLevels {
+  if (index < 4) {
+    const levels: SeedChecklistLevels[] = [
+      ['1', '1', '1'],
+      ['1', '1', '2'],
+      ['1', '2', '2'],
+      ['2', '2', '1'],
+    ];
+
+    return levels[index];
+  }
+
+  if (index < 10) {
+    const levels: SeedChecklistLevels[] = [
+      ['2', '2', '2'],
+      ['2', '2', '2'],
+      ['2', '2', '3'],
+      ['2', '3', '2'],
+      ['3', '2', '2'],
+      ['2', '3', '3'],
+    ];
+
+    return levels[index - 4];
+  }
+
+  if (index < 18) {
+    const levels: SeedChecklistLevels[] = [
+      ['3', '2', '3'],
+      ['3', '3', '2'],
+      ['3', '3', '3'],
+      ['2', '3', '3'],
+      ['3', '3', '3'],
+      ['3', '3', '4'],
+      ['3', '4', '3'],
+      ['3', '3', '4'],
+    ];
+
+    return levels[index - 10];
+  }
+
+  if (index < 28) {
+    const levels: SeedChecklistLevels[] = [
+      ['3', '3', '3'],
+      ['3', '4', '3'],
+      ['4', '3', '3'],
+      ['3', '4', '4'],
+      ['4', '3', '4'],
+      ['4', '4', '3'],
+      ['3', '4', '4'],
+      ['4', '4', '4'],
+      ['4', '4', '3'],
+      ['4', '4', '4'],
+    ];
+
+    return levels[index - 18];
+  }
+
+  if (index < 36) {
+    const levels: SeedChecklistLevels[] = [
+      ['4', '4', '4'],
+      ['4', '4', '3'],
+      ['4', '4', '4'],
+      ['4', '3', '4'],
+      ['4', '4', '4'],
+      ['4', '4', '4'],
+      ['4', '4', '3'],
+      ['4', '4', '4'],
+    ];
+
+    return levels[index - 28];
+  }
+
+  return ['4', '4', '4'];
+}
+
+function getInterne2SalpingectomyPerformance(
+  index: number
+): AdminPerformanceRating {
+  if (index < 6) {
+    return '2';
+  }
+
+  if (index < 18) {
+    return '3';
+  }
+
+  if (index < 37) {
+    return '4';
+  }
+
+  return '5';
+}
+
+function getInterne2SalpingectomySupportLevel(index: number): ChecklistLevel {
+  if (index < 4) {
+    return '1';
+  }
+
+  if (index < 14) {
+    return '2';
+  }
+
+  if (index < 34) {
+    return '3';
+  }
+
+  return '4';
+}
+
+function getInterne2SalpingectomyComplexity(index: number): Complexity {
+  if (index < 8) {
+    return index % 5 === 0 ? 9 : 8;
+  }
+
+  if (index < 18) {
+    return index % 6 === 0 ? 8 : 7;
+  }
+
+  if (index < 30) {
+    return index % 7 === 0 ? 7 : 6;
+  }
+
+  return index % 8 === 0 ? 6 : 5;
+}
+
+function getInterne2CategoryDifficulty(
+  index: number
+): AdminCategoryDifficultyRating {
+  if (index % 11 === 0 || index % 17 === 0) {
+    return '3';
+  }
+
+  if (index % 7 === 0) {
+    return '1';
+  }
+
+  return '2';
+}
+
+const interne2SalpingectomySeedCases: Interne2SalpingectomySeedCase[] =
+  interne2SalpingectomyDates.map((date, index) => {
+    const ligatureIndexes = new Set([4, 11, 18, 25, 32, 38]);
+    const indication: Indication = ligatureIndexes.has(index)
+      ? 'ligature_tubaire'
+      : 'geu';
+
+    return {
+      id: `seed-int2-salp-${String(index + 1).padStart(2, '0')}`,
+      date,
+      savedAt: `${date}T18:${String(10 + (index % 40)).padStart(2, '0')}:00.000Z`,
+      seniorId: index % 2 === 0 ? 'sen-1' : 'sen-2',
+      indication,
+      laterality:
+        indication === 'ligature_tubaire'
+          ? 'bilateral'
+          : index % 2 === 0
+            ? 'gauche'
+            : 'droite',
+      supportLevel: getInterne2SalpingectomySupportLevel(index),
+      keyStepLevels: getInterne2SalpingectomyKeyLevels(index),
+      globalPerformance: getInterne2SalpingectomyPerformance(index),
+      categoryDifficulty: getInterne2CategoryDifficulty(index),
+      complexity: getInterne2SalpingectomyComplexity(index),
+      role: index < 3 ? 'aide_principal' : 'operateur_principal',
+    };
+  });
+
+const interne2ColpoclesisSeedCases: Interne2ColpoclesisSeedCase[] = [
+  {
+    id: 'seed-int2-colpo-01',
+    date: '2026-01-30',
+    savedAt: '2026-01-30T18:45:00.000Z',
+    seniorId: 'sen-2',
+    supportLevel: '1',
+    keyStepLevels: ['1', '1', '2'],
+    globalPerformance: '2',
+    categoryDifficulty: '2',
+    complexity: 7,
+    role: 'aide_principal',
+  },
+  {
+    id: 'seed-int2-colpo-02',
+    date: '2026-03-06',
+    savedAt: '2026-03-06T18:35:00.000Z',
+    seniorId: 'sen-1',
+    supportLevel: '2',
+    keyStepLevels: ['2', '2', '2'],
+    globalPerformance: '3',
+    categoryDifficulty: '2',
+    complexity: 6,
+    role: 'operateur_principal',
+  },
+  {
+    id: 'seed-int2-colpo-03',
+    date: '2026-04-17',
+    savedAt: '2026-04-17T18:50:00.000Z',
+    seniorId: 'sen-2',
+    supportLevel: '2',
+    keyStepLevels: ['1', '2', '2'],
+    globalPerformance: '2',
+    categoryDifficulty: '3',
+    complexity: 8,
+    role: 'operateur_principal',
+  },
+  {
+    id: 'seed-int2-colpo-04',
+    date: '2026-05-21',
+    savedAt: '2026-05-21T18:40:00.000Z',
+    seniorId: 'sen-1',
+    supportLevel: '2',
+    keyStepLevels: ['2', '3', '2'],
+    globalPerformance: '3',
+    categoryDifficulty: '2',
+    complexity: 7,
+    role: 'operateur_principal',
+  },
+  {
+    id: 'seed-int2-colpo-05',
+    date: '2026-06-05',
+    savedAt: '2026-06-05T18:55:00.000Z',
+    seniorId: 'sen-2',
+    supportLevel: '3',
+    keyStepLevels: ['2', '3', '3'],
+    globalPerformance: '3',
+    categoryDifficulty: '3',
+    complexity: 7,
+    role: 'operateur_principal',
+  },
 ];
 
 const interne2SavedInterventions = [
-  ...interne2SalpingectomyDates.map((date, index) =>
-    createSavedSalpingectomyIntervention({
-      id: `seed-int2-salp-${index + 1}`,
-      internalId: 'int-2',
-      date,
-      savedAt: `${date}T18:00:00.000Z`,
-      indication: index < 6 ? 'geu' : 'ligature_tubaire',
-      seniorId: index % 2 === 0 ? 'sen-1' : 'sen-2',
-      laterality:
-        index < 6
-          ? index % 2 === 0
-            ? 'gauche'
-            : 'droite'
-          : 'bilateral',
-      level: '3',
-    })
-  ),
-  createSavedColpoclesisIntervention({
-    id: 'seed-int2-colpo-1',
-    internalId: 'int-2',
-    date: '2026-05-16',
-    savedAt: '2026-05-16T18:00:00.000Z',
-    seniorId: 'sen-1',
-    level: '3',
-  }),
+  ...interne2SalpingectomySeedCases.map(createSavedSalpingectomyIntervention),
+  ...interne2ColpoclesisSeedCases.map(createSavedColpoclesisIntervention),
 ];
 
-const interne3SalpingectomyDates = [
-  '2025-06-10',
-  '2025-06-22',
-  '2025-07-03',
-  '2025-07-15',
-  '2025-07-29',
-  '2025-08-11',
-  '2025-08-24',
-  '2025-09-05',
-  '2025-09-18',
-  '2025-10-02',
-  '2025-10-16',
-  '2025-10-30',
-  '2025-11-13',
-  '2025-11-27',
-  '2025-12-10',
-  '2026-01-08',
-  '2026-01-22',
-  '2026-02-05',
-  '2026-02-18',
-  '2026-03-03',
-];
+export function isSeededDemoInterventionId(interventionId: string) {
+  return (
+    interventionId.startsWith('seed-int2-') ||
+    interventionId.startsWith('seed-int3-')
+  );
+}
 
-const interne3ColpoclesisDates = [
-  '2025-05-28',
-  '2025-06-21',
-  '2025-07-17',
-  '2025-08-07',
-  '2025-08-28',
-  '2025-09-18',
-  '2025-10-09',
-  '2025-10-30',
-  '2025-12-04',
-  '2026-02-06',
-];
+export const seededSavedInterventions: SavedIntervention[] =
+  interne2SavedInterventions.sort((left, right) =>
+    right.savedAt.localeCompare(left.savedAt)
+  );
 
-const interne3SavedInterventions = [
-  ...interne3SalpingectomyDates.map((date, index) =>
-    createSavedSalpingectomyIntervention({
-      id: `seed-int3-salp-${index + 1}`,
-      internalId: 'int-3',
-      date,
-      savedAt: `${date}T18:00:00.000Z`,
-      indication: index < 12 ? 'geu' : 'ligature_tubaire',
-      seniorId: index % 2 === 0 ? 'sen-1' : 'sen-2',
-      laterality:
-        index < 12
-          ? index % 2 === 0
-            ? 'gauche'
-            : 'droite'
-          : 'bilateral',
-      level: index === 0 ? '4' : '3',
-    })
-  ),
-  ...interne3ColpoclesisDates.map((date, index) =>
-    createSavedColpoclesisIntervention({
-      id: `seed-int3-colpo-${index + 1}`,
-      internalId: 'int-3',
-      date,
-      savedAt: `${date}T18:00:00.000Z`,
-      seniorId: index % 2 === 0 ? 'sen-1' : 'sen-2',
-      level: index === 0 ? '4' : '3',
-    })
-  ),
-];
+export const seededAdminInterventionEvaluations: Record<
+  string,
+  AdminInterventionEvaluation
+> = [
+  ...interne2SalpingectomySeedCases,
+  ...interne2ColpoclesisSeedCases,
+].reduce<Record<string, AdminInterventionEvaluation>>((accumulator, seedCase) => {
+  accumulator[seedCase.id] = {
+    interventionId: seedCase.id,
+    globalPerformance: seedCase.globalPerformance,
+    categoryDifficulty: seedCase.categoryDifficulty,
+    updatedAt: seedCase.savedAt.replace('T18:', 'T20:'),
+  };
 
-export const seededSavedInterventions: SavedIntervention[] = [
-  ...interne2SavedInterventions,
-  ...interne3SavedInterventions,
-].sort((left, right) => right.savedAt.localeCompare(left.savedAt));
+  return accumulator;
+}, {});
+
+export function hydrateAdminInterventionEvaluations(
+  evaluations: Record<string, AdminInterventionEvaluation> = {}
+) {
+  return {
+    ...Object.fromEntries(
+      Object.entries(evaluations).filter(
+        ([interventionId]) => !isSeededDemoInterventionId(interventionId)
+      )
+    ),
+    ...seededAdminInterventionEvaluations,
+  };
+}
 
 const salpingectomyPrimaryBadgeMilestones = [
   {

@@ -294,7 +294,7 @@ export function downloadInterventionsCsv(
       getValue: (intervention) => getChoiceLabel(roleOptions, intervention.role, ''),
     },
     {
-      header: 'Score autonomie étapes clés',
+      header: 'Score autonomie temps opératoires clés',
       getValue: (_intervention, context) => context.keyStepAutonomyScore,
     },
     {

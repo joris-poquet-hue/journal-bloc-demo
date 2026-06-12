@@ -183,7 +183,7 @@ export function ObstetricPortalScreen() {
           onPress={goToObstetricJournal}
         />
         <PrimaryButton
-          label="Retour au choix des portails"
+          label="Retour au portail chirurgie"
           onPress={goToPortalSelection}
           variant="secondary"
         />
