@@ -13,11 +13,11 @@ import {
   entryTechniqueOptions,
   formatComplexityRating,
   formatDisplayName,
+  formatSeniorDisplayName,
   getChecklistStepsForIntervention,
   getChoiceLabel,
   getInternalById,
   getProgressBadgesForInternal,
-  getSeniorById,
   getSurgicalInterventionDefinition,
   getSurgicalInterventionDefinitions,
   hydrateAdminInterventionEvaluations,
@@ -26,21 +26,31 @@ import {
 } from '../data/mockData';
 import {
   CreateInternalProfileInput,
+  CreateSeniorProfileInput,
   CreateSurgicalInterventionInput,
   EntryTechnique,
   ChecklistLevel,
   AdminCategoryDifficultyRating,
   AdminInterventionEvaluation,
   AdminPerformanceRating,
+  ActivityLogEntry,
   InternalProfile,
   InterventionType,
   SavedIntervention,
+  Senior,
   SurgicalApproach,
   SurgicalInterventionDefinition,
+  TestFeedback,
+  UpdateInternalCredentialsInput,
+  UpdateSeniorCredentialsInput,
 } from '../types';
 import { formatIsoDate } from '../utils/date';
 import { calculateAutonomyScore } from '../utils/autonomyScore';
 import { downloadInterventionsCsv } from '../utils/export';
+import {
+  loadPersistentArray,
+  savePersistentArray,
+} from '../services/persistentStorage';
 
 type AdminView = 'home' | 'badges' | 'profile' | 'profiles' | 'interventions';
 type FeedbackState =
@@ -49,6 +59,20 @@ type FeedbackState =
       message: string;
     }
   | null;
+
+function FeedbackMessage({ feedback }: { feedback: FeedbackState }) {
+  if (!feedback) {
+    return null;
+  }
+
+  return (
+    <p
+      className={feedback.kind === 'success' ? 'auth-success' : 'auth-error'}
+    >
+      {feedback.message}
+    </p>
+  );
+}
 
 type AdminInterventionFilters = {
   internalId: string;
@@ -67,6 +91,23 @@ const EMPTY_CREATE_FORM: CreateInternalProfileInput = {
   currentRotation: '',
 };
 
+const EMPTY_UPDATE_INTERNAL_CREDENTIALS_FORM: UpdateInternalCredentialsInput = {
+  loginId: '',
+  password: '',
+};
+
+const EMPTY_CREATE_SENIOR_FORM: CreateSeniorProfileInput = {
+  firstName: '',
+  lastName: '',
+  loginId: '',
+  password: '',
+};
+
+const EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM: UpdateSeniorCredentialsInput = {
+  loginId: '',
+  password: '',
+};
+
 const EMPTY_INTERVENTION_FILTERS: AdminInterventionFilters = {
   internalId: 'all',
   procedure: 'all',
@@ -76,6 +117,8 @@ const EMPTY_INTERVENTION_FILTERS: AdminInterventionFilters = {
 
 const ADMIN_EVALUATIONS_STORAGE_KEY =
   'journal-bord:admin-intervention-evaluations:v1';
+const TEST_FEEDBACK_STORAGE_KEY = 'journal-bord:test-feedback:v1';
+const ACTIVITY_LOG_STORAGE_KEY = 'journal-bord:activity-log:v1';
 
 const EMPTY_SURGICAL_INTERVENTION_FORM: CreateSurgicalInterventionInput = {
   name: '',
@@ -332,6 +375,38 @@ function loadStoredAdminEvaluations() {
   }
 }
 
+function loadStoredArray<T>(storageKey: string, fallbackValue: T[] = []) {
+  if (typeof window === 'undefined') {
+    return fallbackValue;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(storageKey);
+
+    if (!rawValue) {
+      return fallbackValue;
+    }
+
+    const parsedValue = JSON.parse(rawValue);
+
+    return Array.isArray(parsedValue) ? (parsedValue as T[]) : fallbackValue;
+  } catch {
+    return fallbackValue;
+  }
+}
+
+function evaluationsArrayToRecord(evaluations: AdminInterventionEvaluation[]) {
+  return Object.fromEntries(
+    evaluations.map((evaluation) => [evaluation.interventionId, evaluation])
+  ) as Record<string, AdminInterventionEvaluation>;
+}
+
+function evaluationsRecordToArray(
+  evaluations: Record<string, AdminInterventionEvaluation>
+) {
+  return Object.values(evaluations);
+}
+
 function getInterventionIndicationLabel(intervention: SavedIntervention) {
   if (intervention.customIndication?.trim()) {
     return intervention.customIndication.trim();
@@ -386,18 +461,24 @@ function sortEarnedBadges(profile: InternalProfile, savedInterventions: ReturnTy
 export function AdminScreen() {
   const {
     createInternalProfile,
+    createSeniorProfile,
     createSurgicalIntervention,
+    customSeniors,
     customSurgicalInterventions,
     deleteCustomSurgicalIntervention,
     deleteInternalProfile,
+    deleteSeniorProfile,
     deleteSavedInterventions,
     internalProfiles,
     isAdmin,
     isSenior,
     logout,
     savedInterventions,
+    selectableSeniors,
     selectedSenior,
     surgicalProcedureOptions,
+    updateInternalCredentials,
+    updateSeniorCredentials,
     updateSurgicalIntervention,
     updateSavedInterventionAutonomyScore,
   } = useAppContext();
@@ -406,11 +487,29 @@ export function AdminScreen() {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [createForm, setCreateForm] =
     useState<CreateInternalProfileInput>(EMPTY_CREATE_FORM);
+  const [editingInternalCredentialsProfileId, setEditingInternalCredentialsProfileId] =
+    useState<string | null>(null);
+  const [editInternalCredentialsForm, setEditInternalCredentialsForm] =
+    useState<UpdateInternalCredentialsInput>(
+      EMPTY_UPDATE_INTERNAL_CREDENTIALS_FORM
+    );
+  const [createSeniorForm, setCreateSeniorForm] =
+    useState<CreateSeniorProfileInput>(EMPTY_CREATE_SENIOR_FORM);
+  const [editingSeniorId, setEditingSeniorId] = useState<string | null>(null);
+  const [editSeniorCredentialsForm, setEditSeniorCredentialsForm] =
+    useState<UpdateSeniorCredentialsInput>(
+      EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM
+    );
   const [surgicalInterventionForm, setSurgicalInterventionForm] =
     useState<CreateSurgicalInterventionInput>(EMPTY_SURGICAL_INTERVENTION_FORM);
   const [interventionFilters, setInterventionFilters] =
     useState<AdminInterventionFilters>(EMPTY_INTERVENTION_FILTERS);
   const [feedback, setFeedback] = useState<FeedbackState>(null);
+  const [internalCredentialsFeedback, setInternalCredentialsFeedback] =
+    useState<FeedbackState>(null);
+  const [seniorFeedback, setSeniorFeedback] = useState<FeedbackState>(null);
+  const [seniorAccountFeedback, setSeniorAccountFeedback] =
+    useState<FeedbackState>(null);
   const [surgicalInterventionFeedback, setSurgicalInterventionFeedback] =
     useState<FeedbackState>(null);
   const [profileToDelete, setProfileToDelete] = useState<InternalProfile | null>(null);
@@ -425,8 +524,54 @@ export function AdminScreen() {
     useState<Record<string, AdminInterventionEvaluation>>(
       loadStoredAdminEvaluations
     );
+  const [hasLoadedPersistentAdminEvaluations, setHasLoadedPersistentAdminEvaluations] =
+    useState(false);
+  const [testFeedbackItems, setTestFeedbackItems] = useState<TestFeedback[]>(() =>
+    loadStoredArray<TestFeedback>(TEST_FEEDBACK_STORAGE_KEY)
+  );
+  const [hasLoadedPersistentTestFeedback, setHasLoadedPersistentTestFeedback] =
+    useState(false);
+  const [testFeedbackMessage, setTestFeedbackMessage] = useState('');
+  const [testFeedbackStatus, setTestFeedbackStatus] =
+    useState<FeedbackState>(null);
+  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>(() =>
+    loadStoredArray<ActivityLogEntry>(ACTIVITY_LOG_STORAGE_KEY)
+  );
+  const [hasLoadedPersistentActivityLog, setHasLoadedPersistentActivityLog] =
+    useState(false);
   const [evaluationFeedback, setEvaluationFeedback] =
     useState<FeedbackState>(null);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadPersistentAdminEvaluations() {
+      const persistentEvaluations =
+        await loadPersistentArray<AdminInterventionEvaluation>(
+          'admin_evaluations'
+        );
+
+      if (isCancelled) {
+        return;
+      }
+
+      if (persistentEvaluations) {
+        setAdminEvaluations(
+          hydrateAdminInterventionEvaluations(
+            evaluationsArrayToRecord(persistentEvaluations)
+          )
+        );
+      }
+
+      setHasLoadedPersistentAdminEvaluations(true);
+    }
+
+    void loadPersistentAdminEvaluations();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -437,7 +582,94 @@ export function AdminScreen() {
       ADMIN_EVALUATIONS_STORAGE_KEY,
       JSON.stringify(adminEvaluations)
     );
-  }, [adminEvaluations]);
+
+    if (hasLoadedPersistentAdminEvaluations) {
+      void savePersistentArray(
+        'admin_evaluations',
+        evaluationsRecordToArray(adminEvaluations)
+      );
+    }
+  }, [adminEvaluations, hasLoadedPersistentAdminEvaluations]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadPersistentTestFeedback() {
+      const persistentFeedback =
+        await loadPersistentArray<TestFeedback>('test_feedback');
+
+      if (isCancelled) {
+        return;
+      }
+
+      if (persistentFeedback) {
+        setTestFeedbackItems(persistentFeedback);
+      }
+
+      setHasLoadedPersistentTestFeedback(true);
+    }
+
+    void loadPersistentTestFeedback();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(
+      TEST_FEEDBACK_STORAGE_KEY,
+      JSON.stringify(testFeedbackItems)
+    );
+
+    if (hasLoadedPersistentTestFeedback) {
+      void savePersistentArray('test_feedback', testFeedbackItems);
+    }
+  }, [testFeedbackItems, hasLoadedPersistentTestFeedback]);
+
+  useEffect(() => {
+    let isCancelled = false;
+
+    async function loadPersistentActivityLog() {
+      const persistentActivity =
+        await loadPersistentArray<ActivityLogEntry>('activity_log');
+
+      if (isCancelled) {
+        return;
+      }
+
+      if (persistentActivity) {
+        setActivityLog(persistentActivity);
+      }
+
+      setHasLoadedPersistentActivityLog(true);
+    }
+
+    void loadPersistentActivityLog();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(
+      ACTIVITY_LOG_STORAGE_KEY,
+      JSON.stringify(activityLog)
+    );
+
+    if (hasLoadedPersistentActivityLog) {
+      void savePersistentArray('activity_log', activityLog.slice(0, 150));
+    }
+  }, [activityLog, hasLoadedPersistentActivityLog]);
 
   const sortedInterventions = useMemo(
     () =>
@@ -671,6 +903,74 @@ export function AdminScreen() {
     selectedEvaluationIntervention,
   ]);
 
+  const getCurrentActor = () => {
+    if (isSenior && selectedSenior) {
+      return {
+        role: 'senior' as const,
+        label: formatSeniorDisplayName(selectedSenior),
+      };
+    }
+
+    return {
+      role: 'admin' as const,
+      label: 'Admin',
+    };
+  };
+
+  const addActivityLogEntry = (
+    action: string,
+    targetType: string,
+    targetLabel: string
+  ) => {
+    const actor = getCurrentActor();
+
+    setActivityLog((current) => [
+      {
+        id: `activity-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        actorRole: actor.role,
+        actorLabel: actor.label,
+        action,
+        targetType,
+        targetLabel,
+        createdAt: new Date().toISOString(),
+      },
+      ...current,
+    ].slice(0, 150));
+  };
+
+  const handleSubmitTestFeedback = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const message = testFeedbackMessage.trim();
+
+    if (!message) {
+      setTestFeedbackStatus({
+        kind: 'error',
+        message: 'Ajoute une remarque avant de l’envoyer.',
+      });
+      return;
+    }
+
+    const actor = getCurrentActor();
+
+    setTestFeedbackItems((current) => [
+      {
+        id: `feedback-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        message,
+        authorRole: actor.role,
+        authorLabel: actor.label,
+        createdAt: new Date().toISOString(),
+      },
+      ...current,
+    ]);
+    addActivityLogEntry('Remarque de test envoyée', 'Remarque', message);
+    setTestFeedbackMessage('');
+    setTestFeedbackStatus({
+      kind: 'success',
+      message: 'Remarque enregistrée. Merci, c’est exactement le carburant du pilote.',
+    });
+  };
+
   const toggleSelection = (interventionId: string) => {
     setSelectedIds((current) =>
       current.includes(interventionId)
@@ -749,6 +1049,37 @@ export function AdminScreen() {
       [field]: value,
     }));
     setFeedback(null);
+  };
+
+  const handleCreateSeniorFieldChange = (
+    field: keyof CreateSeniorProfileInput,
+    value: string
+  ) => {
+    setCreateSeniorForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+    setSeniorFeedback(null);
+  };
+
+  const startSeniorCredentialsEdition = (senior: Senior) => {
+    setEditingSeniorId(senior.id);
+    setEditSeniorCredentialsForm({
+      loginId: senior.loginId ?? '',
+      password: senior.password ?? '',
+    });
+    setSeniorAccountFeedback(null);
+  };
+
+  const handleEditSeniorCredentialsFieldChange = (
+    field: keyof UpdateSeniorCredentialsInput,
+    value: string
+  ) => {
+    setEditSeniorCredentialsForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+    setSeniorAccountFeedback(null);
   };
 
   const toggleSurgicalApproach = (approach: SurgicalApproach) => {
@@ -1021,6 +1352,73 @@ export function AdminScreen() {
     setCreateForm(EMPTY_CREATE_FORM);
   };
 
+  const handleCreateSeniorProfile = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSeniorAccountFeedback(null);
+
+    const result = createSeniorProfile(createSeniorForm);
+
+    setSeniorFeedback({
+      kind: result.success ? 'success' : 'error',
+      message: result.success && result.senior
+        ? `${result.message} Identifiant : ${result.senior.loginId} · Mot de passe : ${result.senior.password}`
+        : result.message,
+    });
+
+    if (!result.success) {
+      return;
+    }
+
+    setCreateSeniorForm(EMPTY_CREATE_SENIOR_FORM);
+  };
+
+  const handleUpdateSeniorCredentials = (
+    event: FormEvent<HTMLFormElement>,
+    seniorId: string
+  ) => {
+    event.preventDefault();
+    setSeniorFeedback(null);
+
+    const result = updateSeniorCredentials(
+      seniorId,
+      editSeniorCredentialsForm
+    );
+
+    setSeniorAccountFeedback({
+      kind: result.success ? 'success' : 'error',
+      message: result.success && result.senior
+        ? `${result.message} Identifiant : ${result.senior.loginId} · Mot de passe : ${result.senior.password}`
+        : result.message,
+    });
+
+    if (!result.success) {
+      return;
+    }
+
+    setEditingSeniorId(null);
+    setEditSeniorCredentialsForm(EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM);
+  };
+
+  const handleDeleteSeniorProfile = (senior: Senior) => {
+    const seniorLabel = formatSeniorDisplayName(senior);
+    const confirmed = window.confirm(
+      `Supprimer le compte senior ${seniorLabel} ?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    deleteSeniorProfile(senior.id);
+    setEditingSeniorId((current) => (current === senior.id ? null : current));
+    setEditSeniorCredentialsForm(EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM);
+    setSeniorFeedback(null);
+    setSeniorAccountFeedback({
+      kind: 'success',
+      message: `Le compte senior ${seniorLabel} a été supprimé.`,
+    });
+  };
+
   const handleCreateSurgicalIntervention = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -1070,7 +1468,8 @@ export function AdminScreen() {
       selectedInterventions,
       internalProfiles,
       customSurgicalInterventions,
-      adminEvaluations
+      adminEvaluations,
+      selectableSeniors
     );
   };
 
@@ -1079,7 +1478,8 @@ export function AdminScreen() {
       selectedProfileInterventions,
       internalProfiles,
       customSurgicalInterventions,
-      adminEvaluations
+      adminEvaluations,
+      selectableSeniors
     );
   };
 
@@ -1365,10 +1765,15 @@ export function AdminScreen() {
     );
   }
 
-  if (isAdmin && view === 'profile' && selectedProfile && selectedProfileStats) {
+  if (
+    (isAdmin || isSenior) &&
+    view === 'profile' &&
+    selectedProfile &&
+    selectedProfileStats
+  ) {
     return (
       <ScreenContainer
-        eyebrow="Administration"
+        eyebrow={isSenior ? 'Senior' : 'Administration'}
         title={formatDisplayName(selectedProfile.firstName, selectedProfile.lastName)}
         subtitle={`${selectedProfile.promotion} · ${selectedProfile.semester} · ${selectedProfile.currentRotation}`}
         frameWidth="wide"
@@ -1401,7 +1806,7 @@ export function AdminScreen() {
         <SectionCard title="Vue d’ensemble">
           <div className="info-grid">
             <div className="info-block">
-              <span className="info-block__label">Badges acquis</span>
+              <span className="info-block__label">Trophées acquis</span>
               <strong className="info-block__value">
                 {selectedProfileStats.earnedBadgesCount}
               </strong>
@@ -1433,7 +1838,9 @@ export function AdminScreen() {
           {selectedProfileInterventions.length ? (
             <div className="admin-list admin-list--scroll">
               {selectedProfileInterventions.map((intervention) => {
-                const senior = getSeniorById(intervention.seniorId);
+                const senior =
+                  selectableSeniors.find((item) => item.id === intervention.seniorId) ??
+                  null;
                 const evaluation = adminEvaluations[intervention.id];
 
                 return (
@@ -1456,7 +1863,7 @@ export function AdminScreen() {
                     <span>
                       Senior :{' '}
                       {senior
-                        ? `${senior.firstName} ${senior.lastName}`
+                        ? formatSeniorDisplayName(senior)
                         : 'Non renseigné'}
                     </span>
                     <span>
@@ -1482,8 +1889,8 @@ export function AdminScreen() {
         </SectionCard>
 
         <SectionCard
-          title="Badges acquis"
-          description={`${selectedProfileEarnedBadges.length} badge(s) obtenu(s).`}
+          title="Trophées acquis"
+          description={`${selectedProfileEarnedBadges.length} trophée(s) obtenu(s).`}
         >
           {selectedProfileEarnedBadges.length ? (
             <div className="badge-grid">
@@ -1493,8 +1900,8 @@ export function AdminScreen() {
             </div>
           ) : (
             <div className="validation-box">
-              <strong>Aucun badge acquis pour l’instant</strong>
-              <span>Les futurs badges obtenus par cet interne apparaîtront ici.</span>
+              <strong>Aucun trophée acquis pour l’instant</strong>
+              <span>Les futurs trophées obtenus par cet interne apparaîtront ici.</span>
             </div>
           )}
         </SectionCard>
@@ -1513,12 +1920,12 @@ export function AdminScreen() {
     );
   }
 
-  if (isAdmin && view === 'profiles') {
+  if ((isAdmin || isSenior) && view === 'profiles') {
     return (
       <ScreenContainer
-        eyebrow="Administration"
+        eyebrow={isSenior ? 'Senior' : 'Administration'}
         title="Administration profil"
-        subtitle="Création et consultation des profils internes."
+        subtitle="Création et consultation des profils internes et comptes seniors."
         frameWidth="wide"
       >
         <SectionCard
@@ -1645,6 +2052,179 @@ export function AdminScreen() {
           </form>
         </SectionCard>
 
+        {isAdmin ? (
+          <SectionCard title="Créer un compte senior">
+            <form className="admin-create-form" onSubmit={handleCreateSeniorProfile}>
+              <div className="admin-create-form__grid">
+                <label className="field-stack">
+                  <span className="field-stack__label">Prénom</span>
+                  <input
+                    className="field-input"
+                    onChange={(event) =>
+                      handleCreateSeniorFieldChange('firstName', event.target.value)
+                    }
+                    type="text"
+                    value={createSeniorForm.firstName}
+                  />
+                </label>
+
+                <label className="field-stack">
+                  <span className="field-stack__label">Nom</span>
+                  <input
+                    className="field-input"
+                    onChange={(event) =>
+                      handleCreateSeniorFieldChange('lastName', event.target.value)
+                    }
+                    type="text"
+                    value={createSeniorForm.lastName}
+                  />
+                </label>
+
+                <label className="field-stack">
+                  <span className="field-stack__label">Identifiant</span>
+                  <input
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    className="field-input"
+                    onChange={(event) =>
+                      handleCreateSeniorFieldChange('loginId', event.target.value)
+                    }
+                    type="text"
+                    value={createSeniorForm.loginId}
+                  />
+                </label>
+
+                <label className="field-stack">
+                  <span className="field-stack__label">Mot de passe</span>
+                  <input
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    className="field-input"
+                    onChange={(event) =>
+                      handleCreateSeniorFieldChange('password', event.target.value)
+                    }
+                    type="text"
+                    value={createSeniorForm.password}
+                  />
+                </label>
+              </div>
+
+              <FeedbackMessage feedback={seniorFeedback} />
+
+              <button className="app-button app-button--primary" type="submit">
+                Créer le compte senior
+              </button>
+            </form>
+          </SectionCard>
+        ) : null}
+
+        {isAdmin && customSeniors.length ? (
+          <SectionCard title="Comptes seniors créés">
+            <FeedbackMessage feedback={seniorAccountFeedback} />
+
+            <div className="admin-profile-list">
+              {customSeniors.map((senior) => (
+                <article
+                  key={senior.id}
+                  className="profile-card profile-card--static"
+                >
+                  <div className="profile-card__header">
+                    <strong className="profile-card__name-tag">
+                      {formatSeniorDisplayName(senior)}
+                    </strong>
+                  </div>
+                  <div className="profile-card__meta">
+                    <span>Identifiant : {senior.loginId}</span>
+                    <span>Mot de passe : {senior.password}</span>
+                  </div>
+                  {editingSeniorId === senior.id ? (
+                    <form
+                      className="admin-create-form"
+                      onSubmit={(event) =>
+                        handleUpdateSeniorCredentials(event, senior.id)
+                      }
+                    >
+                      <div className="admin-create-form__grid">
+                        <label className="field-stack">
+                          <span className="field-stack__label">Identifiant</span>
+                          <input
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            className="field-input"
+                            onChange={(event) =>
+                              handleEditSeniorCredentialsFieldChange(
+                                'loginId',
+                                event.target.value
+                              )
+                            }
+                            type="text"
+                            value={editSeniorCredentialsForm.loginId}
+                          />
+                        </label>
+
+                        <label className="field-stack">
+                          <span className="field-stack__label">Mot de passe</span>
+                          <input
+                            autoCapitalize="none"
+                            autoCorrect="off"
+                            className="field-input"
+                            onChange={(event) =>
+                              handleEditSeniorCredentialsFieldChange(
+                                'password',
+                                event.target.value
+                              )
+                            }
+                            type="text"
+                            value={editSeniorCredentialsForm.password}
+                          />
+                        </label>
+                      </div>
+
+                      <div className="admin-profile-card__actions">
+                        <button
+                          className="mini-button mini-button--secondary"
+                          type="submit"
+                        >
+                          Enregistrer les identifiants
+                        </button>
+                        <button
+                          className="mini-button"
+                          onClick={() => {
+                            setEditingSeniorId(null);
+                            setEditSeniorCredentialsForm(
+                              EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM
+                            );
+                          }}
+                          type="button"
+                        >
+                          Annuler
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="admin-profile-card__actions">
+                      <button
+                        className="mini-button mini-button--secondary"
+                        onClick={() => startSeniorCredentialsEdition(senior)}
+                        type="button"
+                      >
+                        Modifier identifiant / mot de passe
+                      </button>
+                      <button
+                        className="mini-button mini-button--danger"
+                        onClick={() => handleDeleteSeniorProfile(senior)}
+                        type="button"
+                      >
+                        Supprimer le compte senior
+                      </button>
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          </SectionCard>
+        ) : null}
+
         <SectionCard title="Profils internes">
           <div className="admin-profile-list">
             {profilesForAdminList.map((profile) => (
@@ -1679,13 +2259,15 @@ export function AdminScreen() {
                   >
                     Voir les statistiques
                   </button>
-                  <button
-                    className="mini-button mini-button--danger"
-                    onClick={() => setProfileToDelete(profile)}
-                    type="button"
-                  >
-                    Supprimer le profil
-                  </button>
+                  {isAdmin ? (
+                    <button
+                      className="mini-button mini-button--danger"
+                      onClick={() => setProfileToDelete(profile)}
+                      type="button"
+                    >
+                      Supprimer le profil
+                    </button>
+                  ) : null}
                 </div>
               </article>
             ))}
@@ -1967,17 +2549,7 @@ export function AdminScreen() {
               </div>
             </div>
 
-            {surgicalInterventionFeedback ? (
-              <p
-                className={
-                  surgicalInterventionFeedback.kind === 'success'
-                    ? 'auth-success'
-                    : 'auth-error'
-                }
-              >
-                {surgicalInterventionFeedback.message}
-              </p>
-            ) : null}
+            <FeedbackMessage feedback={surgicalInterventionFeedback} />
 
             <div className="admin-form-actions">
               <button className="app-button app-button--primary" type="submit">
@@ -2073,8 +2645,8 @@ export function AdminScreen() {
     return (
       <ScreenContainer
         eyebrow="Administration"
-        title="Catalogue des badges"
-        subtitle="Vue d’ensemble de tous les badges potentiellement obtenables."
+        title="Catalogue des trophées"
+        subtitle="Vue d’ensemble de tous les trophées potentiellement obtenables."
         frameWidth="wide"
       >
         <SectionCard title="Catalogue">
@@ -2082,10 +2654,10 @@ export function AdminScreen() {
             <table className="admin-badge-table">
               <thead>
                 <tr>
-                  <th>Badge</th>
+                  <th>Trophée</th>
                   <th>Nom</th>
                   <th>Condition d’obtention</th>
-                  <th>Badge à débloquer avant</th>
+                  <th>Trophée à débloquer avant</th>
                   <th>Internes ayant obtenu</th>
                 </tr>
               </thead>
@@ -2138,9 +2710,9 @@ export function AdminScreen() {
             : 'Cet espace centralise la création de profils et la consultation des données.'
         }
       >
-        {isAdmin ? (
+        {isAdmin || isSenior ? (
           <PrimaryButton
-            label="Ouvrir administration profil"
+            label="Administration profil"
             onPress={() => setView('profiles')}
             variant="secondary"
           />
@@ -2152,7 +2724,7 @@ export function AdminScreen() {
         />
         {isAdmin ? (
           <PrimaryButton
-            label="Ouvrir catalogue des badges"
+            label="Ouvrir catalogue des trophées"
             onPress={() => setView('badges')}
             variant="secondary"
           />
@@ -2179,7 +2751,9 @@ export function AdminScreen() {
                 intervention.internalId,
                 internalProfiles
               );
-              const senior = getSeniorById(intervention.seniorId);
+              const senior =
+                selectableSeniors.find((item) => item.id === intervention.seniorId) ??
+                null;
               const evaluation = adminEvaluations[intervention.id];
 
               return (
@@ -2205,7 +2779,7 @@ export function AdminScreen() {
                   <span>
                     Senior :{' '}
                     {senior
-                      ? `${senior.firstName} ${senior.lastName}`
+                      ? formatSeniorDisplayName(senior)
                       : 'Non renseigné'}
                   </span>
                   <span>
@@ -2491,17 +3065,7 @@ export function AdminScreen() {
             </div>
           </div>
 
-          {surgicalInterventionFeedback ? (
-            <p
-              className={
-                surgicalInterventionFeedback.kind === 'success'
-                  ? 'auth-success'
-                  : 'auth-error'
-              }
-            >
-              {surgicalInterventionFeedback.message}
-            </p>
-          ) : null}
+          <FeedbackMessage feedback={surgicalInterventionFeedback} />
 
           <div className="admin-form-actions">
             <button className="app-button app-button--primary" type="submit">
@@ -2756,7 +3320,10 @@ export function AdminScreen() {
                         intervention.internalId,
                         internalProfiles
                       );
-                      const senior = getSeniorById(intervention.seniorId);
+                      const senior =
+                        selectableSeniors.find(
+                          (item) => item.id === intervention.seniorId
+                        ) ?? null;
                       const isSelected = selectedSet.has(intervention.id);
                       const evaluation = adminEvaluations[intervention.id];
 
@@ -2793,7 +3360,7 @@ export function AdminScreen() {
                           <span>
                             Senior :{' '}
                             {senior
-                              ? `${senior.firstName} ${senior.lastName}`
+                              ? formatSeniorDisplayName(senior)
                               : 'Non renseigné'}
                           </span>
                           <span>

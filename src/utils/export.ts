@@ -5,12 +5,12 @@ import {
   entryTechniqueOptions,
   formatComplexityRating,
   formatDisplayName,
+  formatSeniorDisplayName,
   getFixedContextForIntervention,
   getChecklistStepsForIntervention,
   getChoiceLabel,
   getInternalById,
   getProcedureOptions,
-  getSeniorById,
   getSurgicalInterventionDefinition,
   indicationOptions,
   lateralityOptions,
@@ -20,6 +20,7 @@ import {
   AdminInterventionEvaluation,
   InternalProfile,
   SavedIntervention,
+  Senior,
   SurgicalInterventionDefinition,
 } from '../types';
 import { calculateAutonomyScore } from './autonomyScore';
@@ -130,7 +131,8 @@ export function downloadInterventionsCsv(
   interventions: SavedIntervention[],
   internalProfiles: InternalProfile[],
   customInterventions: SurgicalInterventionDefinition[] = [],
-  adminEvaluations: Record<string, AdminInterventionEvaluation> = {}
+  adminEvaluations: Record<string, AdminInterventionEvaluation> = {},
+  selectableSeniors: Senior[] = []
 ) {
   if (interventions.length === 0) {
     return;
@@ -327,7 +329,9 @@ export function downloadInterventionsCsv(
 
   const rows = interventions.map((intervention) => {
     const internal = getInternalById(intervention.internalId, internalProfiles);
-    const senior = getSeniorById(intervention.seniorId);
+    const senior =
+      selectableSeniors.find((item) => item.id === intervention.seniorId) ??
+      null;
     const checklistSteps = getChecklistStepsForIntervention(
       intervention.procedure,
       intervention.indication,
@@ -337,7 +341,7 @@ export function downloadInterventionsCsv(
     );
     const context: ExportRowContext = {
       internal,
-      seniorLabel: senior ? `${senior.firstName} ${senior.lastName}` : '',
+      seniorLabel: senior ? formatSeniorDisplayName(senior) : '',
       checklistStepIds: new Set(checklistSteps.map((step) => step.id)),
       keyStepAutonomyScore: getKeyStepAutonomyScore(
         intervention,

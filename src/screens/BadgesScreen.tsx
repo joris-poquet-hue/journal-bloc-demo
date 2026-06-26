@@ -32,9 +32,9 @@ export function BadgesScreen() {
   if (!selectedInternal) {
     return (
       <ScreenContainer
-        eyebrow="Badges"
+        eyebrow="Trophées"
         title="Aucun profil interne"
-        subtitle="Reconnecte-toi pour consulter tes badges."
+        subtitle="Reconnecte-toi pour consulter tes trophées."
       >
         <PrimaryButton label="Retour à l’accueil" onPress={backToWelcome} />
       </ScreenContainer>
@@ -73,11 +73,11 @@ export function BadgesScreen() {
 
   return (
     <ScreenContainer
-      eyebrow="Badges"
-      title="Tous mes badges"
+      eyebrow="Trophées"
+      title="Tous mes trophées"
     >
       {earnedBadges.length ? (
-        <SectionCard title="Badges obtenus">
+        <SectionCard title="Trophées obtenus">
           <div className="badge-grid">
             {earnedBadges.map((badge) => (
               <ProgressBadgeCard key={badge.id} badge={badge} />

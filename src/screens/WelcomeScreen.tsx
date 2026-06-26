@@ -1,211 +1,228 @@
+import { ChevronRight, LockKeyhole, NotebookTabs } from 'lucide-react';
+import { useMemo } from 'react';
+
+import {
+  ApproachIcon,
+  getInterventionApproachLabel,
+} from '../components/ApproachIcon';
 import { useAppContext } from '../context/AppContext';
 import {
   formatDisplayName,
+  formatSeniorDisplayName,
   getChoiceLabel,
-  getProgressBadgesForInternal,
-  indicationOptions,
+  hydrateAdminInterventionEvaluations,
 } from '../data/mockData';
-import { ProgressBadgeCard } from '../components/ProgressBadgeCard';
-import { PrimaryButton } from '../components/PrimaryButton';
-import { ScreenContainer } from '../components/ScreenContainer';
-import { SectionCard } from '../components/SectionCard';
-import { formatIsoDate } from '../utils/date';
+import { AdminInterventionEvaluation } from '../types';
+import { calculateAutonomyScore } from '../utils/autonomyScore';
 
-function getSemesterTone(semester: string) {
-  const semesterNumber = Number(semester.replace('S', ''));
+const ADMIN_EVALUATIONS_STORAGE_KEY =
+  'journal-bord:admin-intervention-evaluations:v1';
 
-  if (semesterNumber >= 1 && semesterNumber <= 2) {
-    return 'blue';
+function getInitials(firstName: string, lastName: string) {
+  return `${firstName.trim().charAt(0)}${lastName.trim().charAt(0)}`.toUpperCase();
+}
+
+function formatDashboardDate(value: string) {
+  const [year, month, day] = value.split('-').map(Number);
+
+  if (!year || !month || !day) {
+    return value;
   }
 
-  if (semesterNumber >= 3 && semesterNumber <= 8) {
-    return 'green';
+  return new Intl.DateTimeFormat('fr-FR', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  })
+    .format(new Date(year, month - 1, day))
+    .replace('.', '');
+}
+
+function loadStoredAdminEvaluations() {
+  if (typeof window === 'undefined') {
+    return hydrateAdminInterventionEvaluations();
   }
 
-  return 'gold';
+  try {
+    const rawValue = window.localStorage.getItem(ADMIN_EVALUATIONS_STORAGE_KEY);
+
+    if (!rawValue) {
+      return hydrateAdminInterventionEvaluations();
+    }
+
+    const parsedValue = JSON.parse(rawValue);
+
+    return parsedValue && typeof parsedValue === 'object'
+      ? hydrateAdminInterventionEvaluations(
+          parsedValue as Record<string, AdminInterventionEvaluation>
+        )
+      : hydrateAdminInterventionEvaluations();
+  } catch {
+    return hydrateAdminInterventionEvaluations();
+  }
 }
 
 export function WelcomeScreen() {
   const {
     selectedInternal,
     savedInterventions,
+    selectableSeniors,
     surgicalProcedureOptions,
-    goToBadges,
-    goToForm,
-    goToPreBlock,
+    customSurgicalInterventions,
+    goToNotebook,
     goToSurgeryHistory,
-    logout,
-  } =
-    useAppContext();
+  } = useAppContext();
+
+  const adminEvaluations = useMemo(loadStoredAdminEvaluations, []);
 
   if (!selectedInternal) {
     return null;
   }
 
-  const semesterTone = getSemesterTone(selectedInternal.semester);
-  const visibleBadges = getProgressBadgesForInternal(
-    selectedInternal,
-    savedInterventions
-  ).filter(
-    (badge) =>
-      !badge.isLocked &&
-      (badge.isEarned || (!(badge.isBinary && !badge.isEarned) && badge.current > 0))
-  );
-  const recentEarnedBadges = visibleBadges
-    .filter((badge) => badge.isEarned)
-    .sort((left, right) => (right.awardedAt ?? '').localeCompare(left.awardedAt ?? ''));
-  const inProgressBadges = visibleBadges
-    .filter((badge) => !badge.isEarned)
-    .sort((left, right) => (right.current / right.target) - (left.current / left.target));
-  const badgePreview = recentEarnedBadges.length
-    ? [
-        ...recentEarnedBadges,
-        ...inProgressBadges,
-      ].slice(0, 3)
-    : [];
   const latestInterventions = savedInterventions
     .filter((intervention) => intervention.internalId === selectedInternal.id)
-    .sort((left, right) => right.savedAt.localeCompare(left.savedAt))
-    .slice(0, 5);
+    .sort((left, right) => right.date.localeCompare(left.date))
+    .slice(0, 3);
+  const fullName = formatDisplayName(
+    selectedInternal.firstName,
+    selectedInternal.lastName
+  );
 
   return (
-    <ScreenContainer
-      eyebrow="Accueil"
-      title="Journal de bord du bloc"
-      subtitle="Journal de bord des internes en gynécologie-obstétrique du CHU de Nantes"
-    >
-      <section className="welcome-hero-card">
-        <div className="welcome-hero-card__copy">
-          <p>
-            Ce journal de bord permet de tracer les interventions réalisées au
-            bloc, d’objectiver la progression opératoire de l’interne et de
-            structurer le suivi de sa formation.
-          </p>
-        </div>
-      </section>
-
-      <div className="section-heading">
-        <span className="section-heading__eyebrow">Session</span>
-        <h2 className="section-heading__title">Profil connecté</h2>
-      </div>
-
-      <article className={`profile-card profile-card--${semesterTone} profile-card--static profile-card--selected`}>
-        <div className="profile-card__header">
-          <strong className={`profile-card__name-tag profile-card__name-tag--${semesterTone}`}>
-            {formatDisplayName(selectedInternal.firstName, selectedInternal.lastName)}
-          </strong>
-          <span className="profile-card__badge">{selectedInternal.semester}</span>
-        </div>
-        <div className="profile-card__meta">
-          <span>{selectedInternal.promotion}</span>
-          <span>{selectedInternal.currentRotation}</span>
-        </div>
-      </article>
-
-      <SectionCard title="Dernières interventions">
-        {latestInterventions.length ? (
-          <div className="intervention-row">
-            {latestInterventions.map((intervention) => {
-              const procedureLabel = getChoiceLabel(
-                surgicalProcedureOptions,
-                intervention.procedure
-              );
-              const indicationLabel =
-                intervention.customIndication?.trim() ||
-                (intervention.indication === 'autre' &&
-                intervention.indicationComment.trim()
-                  ? intervention.indicationComment.trim()
-                  : getChoiceLabel(indicationOptions, intervention.indication, ''));
-
-              return (
-                <article
-                  key={intervention.id}
-                  className="intervention-card intervention-card--compact"
-                >
-                  <span className="intervention-card__date">
-                    {formatIsoDate(intervention.date)}
-                  </span>
-                  <strong className="intervention-card__title">
-                    {procedureLabel}
-                  </strong>
-                  {indicationLabel ? (
-                    <span className="intervention-card__meta">
-                      {indicationLabel}
-                    </span>
-                  ) : null}
-                </article>
-              );
-            })}
+    <main className="screen-shell dashboard-screen">
+      <div className="screen-shell__frame">
+        <section className="dashboard-profile-card" aria-label="Profil connecté">
+          <div className="dashboard-profile-card__copy">
+            <span className="dashboard-profile-card__eyebrow">Profil connecté</span>
+            <h1>{fullName}</h1>
+            <p className="dashboard-profile-card__status">
+              Interne – Semestre {selectedInternal.semester.replace('S', '')}
+            </p>
+            <p className="dashboard-profile-card__rotation">
+              Gynécologue – {selectedInternal.currentRotation}
+            </p>
           </div>
-        ) : (
-          <p className="field-helper">
-            Aucune intervention enregistrée pour le moment
+          <div className="dashboard-profile-card__avatar" aria-hidden="true">
+            {getInitials(selectedInternal.firstName, selectedInternal.lastName)}
+          </div>
+        </section>
+
+        <button className="dashboard-note-link" onClick={goToNotebook} type="button">
+          <span className="dashboard-note-link__icon" aria-hidden="true">
+            <NotebookTabs strokeWidth={2.1} />
+          </span>
+          <span className="dashboard-note-link__copy">
+            <strong>Bloc-notes</strong>
+            <span>Notes personnelles</span>
+          </span>
+          <ChevronRight aria-hidden="true" className="dashboard-note-link__chevron" />
+        </button>
+
+        <section className="dashboard-card">
+          <header className="dashboard-card__header">
+            <h2>Mes derniers trophées</h2>
+          </header>
+          <p className="dashboard-empty">
+            Aucun trophée n’est encore configuré pour le moment
           </p>
-        )}
-        <div className="badge-section-action">
-          <PrimaryButton
-            label="Historique des blocs"
-            onPress={goToSurgeryHistory}
-            variant="secondary"
-          />
-        </div>
-      </SectionCard>
+        </section>
 
-      <SectionCard title="Badges de progression">
-        {badgePreview.length ? (
-          <>
-            <div className="badge-row">
-              {badgePreview.map((badge) => (
-                <ProgressBadgeCard
-                  key={badge.id}
-                  badge={badge}
-                  compact
-                  revealTitleOnHover
-                />
-              ))}
+        <section className="dashboard-card">
+          <header className="dashboard-card__header">
+            <h2>Mes dernières interventions</h2>
+            <button
+              className="dashboard-card__link"
+              onClick={goToSurgeryHistory}
+              type="button"
+            >
+              Voir tout l’historique
+              <ChevronRight aria-hidden="true" />
+            </button>
+          </header>
+          {latestInterventions.length ? (
+            <div className="dashboard-intervention-list">
+              {latestInterventions.map((intervention) => {
+                const evaluation = adminEvaluations[intervention.id];
+                const isValidated = Boolean(
+                  evaluation?.globalPerformance && evaluation.categoryDifficulty
+                );
+                const senior = selectableSeniors.find(
+                  (candidate) => candidate.id === intervention.seniorId
+                );
+                const autonomyScore =
+                  calculateAutonomyScore(
+                    intervention,
+                    customSurgicalInterventions,
+                    evaluation
+                  ) ?? intervention.autonomyScore;
+                const content = (
+                  <>
+                    <ApproachIcon intervention={intervention} />
+                    <span className="dashboard-intervention__date">
+                      {formatDashboardDate(intervention.date)}
+                    </span>
+                    <span className="dashboard-intervention__main">
+                      <strong>
+                        {getChoiceLabel(surgicalProcedureOptions, intervention.procedure)}
+                      </strong>
+                      <span>{getInterventionApproachLabel(intervention)}</span>
+                      <span>
+                        {senior ? formatSeniorDisplayName(senior) : 'Senior non renseigné'}
+                      </span>
+                    </span>
+                    <span className="dashboard-intervention__status">
+                      <span
+                        className={`dashboard-status-pill ${
+                          isValidated
+                            ? 'dashboard-status-pill--valid'
+                            : 'dashboard-status-pill--pending'
+                        }`}
+                      >
+                        {isValidated ? 'Validée' : 'En attente'}
+                      </span>
+                      {isValidated && autonomyScore != null ? (
+                        <span className="dashboard-score-pill">
+                          {Math.round(autonomyScore)}%
+                        </span>
+                      ) : null}
+                    </span>
+                    {isValidated ? (
+                      <ChevronRight
+                        aria-hidden="true"
+                        className="dashboard-intervention__action-icon"
+                      />
+                    ) : (
+                      <LockKeyhole
+                        aria-hidden="true"
+                        className="dashboard-intervention__action-icon"
+                      />
+                    )}
+                  </>
+                );
+
+                return isValidated ? (
+                  <button
+                    className="dashboard-intervention dashboard-intervention--clickable"
+                    key={intervention.id}
+                    onClick={goToSurgeryHistory}
+                    type="button"
+                  >
+                    {content}
+                  </button>
+                ) : (
+                  <article className="dashboard-intervention" key={intervention.id}>
+                    {content}
+                  </article>
+                );
+              })}
             </div>
-            <div className="badge-section-action">
-              <PrimaryButton
-                label="Voir tous mes badges"
-                onPress={goToBadges}
-                variant="secondary"
-              />
-            </div>
-          </>
-        ) : (
-          <p className="field-helper">Aucun badge obtenu pour le moment</p>
-        )}
-      </SectionCard>
-
-      <div className="section-heading">
-        <span className="section-heading__eyebrow">Avant le bloc</span>
-        <h2 className="section-heading__title">Fiches techniques</h2>
+          ) : (
+            <p className="dashboard-empty">
+              Aucune intervention enregistrée pour le moment
+            </p>
+          )}
+        </section>
       </div>
-
-      <section className="welcome-hero-card welcome-hero-card--action">
-        <div className="welcome-hero-card__copy">
-          <p>
-            Consulte des fiches de rappels.
-          </p>
-        </div>
-        <PrimaryButton
-          label="Consulter"
-          onPress={goToPreBlock}
-          variant="secondary"
-        />
-      </section>
-
-      <div className="action-stack">
-        <PrimaryButton
-          label="Continuer vers le journal"
-          onPress={goToForm}
-        />
-        <PrimaryButton
-          label="Se déconnecter"
-          onPress={logout}
-          variant="danger"
-        />
-      </div>
-    </ScreenContainer>
+    </main>
   );
 }

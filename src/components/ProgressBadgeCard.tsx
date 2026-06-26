@@ -1,3 +1,5 @@
+import { LockKeyhole } from 'lucide-react';
+
 import { ProgressBadge } from '../types';
 import { formatIsoDate } from '../utils/date';
 
@@ -37,7 +39,7 @@ export function ProgressBadgeCard({
     .filter(Boolean)
     .join(' ');
   const isSecret = showAsSecret || badge.isLocked;
-  const displayTitle = isSecret ? 'Badge secret' : badge.title;
+  const displayTitle = isSecret ? 'Trophée secret' : badge.title;
   const shouldShowMeta = !revealTitleOnHover;
 
   return (
@@ -57,7 +59,7 @@ export function ProgressBadgeCard({
           aria-hidden="true"
           className="badge-card__placeholder badge-card__placeholder--lock"
         >
-          🔒
+          <LockKeyhole strokeWidth={1.9} />
         </div>
       ) : (
         <div aria-hidden="true" className="badge-card__placeholder">

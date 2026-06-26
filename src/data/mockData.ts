@@ -22,71 +22,63 @@ import {
   SurgeryContext,
   TechniqueGuide,
 } from '../types';
-import { calculateAutonomyScoreFromComponents } from '../utils/autonomyScoreFormula';
 
 export const internalProfiles: InternalProfile[] = [
   {
-    id: 'int-1',
-    firstName: 'Interne1',
-    lastName: '',
-    loginId: 'Interne1',
-    password: 'Interne1',
-    promotion: 'Promo 2025',
-    semester: 'S1',
-    currentRotation: 'Pool obstétrical',
-    createdAt: '2026-05-29T08:00:00.000Z',
+    id: 'int-test',
+    firstName: 'Interne',
+    lastName: 'Test',
+    loginId: 'internet',
+    password: 'internet',
+    promotion: 'Promo 2022',
+    semester: 'S8',
+    currentRotation: 'Stage de chirurgie',
+    createdAt: '2026-06-26T00:00:00.000Z',
     lastLoginAt: null,
-    baselineStats: {
-      totalInterventions: 0,
-      primaryOperatorCount: 0,
-      primaryAssistantCount: 0,
-    },
     achievementBadges: [],
     badgeMetrics: {
       primarySalpingectomyCount: 0,
       primaryColpocleisisCount: 0,
     },
-  },
-  {
-    id: 'int-2',
-    firstName: 'Interne2',
-    lastName: '',
-    loginId: 'Interne2',
-    password: 'Interne2',
-    promotion: 'Promo 2023',
-    semester: 'S5',
-    currentRotation: 'Chirurgie',
-    createdAt: '2026-05-29T08:05:00.000Z',
-    lastLoginAt: null,
     baselineStats: {
       totalInterventions: 0,
       primaryOperatorCount: 0,
       primaryAssistantCount: 0,
-    },
-    achievementBadges: [],
-    badgeMetrics: {
-      primarySalpingectomyCount: 0,
-      primaryColpocleisisCount: 0,
     },
   },
 ];
 
 export const seniors: Senior[] = [
   {
-    id: 'sen-1',
-    firstName: 'Senior1',
-    lastName: '',
-    loginId: 'Senior1',
-    password: 'Senior1',
-  },
-  {
-    id: 'sen-2',
-    firstName: 'Senior2',
-    lastName: '',
-    loginId: 'Senior2',
-    password: 'Senior2',
+    id: 'sen-test',
+    firstName: 'Senior',
+    lastName: 'Test',
+    loginId: 'seniort',
+    password: 'seniort',
+    createdAt: '2026-06-26T00:00:00.000Z',
   },
 ];
+
+export const selectableSeniors: Senior[] = [
+  ...seniors,
+  {
+    id: 'sen-other',
+    firstName: 'Autre',
+    lastName: '',
+  },
+];
+
+export function getSelectableSeniors(customSeniors: Senior[] = []) {
+  return [
+    ...seniors,
+    ...customSeniors,
+    {
+      id: 'sen-other',
+      firstName: 'Autre',
+      lastName: '',
+    },
+  ];
+}
 
 export const procedureOptions: ChoiceOption<InterventionType>[] = [
   {
@@ -157,6 +149,21 @@ export const contextOptions: ChoiceOption<SurgeryContext>[] = [
 
 export function formatDisplayName(firstName: string, lastName: string) {
   return [firstName, lastName].filter((value) => value.trim().length > 0).join(' ');
+}
+
+export function formatSeniorDisplayName(senior: Senior) {
+  if (senior.id === 'sen-other') {
+    return 'Autre';
+  }
+
+  if (senior.isCustom) {
+    const lastName = senior.lastName.trim();
+    const fallbackName = formatDisplayName(senior.firstName, senior.lastName);
+
+    return lastName.length > 0 ? `Dr ${lastName}` : fallbackName;
+  }
+
+  return formatDisplayName(senior.firstName, senior.lastName);
 }
 
 export function getFixedContextForIntervention(
@@ -438,493 +445,428 @@ export function getChecklistStepsForIntervention(
   return [];
 }
 
-function createChecklistState(
-  steps: ChecklistStep[],
-  level: ChecklistLevel
-): Record<string, ChecklistLevel | null> {
-  return steps.reduce<Record<string, ChecklistLevel | null>>((accumulator, step) => {
-    accumulator[step.id] = level;
-    return accumulator;
-  }, {});
-}
-
-const salpingectomyKeyStepIds = ['step-9', 'step-10', 'step-12'] as const;
-const colpoclesisKeyStepIds = [
-  'colpo-step-3',
-  'colpo-step-4',
-  'colpo-step-5',
-] as const;
-
-type SeedChecklistLevels = [ChecklistLevel, ChecklistLevel, ChecklistLevel];
-type Interne2SeedCaseBase = {
-  id: string;
-  date: string;
-  savedAt: string;
-  seniorId: string;
-  supportLevel: ChecklistLevel;
-  keyStepLevels: SeedChecklistLevels;
-  globalPerformance: AdminPerformanceRating;
-  categoryDifficulty: AdminCategoryDifficultyRating;
-  complexity: Complexity;
-  role: GlobalRole;
-};
-type Interne2SalpingectomySeedCase = Interne2SeedCaseBase & {
-  indication: Indication;
-  laterality: Laterality;
-};
-type Interne2ColpoclesisSeedCase = Interne2SeedCaseBase;
-
-function createSeedChecklistState(
-  steps: ChecklistStep[],
-  defaultLevel: ChecklistLevel,
-  keyStepIds: readonly string[],
-  keyStepLevels: readonly ChecklistLevel[]
-): Record<string, ChecklistLevel | null> {
-  const checklist = createChecklistState(steps, defaultLevel);
-
-  keyStepIds.forEach((stepId, index) => {
-    if (Object.prototype.hasOwnProperty.call(checklist, stepId)) {
-      checklist[stepId] = keyStepLevels[index] ?? defaultLevel;
-    }
-  });
-
-  return checklist;
-}
-
-function getKeyStepAverageFromLevels(levels: readonly ChecklistLevel[]) {
-  const numericScores = levels
-    .filter((level): level is '0' | '1' | '2' | '3' | '4' =>
-      ['0', '1', '2', '3', '4'].includes(level)
-    )
-    .map((level) => Number(level));
-
-  if (numericScores.length === 0) {
-    return null;
-  }
-
-  return numericScores.reduce((total, score) => total + score, 0) /
-    numericScores.length;
-}
-
-function getSeedAutonomyScore(
-  keyStepLevels: readonly ChecklistLevel[],
-  globalPerformance: AdminPerformanceRating,
-  categoryDifficulty: AdminCategoryDifficultyRating
-) {
-  const keyStepAverage = getKeyStepAverageFromLevels(keyStepLevels);
-
-  return keyStepAverage == null
-    ? null
-    : calculateAutonomyScoreFromComponents(
-        keyStepAverage,
-        globalPerformance,
-        categoryDifficulty
-      );
-}
-
-function createSavedSalpingectomyIntervention({
-  id,
-  date,
-  savedAt,
-  indication,
-  seniorId,
-  laterality,
-  supportLevel,
-  keyStepLevels,
-  globalPerformance,
-  categoryDifficulty,
-  complexity,
-  role,
-}: Interne2SalpingectomySeedCase): SavedIntervention {
-  const approach: SurgicalApproach = 'coelioscopie';
-  const entryTechnique: EntryTechnique = 'open';
-  const checklistSteps = getChecklistStepsForIntervention(
-    'salpingectomie',
-    indication,
-    approach,
-    entryTechnique
-  );
-
-  return {
-    id,
-    savedAt,
-    date,
-    internalId: 'int-2',
-    seniorId,
-    procedure: 'salpingectomie',
-    indication,
-    indicationComment: '',
-    customIndication: null,
-    approach,
-    entryTechnique,
-    laterality,
-    context: getFixedContextForIntervention('salpingectomie', indication),
-    complexity,
-    role,
-    checklist: createSeedChecklistState(
-      checklistSteps,
-      supportLevel,
-      salpingectomyKeyStepIds,
-      keyStepLevels
-    ),
-    autonomyScore: getSeedAutonomyScore(
-      keyStepLevels,
-      globalPerformance,
-      categoryDifficulty
-    ),
-  };
-}
-
-function createSavedColpoclesisIntervention({
-  id,
-  date,
-  savedAt,
-  seniorId,
-  supportLevel,
-  keyStepLevels,
-  globalPerformance,
-  categoryDifficulty,
-  complexity,
-  role,
-}: Interne2ColpoclesisSeedCase): SavedIntervention {
-  return {
-    id,
-    savedAt,
-    date,
-    internalId: 'int-2',
-    seniorId,
-    procedure: 'colpoclesis',
-    indication: null,
-    indicationComment: '',
-    customIndication: null,
-    approach: null,
-    entryTechnique: null,
-    laterality: null,
-    context: getFixedContextForIntervention('colpoclesis', null),
-    complexity,
-    role,
-    checklist: createSeedChecklistState(
-      colpoclesisChecklistSteps,
-      supportLevel,
-      colpoclesisKeyStepIds,
-      keyStepLevels
-    ),
-    autonomyScore: getSeedAutonomyScore(
-      keyStepLevels,
-      globalPerformance,
-      categoryDifficulty
-    ),
-  };
-}
-
-const interne2SalpingectomyDates = [
-  '2025-11-05',
-  '2025-11-12',
-  '2025-11-20',
-  '2025-11-27',
-  '2025-12-03',
-  '2025-12-10',
-  '2025-12-18',
-  '2026-01-06',
-  '2026-01-13',
-  '2026-01-21',
-  '2026-01-29',
-  '2026-02-04',
-  '2026-02-10',
-  '2026-02-18',
-  '2026-02-24',
-  '2026-03-03',
-  '2026-03-10',
-  '2026-03-18',
-  '2026-03-25',
-  '2026-04-01',
-  '2026-04-08',
-  '2026-04-15',
-  '2026-04-22',
-  '2026-04-29',
-  '2026-05-05',
-  '2026-05-08',
-  '2026-05-12',
-  '2026-05-15',
-  '2026-05-19',
-  '2026-05-22',
-  '2026-05-26',
-  '2026-05-29',
-  '2026-06-02',
-  '2026-06-03',
-  '2026-06-04',
-  '2026-06-05',
-  '2026-06-08',
-  '2026-06-09',
-  '2026-06-10',
-  '2026-06-11',
-];
-
-function getInterne2SalpingectomyKeyLevels(
-  index: number
-): SeedChecklistLevels {
-  if (index < 4) {
-    const levels: SeedChecklistLevels[] = [
-      ['1', '1', '1'],
-      ['1', '1', '2'],
-      ['1', '2', '2'],
-      ['2', '2', '1'],
-    ];
-
-    return levels[index];
-  }
-
-  if (index < 10) {
-    const levels: SeedChecklistLevels[] = [
-      ['2', '2', '2'],
-      ['2', '2', '2'],
-      ['2', '2', '3'],
-      ['2', '3', '2'],
-      ['3', '2', '2'],
-      ['2', '3', '3'],
-    ];
-
-    return levels[index - 4];
-  }
-
-  if (index < 18) {
-    const levels: SeedChecklistLevels[] = [
-      ['3', '2', '3'],
-      ['3', '3', '2'],
-      ['3', '3', '3'],
-      ['2', '3', '3'],
-      ['3', '3', '3'],
-      ['3', '3', '4'],
-      ['3', '4', '3'],
-      ['3', '3', '4'],
-    ];
-
-    return levels[index - 10];
-  }
-
-  if (index < 28) {
-    const levels: SeedChecklistLevels[] = [
-      ['3', '3', '3'],
-      ['3', '4', '3'],
-      ['4', '3', '3'],
-      ['3', '4', '4'],
-      ['4', '3', '4'],
-      ['4', '4', '3'],
-      ['3', '4', '4'],
-      ['4', '4', '4'],
-      ['4', '4', '3'],
-      ['4', '4', '4'],
-    ];
-
-    return levels[index - 18];
-  }
-
-  if (index < 36) {
-    const levels: SeedChecklistLevels[] = [
-      ['4', '4', '4'],
-      ['4', '4', '3'],
-      ['4', '4', '4'],
-      ['4', '3', '4'],
-      ['4', '4', '4'],
-      ['4', '4', '4'],
-      ['4', '4', '3'],
-      ['4', '4', '4'],
-    ];
-
-    return levels[index - 28];
-  }
-
-  return ['4', '4', '4'];
-}
-
-function getInterne2SalpingectomyPerformance(
-  index: number
-): AdminPerformanceRating {
-  if (index < 6) {
-    return '2';
-  }
-
-  if (index < 18) {
-    return '3';
-  }
-
-  if (index < 37) {
-    return '4';
-  }
-
-  return '5';
-}
-
-function getInterne2SalpingectomySupportLevel(index: number): ChecklistLevel {
-  if (index < 4) {
-    return '1';
-  }
-
-  if (index < 14) {
-    return '2';
-  }
-
-  if (index < 34) {
-    return '3';
-  }
-
-  return '4';
-}
-
-function getInterne2SalpingectomyComplexity(index: number): Complexity {
-  if (index < 8) {
-    return index % 5 === 0 ? 9 : 8;
-  }
-
-  if (index < 18) {
-    return index % 6 === 0 ? 8 : 7;
-  }
-
-  if (index < 30) {
-    return index % 7 === 0 ? 7 : 6;
-  }
-
-  return index % 8 === 0 ? 6 : 5;
-}
-
-function getInterne2CategoryDifficulty(
-  index: number
-): AdminCategoryDifficultyRating {
-  if (index % 11 === 0 || index % 17 === 0) {
-    return '3';
-  }
-
-  if (index % 7 === 0) {
-    return '1';
-  }
-
-  return '2';
-}
-
-const interne2SalpingectomySeedCases: Interne2SalpingectomySeedCase[] =
-  interne2SalpingectomyDates.map((date, index) => {
-    const ligatureIndexes = new Set([4, 11, 18, 25, 32, 38]);
-    const indication: Indication = ligatureIndexes.has(index)
-      ? 'ligature_tubaire'
-      : 'geu';
-
-    return {
-      id: `seed-int2-salp-${String(index + 1).padStart(2, '0')}`,
-      date,
-      savedAt: `${date}T18:${String(10 + (index % 40)).padStart(2, '0')}:00.000Z`,
-      seniorId: index % 2 === 0 ? 'sen-1' : 'sen-2',
-      indication,
-      laterality:
-        indication === 'ligature_tubaire'
-          ? 'bilateral'
-          : index % 2 === 0
-            ? 'gauche'
-            : 'droite',
-      supportLevel: getInterne2SalpingectomySupportLevel(index),
-      keyStepLevels: getInterne2SalpingectomyKeyLevels(index),
-      globalPerformance: getInterne2SalpingectomyPerformance(index),
-      categoryDifficulty: getInterne2CategoryDifficulty(index),
-      complexity: getInterne2SalpingectomyComplexity(index),
-      role: index < 3 ? 'aide_principal' : 'operateur_principal',
-    };
-  });
-
-const interne2ColpoclesisSeedCases: Interne2ColpoclesisSeedCase[] = [
-  {
-    id: 'seed-int2-colpo-01',
-    date: '2026-01-30',
-    savedAt: '2026-01-30T18:45:00.000Z',
-    seniorId: 'sen-2',
-    supportLevel: '1',
-    keyStepLevels: ['1', '1', '2'],
-    globalPerformance: '2',
-    categoryDifficulty: '2',
-    complexity: 7,
-    role: 'aide_principal',
-  },
-  {
-    id: 'seed-int2-colpo-02',
-    date: '2026-03-06',
-    savedAt: '2026-03-06T18:35:00.000Z',
-    seniorId: 'sen-1',
-    supportLevel: '2',
-    keyStepLevels: ['2', '2', '2'],
-    globalPerformance: '3',
-    categoryDifficulty: '2',
-    complexity: 6,
-    role: 'operateur_principal',
-  },
-  {
-    id: 'seed-int2-colpo-03',
-    date: '2026-04-17',
-    savedAt: '2026-04-17T18:50:00.000Z',
-    seniorId: 'sen-2',
-    supportLevel: '2',
-    keyStepLevels: ['1', '2', '2'],
-    globalPerformance: '2',
-    categoryDifficulty: '3',
-    complexity: 8,
-    role: 'operateur_principal',
-  },
-  {
-    id: 'seed-int2-colpo-04',
-    date: '2026-05-21',
-    savedAt: '2026-05-21T18:40:00.000Z',
-    seniorId: 'sen-1',
-    supportLevel: '2',
-    keyStepLevels: ['2', '3', '2'],
-    globalPerformance: '3',
-    categoryDifficulty: '2',
-    complexity: 7,
-    role: 'operateur_principal',
-  },
-  {
-    id: 'seed-int2-colpo-05',
-    date: '2026-06-05',
-    savedAt: '2026-06-05T18:55:00.000Z',
-    seniorId: 'sen-2',
-    supportLevel: '3',
-    keyStepLevels: ['2', '3', '3'],
-    globalPerformance: '3',
-    categoryDifficulty: '3',
-    complexity: 7,
-    role: 'operateur_principal',
-  },
-];
-
-const interne2SavedInterventions = [
-  ...interne2SalpingectomySeedCases.map(createSavedSalpingectomyIntervention),
-  ...interne2ColpoclesisSeedCases.map(createSavedColpoclesisIntervention),
-];
-
 export function isSeededDemoInterventionId(interventionId: string) {
   return (
     interventionId.startsWith('seed-int2-') ||
-    interventionId.startsWith('seed-int3-')
+    interventionId.startsWith('seed-int3-') ||
+    interventionId.startsWith('seed-internet-')
   );
 }
 
-export const seededSavedInterventions: SavedIntervention[] =
-  interne2SavedInterventions.sort((left, right) =>
-    right.savedAt.localeCompare(left.savedAt)
+type SeedInterventionCase = {
+  approach: SurgicalApproach | null;
+  categoryDifficulty: AdminCategoryDifficultyRating;
+  complexity: Complexity;
+  date: string;
+  entryTechnique: EntryTechnique | null;
+  globalPerformance: AdminPerformanceRating;
+  indication: Indication | null;
+  keyLevels: [ChecklistLevel, ChecklistLevel, ChecklistLevel];
+  laterality: Laterality | null;
+  procedure: InterventionType;
+  savedAt: string;
+};
+
+const seedDifficultyCoefficients: Record<AdminCategoryDifficultyRating, number> = {
+  '1': 0.95,
+  '2': 1,
+  '3': 1.05,
+};
+
+const seedInterventionCases: SeedInterventionCase[] = [
+  {
+    date: '2025-11-06',
+    savedAt: '2025-11-06T07:20:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'geu',
+    approach: 'coelioscopie',
+    entryTechnique: 'open',
+    laterality: 'droite',
+    complexity: 8,
+    keyLevels: ['1', '1', '1'],
+    globalPerformance: '2',
+    categoryDifficulty: '3',
+  },
+  {
+    date: '2025-11-18',
+    savedAt: '2025-11-18T08:05:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'ligature_tubaire',
+    approach: 'coelioscopie',
+    entryTechnique: 'veress',
+    laterality: 'bilateral',
+    complexity: 4,
+    keyLevels: ['1', '1', '2'],
+    globalPerformance: '2',
+    categoryDifficulty: '1',
+  },
+  {
+    date: '2025-12-02',
+    savedAt: '2025-12-02T12:40:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'ligature_tubaire',
+    approach: 'coelioscopie',
+    entryTechnique: 'trocart_direct',
+    laterality: 'bilateral',
+    complexity: 5,
+    keyLevels: ['2', '1', '2'],
+    globalPerformance: '2',
+    categoryDifficulty: '2',
+  },
+  {
+    date: '2025-12-16',
+    savedAt: '2025-12-16T06:55:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'geu',
+    approach: 'coelioscopie',
+    entryTechnique: 'open',
+    laterality: 'gauche',
+    complexity: 7,
+    keyLevels: ['2', '2', '2'],
+    globalPerformance: '2',
+    categoryDifficulty: '3',
+  },
+  {
+    date: '2025-12-29',
+    savedAt: '2025-12-29T10:15:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'ligature_tubaire',
+    approach: 'vnotes',
+    entryTechnique: 'open',
+    laterality: 'bilateral',
+    complexity: 5,
+    keyLevels: ['2', '2', '2'],
+    globalPerformance: '3',
+    categoryDifficulty: '2',
+  },
+  {
+    date: '2026-01-08',
+    savedAt: '2026-01-08T08:30:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'ligature_tubaire',
+    approach: 'coelioscopie',
+    entryTechnique: 'open',
+    laterality: 'bilateral',
+    complexity: 4,
+    keyLevels: ['2', '2', '3'],
+    globalPerformance: '3',
+    categoryDifficulty: '1',
+  },
+  {
+    date: '2026-01-22',
+    savedAt: '2026-01-22T13:10:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'ligature_tubaire',
+    approach: 'coelioscopie',
+    entryTechnique: 'veress',
+    laterality: 'bilateral',
+    complexity: 5,
+    keyLevels: ['2', '3', '3'],
+    globalPerformance: '3',
+    categoryDifficulty: '2',
+  },
+  {
+    date: '2026-01-30',
+    savedAt: '2026-01-30T06:45:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'geu',
+    approach: 'laparotomie',
+    entryTechnique: null,
+    laterality: 'droite',
+    complexity: 8,
+    keyLevels: ['2', '2', '3'],
+    globalPerformance: '3',
+    categoryDifficulty: '3',
+  },
+  {
+    date: '2026-02-09',
+    savedAt: '2026-02-09T09:00:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'ligature_tubaire',
+    approach: 'coelioscopie',
+    entryTechnique: 'trocart_direct',
+    laterality: 'bilateral',
+    complexity: 4,
+    keyLevels: ['3', '3', '3'],
+    globalPerformance: '3',
+    categoryDifficulty: '1',
+  },
+  {
+    date: '2026-02-24',
+    savedAt: '2026-02-24T11:25:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'ligature_tubaire',
+    approach: 'coelioscopie',
+    entryTechnique: 'open',
+    laterality: 'bilateral',
+    complexity: 5,
+    keyLevels: ['3', '3', '3'],
+    globalPerformance: '3',
+    categoryDifficulty: '2',
+  },
+  {
+    date: '2026-02-27',
+    savedAt: '2026-02-27T13:35:00.000Z',
+    procedure: 'colpoclesis',
+    indication: 'autre',
+    approach: null,
+    entryTechnique: null,
+    laterality: null,
+    complexity: 6,
+    keyLevels: ['1', '1', '2'],
+    globalPerformance: '2',
+    categoryDifficulty: '2',
+  },
+  {
+    date: '2026-03-10',
+    savedAt: '2026-03-10T08:45:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'ligature_tubaire',
+    approach: 'coelioscopie',
+    entryTechnique: 'veress',
+    laterality: 'bilateral',
+    complexity: 5,
+    keyLevels: ['3', '3', '4'],
+    globalPerformance: '4',
+    categoryDifficulty: '2',
+  },
+  {
+    date: '2026-03-17',
+    savedAt: '2026-03-17T06:50:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'geu',
+    approach: 'coelioscopie',
+    entryTechnique: 'open',
+    laterality: 'gauche',
+    complexity: 7,
+    keyLevels: ['3', '3', '3'],
+    globalPerformance: '3',
+    categoryDifficulty: '3',
+  },
+  {
+    date: '2026-03-26',
+    savedAt: '2026-03-26T12:05:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'ligature_tubaire',
+    approach: 'vnotes',
+    entryTechnique: 'open',
+    laterality: 'bilateral',
+    complexity: 5,
+    keyLevels: ['3', '4', '3'],
+    globalPerformance: '4',
+    categoryDifficulty: '2',
+  },
+  {
+    date: '2026-04-03',
+    savedAt: '2026-04-03T09:35:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'ligature_tubaire',
+    approach: 'coelioscopie',
+    entryTechnique: 'trocart_direct',
+    laterality: 'bilateral',
+    complexity: 4,
+    keyLevels: ['4', '3', '4'],
+    globalPerformance: '4',
+    categoryDifficulty: '1',
+  },
+  {
+    date: '2026-04-09',
+    savedAt: '2026-04-09T13:20:00.000Z',
+    procedure: 'colpoclesis',
+    indication: 'autre',
+    approach: null,
+    entryTechnique: null,
+    laterality: null,
+    complexity: 6,
+    keyLevels: ['2', '2', '3'],
+    globalPerformance: '3',
+    categoryDifficulty: '2',
+  },
+  {
+    date: '2026-04-21',
+    savedAt: '2026-04-21T07:55:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'ligature_tubaire',
+    approach: 'coelioscopie',
+    entryTechnique: 'open',
+    laterality: 'bilateral',
+    complexity: 4,
+    keyLevels: ['4', '4', '4'],
+    globalPerformance: '4',
+    categoryDifficulty: '2',
+  },
+  {
+    date: '2026-04-29',
+    savedAt: '2026-04-29T11:10:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'ligature_tubaire',
+    approach: 'coelioscopie',
+    entryTechnique: 'veress',
+    laterality: 'bilateral',
+    complexity: 3,
+    keyLevels: ['4', '4', '4'],
+    globalPerformance: '4',
+    categoryDifficulty: '1',
+  },
+  {
+    date: '2026-05-05',
+    savedAt: '2026-05-05T06:35:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'geu',
+    approach: 'coelioscopie',
+    entryTechnique: 'open',
+    laterality: 'droite',
+    complexity: 7,
+    keyLevels: ['3', '4', '4'],
+    globalPerformance: '4',
+    categoryDifficulty: '3',
+  },
+  {
+    date: '2026-05-14',
+    savedAt: '2026-05-14T08:20:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'ligature_tubaire',
+    approach: 'vnotes',
+    entryTechnique: 'open',
+    laterality: 'bilateral',
+    complexity: 5,
+    keyLevels: ['4', '4', '4'],
+    globalPerformance: '4',
+    categoryDifficulty: '2',
+  },
+  {
+    date: '2026-05-28',
+    savedAt: '2026-05-28T12:30:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'ligature_tubaire',
+    approach: 'coelioscopie',
+    entryTechnique: 'trocart_direct',
+    laterality: 'bilateral',
+    complexity: 4,
+    keyLevels: ['4', '4', '4'],
+    globalPerformance: '5',
+    categoryDifficulty: '2',
+  },
+  {
+    date: '2026-06-09',
+    savedAt: '2026-06-09T13:00:00.000Z',
+    procedure: 'colpoclesis',
+    indication: 'autre',
+    approach: null,
+    entryTechnique: null,
+    laterality: null,
+    complexity: 7,
+    keyLevels: ['3', '3', '4'],
+    globalPerformance: '4',
+    categoryDifficulty: '3',
+  },
+  {
+    date: '2026-06-18',
+    savedAt: '2026-06-18T07:15:00.000Z',
+    procedure: 'salpingectomie',
+    indication: 'ligature_tubaire',
+    approach: 'coelioscopie',
+    entryTechnique: 'open',
+    laterality: 'bilateral',
+    complexity: 4,
+    keyLevels: ['4', '4', '4'],
+    globalPerformance: '5',
+    categoryDifficulty: '2',
+  },
+];
+
+function getSeedContext(procedure: InterventionType, indication: Indication | null) {
+  return getFixedContextForIntervention(procedure, indication) ?? 'programme';
+}
+
+function calculateSeedAutonomyScore(
+  keyLevels: [ChecklistLevel, ChecklistLevel, ChecklistLevel],
+  globalPerformance: AdminPerformanceRating,
+  categoryDifficulty: AdminCategoryDifficultyRating
+) {
+  const keyStepAverage =
+    keyLevels.reduce((total, level) => total + Number(level), 0) /
+    keyLevels.length;
+  const autonomyComponent = (keyStepAverage / 4) * 100;
+  const performanceComponent = ((Number(globalPerformance) - 1) / 4) * 100;
+  const score =
+    (0.4 * autonomyComponent + 0.6 * performanceComponent) *
+    seedDifficultyCoefficients[categoryDifficulty];
+
+  return Math.min(100, Math.max(0, Math.round(score)));
+}
+
+function createSeedChecklist(caseItem: SeedInterventionCase) {
+  const checklistSteps =
+    caseItem.procedure === 'colpoclesis'
+      ? colpoclesisChecklistSteps
+      : salpingectomyChecklistSteps;
+  const keyStepIds =
+    caseItem.procedure === 'colpoclesis'
+      ? ['colpo-step-3', 'colpo-step-4', 'colpo-step-5']
+      : ['step-9', 'step-10', 'step-12'];
+  const keyLevelsById = new Map(
+    keyStepIds.map((stepId, index) => [stepId, caseItem.keyLevels[index]])
   );
+  const lowestKeyLevel = Math.min(...caseItem.keyLevels.map(Number));
+  const defaultLevel = `${Math.max(1, lowestKeyLevel)}` as ChecklistLevel;
+
+  return Object.fromEntries(
+    checklistSteps.map((step) => [
+      step.id,
+      keyLevelsById.get(step.id) ?? defaultLevel,
+    ])
+  ) as Record<string, ChecklistLevel>;
+}
+
+export const seededSavedInterventions: SavedIntervention[] = seedInterventionCases
+  .map((caseItem, index) => ({
+    id: `seed-internet-${`${index + 1}`.padStart(2, '0')}`,
+    date: caseItem.date,
+    internalId: 'int-test',
+    seniorId: 'sen-test',
+    procedure: caseItem.procedure,
+    indication: caseItem.indication,
+    indicationComment:
+      caseItem.procedure === 'colpoclesis'
+        ? 'Prolapsus génital symptomatique'
+        : '',
+    customIndication: null,
+    approach: caseItem.approach,
+    entryTechnique: caseItem.entryTechnique,
+    laterality: caseItem.laterality,
+    context: getSeedContext(caseItem.procedure, caseItem.indication),
+    complexity: caseItem.complexity,
+    role: 'operateur_principal' as const,
+    checklist: createSeedChecklist(caseItem),
+    autonomyScore: calculateSeedAutonomyScore(
+      caseItem.keyLevels,
+      caseItem.globalPerformance,
+      caseItem.categoryDifficulty
+    ),
+    savedAt: caseItem.savedAt,
+  }))
+  .sort((left, right) => right.savedAt.localeCompare(left.savedAt));
 
 export const seededAdminInterventionEvaluations: Record<
   string,
   AdminInterventionEvaluation
-> = [
-  ...interne2SalpingectomySeedCases,
-  ...interne2ColpoclesisSeedCases,
-].reduce<Record<string, AdminInterventionEvaluation>>((accumulator, seedCase) => {
-  accumulator[seedCase.id] = {
-    interventionId: seedCase.id,
-    globalPerformance: seedCase.globalPerformance,
-    categoryDifficulty: seedCase.categoryDifficulty,
-    updatedAt: seedCase.savedAt.replace('T18:', 'T20:'),
-  };
+> = Object.fromEntries(
+  seedInterventionCases.map((caseItem, index) => {
+    const interventionId = `seed-internet-${`${index + 1}`.padStart(2, '0')}`;
 
-  return accumulator;
-}, {});
+    return [
+      interventionId,
+      {
+        interventionId,
+        globalPerformance: caseItem.globalPerformance,
+        categoryDifficulty: caseItem.categoryDifficulty,
+        seniorComment: '',
+        updatedAt: caseItem.savedAt,
+      },
+    ];
+  })
+);
 
 export function hydrateAdminInterventionEvaluations(
   evaluations: Record<string, AdminInterventionEvaluation> = {}
@@ -933,7 +875,13 @@ export function hydrateAdminInterventionEvaluations(
     ...Object.fromEntries(
       Object.entries(evaluations).filter(
         ([interventionId]) => !isSeededDemoInterventionId(interventionId)
-      )
+      ).map(([interventionId, evaluation]) => [
+        interventionId,
+        {
+          ...evaluation,
+          seniorComment: evaluation.seniorComment ?? '',
+        },
+      ])
     ),
     ...seededAdminInterventionEvaluations,
   };
@@ -1010,7 +958,9 @@ const colpocleisisPrimaryBadgeMilestones = [
   },
 ] as const;
 
-export const badgeCatalog: BadgeCatalogItem[] = [
+export const badgeCatalog: BadgeCatalogItem[] = [];
+
+const legacyBadgeCatalog: BadgeCatalogItem[] = [
   {
     id: 'catalog-salpingectomie-as',
     title: 'As de la salpingectomie',
@@ -1049,7 +999,7 @@ export const badgeCatalog: BadgeCatalogItem[] = [
     target: 10,
     imageSrc: '/images/badges/salpingectomie-operateur-principal-10.png',
     criteria:
-      'Obtenu après 10 salpingectomies enregistrées en tant qu’opérateur principal. Déverrouillé seulement après obtention du badge précédent.',
+      'Obtenu après 10 salpingectomies enregistrées en tant qu’opérateur principal. Déverrouillé seulement après obtention du trophée précédent.',
     prerequisiteTitle: 'Première salpingectomie en tant qu’opérateur principal',
   },
   {
@@ -1060,7 +1010,7 @@ export const badgeCatalog: BadgeCatalogItem[] = [
     target: 20,
     imageSrc: '/images/badges/salpingectomie-operateur-principal-20.png',
     criteria:
-      'Obtenu après 20 salpingectomies enregistrées en tant qu’opérateur principal. Déverrouillé seulement après obtention du badge précédent.',
+      'Obtenu après 20 salpingectomies enregistrées en tant qu’opérateur principal. Déverrouillé seulement après obtention du trophée précédent.',
     prerequisiteTitle: 'Dix salpingectomies en tant qu’opérateur principal',
   },
   {
@@ -1081,7 +1031,7 @@ export const badgeCatalog: BadgeCatalogItem[] = [
     target: 5,
     imageSrc: '/images/badges/colpocleisis-operateur-principal-5.png',
     criteria:
-      'Obtenu après 5 colpoclésis enregistrés en tant qu’opérateur principal. Déverrouillé seulement après obtention du badge précédent.',
+      'Obtenu après 5 colpoclésis enregistrés en tant qu’opérateur principal. Déverrouillé seulement après obtention du trophée précédent.',
     prerequisiteTitle: 'Premier colpoclésis en tant qu’opérateur principal',
   },
   {
@@ -1092,7 +1042,7 @@ export const badgeCatalog: BadgeCatalogItem[] = [
     target: 10,
     imageSrc: '/images/badges/colpocleisis-operateur-principal-10.png',
     criteria:
-      'Obtenu après 10 colpoclésis enregistrés en tant qu’opérateur principal. Déverrouillé seulement après obtention du badge précédent.',
+      'Obtenu après 10 colpoclésis enregistrés en tant qu’opérateur principal. Déverrouillé seulement après obtention du trophée précédent.',
     prerequisiteTitle: 'Cinq colpoclésis en tant qu’opérateur principal',
   },
 ];
@@ -1661,6 +1611,11 @@ export function getProgressBadgesForInternal(
   profile: InternalProfile,
   savedInterventions: SavedIntervention[] = []
 ): ProgressBadge[] {
+  void profile;
+  void savedInterventions;
+
+  return [];
+
   const basePrimaryCount = profile.badgeMetrics?.primarySalpingectomyCount ?? 0;
   const primaryInterventions = getPrimarySalpingectomyInterventions(
     profile.id,
@@ -1860,23 +1815,32 @@ export function isAdminCredentials(loginId: string, password: string) {
   return normalizedLoginId === 'admin' && normalizedPassword === 'admin';
 }
 
-export function getSeniorByCredentials(loginId: string, password: string) {
+export function getSeniorByCredentials(
+  loginId: string,
+  password: string,
+  customSeniors: Senior[] = []
+) {
   const normalizedLoginId = normalizeCredentialValue(loginId);
   const normalizedPassword = normalizeCredentialValue(password);
 
   return (
-    seniors.find(
+    [...seniors, ...customSeniors].find(
       (senior) =>
+        senior.loginId &&
+        senior.password &&
         normalizeCredentialValue(senior.loginId) === normalizedLoginId &&
         normalizeCredentialValue(senior.password) === normalizedPassword
     ) ?? null
   );
 }
 
-export function getSeniorById(id: string | null | undefined) {
+export function getSeniorById(
+  id: string | null | undefined,
+  customSeniors: Senior[] = []
+) {
   if (!id) {
     return null;
   }
 
-  return seniors.find((senior) => senior.id === id) ?? null;
+  return getSelectableSeniors(customSeniors).find((senior) => senior.id === id) ?? null;
 }

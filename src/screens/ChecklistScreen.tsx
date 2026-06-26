@@ -1,18 +1,19 @@
-import { ChoiceChip } from '../components/ChoiceChip';
-import { PrimaryButton } from '../components/PrimaryButton';
+import { BookOpen, ChevronDown, ChevronUp } from 'lucide-react';
+import { useMemo, useState } from 'react';
+
+import { InterventionFlowCard } from '../components/InterventionFlowCard';
+import { InterventionFlowLayout } from '../components/InterventionFlowLayout';
 import { ScreenContainer } from '../components/ScreenContainer';
-import { SectionCard } from '../components/SectionCard';
 import { useAppContext } from '../context/AppContext';
 import {
-  approachOptions,
   checklistLevelDetails,
   checklistLevelOptions,
   getChecklistStepsForIntervention,
-  getChoiceLabel,
-  getSeniorById,
-  indicationOptions,
 } from '../data/mockData';
-import { formatIsoDate } from '../utils/date';
+import {
+  formatChecklistAverage,
+  getChecklistAverage,
+} from '../utils/checklistSummary';
 
 export function ChecklistScreen() {
   const {
@@ -20,12 +21,30 @@ export function ChecklistScreen() {
     draft,
     checklistProgress,
     customSurgicalInterventions,
-    surgicalProcedureOptions,
     backToForm,
     goToSummary,
     setAllChecklistLevels,
     setChecklistLevel,
   } = useAppContext();
+  const [isScaleOpen, setIsScaleOpen] = useState(false);
+
+  const checklistSteps = useMemo(
+    () =>
+      getChecklistStepsForIntervention(
+        draft.procedure,
+        draft.indication,
+        draft.approach,
+        draft.entryTechnique,
+        customSurgicalInterventions
+      ),
+    [
+      customSurgicalInterventions,
+      draft.approach,
+      draft.entryTechnique,
+      draft.indication,
+      draft.procedure,
+    ]
+  );
 
   if (!selectedInternal) {
     return (
@@ -34,151 +53,172 @@ export function ChecklistScreen() {
         title="Interne manquant"
         subtitle="Retourne au formulaire pour reprendre la saisie."
       >
-        <PrimaryButton label="Retour au formulaire" onPress={backToForm} />
+        <button
+          className="flow-button flow-button--secondary"
+          onClick={backToForm}
+          type="button"
+        >
+          Retour à l’étape 1
+        </button>
       </ScreenContainer>
     );
   }
 
-  const senior = getSeniorById(draft.seniorId);
-  const indicationLabel =
-    draft.indication === 'autre' && draft.indicationComment.trim()
-      ? `Autre · ${draft.indicationComment.trim()}`
-      : getChoiceLabel(indicationOptions, draft.indication);
-  const customIndicationLabel = draft.customIndication?.trim() ?? '';
-  const isSalpingectomy = draft.procedure === 'salpingectomie';
-  const hasCustomIndication = !isSalpingectomy && customIndicationLabel.length > 0;
-  const checklistSteps = getChecklistStepsForIntervention(
-    draft.procedure,
-    draft.indication,
-    draft.approach,
-    draft.entryTechnique,
-    customSurgicalInterventions
+  const autonomyAverage = getChecklistAverage(
+    checklistSteps.map((step) => draft.checklist[step.id])
   );
+
   return (
-    <ScreenContainer
-      eyebrow="Étape 2 sur 3"
+    <InterventionFlowLayout
+      onBack={backToForm}
+      step={2}
+      subtitle="Renseigne ton niveau d’autonomie étape par étape."
       title="Checklist technique"
     >
-      <SectionCard
-        title="Récapitulatif"
-        description="Vérifie les informations principales avant enregistrement."
+      <InterventionFlowCard
+        action={
+          <button
+            aria-label={isScaleOpen ? 'Masquer le barème' : 'Afficher le barème'}
+            aria-expanded={isScaleOpen}
+            className="flow-icon-toggle"
+            onClick={() => setIsScaleOpen((current) => !current)}
+            type="button"
+          >
+            {isScaleOpen ? (
+              <ChevronUp aria-hidden="true" strokeWidth={2.2} />
+            ) : (
+              <ChevronDown aria-hidden="true" strokeWidth={2.2} />
+            )}
+          </button>
+        }
+        description="Comprendre le barème"
+        icon={BookOpen}
+        title="Barème d’autonomie"
       >
-        <div className="info-grid">
-          <InfoBlock label="Date" value={formatIsoDate(draft.date)} />
-          <InfoBlock
-            label="Senior"
-            value={senior ? `${senior.firstName} ${senior.lastName}` : 'Non renseigné'}
-          />
-          <InfoBlock
-            label="Intervention"
-            value={getChoiceLabel(surgicalProcedureOptions, draft.procedure)}
-          />
-          {isSalpingectomy || hasCustomIndication ? (
-            <>
-              <InfoBlock
-                label="Indication"
-                value={isSalpingectomy ? indicationLabel : customIndicationLabel}
-              />
-              {isSalpingectomy ? (
-                <InfoBlock
-                  label="Voie"
-                  value={getChoiceLabel(approachOptions, draft.approach)}
-                />
-              ) : null}
-            </>
-          ) : null}
-        </div>
-      </SectionCard>
+        {isScaleOpen ? (
+          <div className="flow-scale-list">
+            {checklistLevelOptions.map((level) => (
+              <article className="flow-scale-item" key={level.value}>
+                <strong>
+                  {level.label} · {level.description}
+                </strong>
+                <p>{checklistLevelDetails[level.value]}</p>
+              </article>
+            ))}
+          </div>
+        ) : null}
+      </InterventionFlowCard>
 
       {checklistProgress.applicable ? (
         <>
-          <SectionCard
-            title="Barème"
-            description={`${checklistProgress.completed} / ${checklistProgress.total} étape(s) renseignée(s). Le score reste attribué étape par étape par l’interne.`}
-          >
-            <div className="legend-list legend-list--scale">
-              {checklistLevelOptions.map((level) => (
-                <article className="legend-item" key={level.value}>
-                  <div className="legend-item__header">
-                    <strong>{level.label}</strong>
-                    <span>{level.description}</span>
-                  </div>
-                  <p>{checklistLevelDetails[level.value]}</p>
-                </article>
-              ))}
-            </div>
-          </SectionCard>
-
-          <SectionCard
+          <InterventionFlowCard
+            description="Applique un niveau à toutes les étapes, puis ajuste si besoin."
             title="Remplissage rapide"
-            description="Applique un niveau à toutes les étapes, puis ajuste les étapes une par une si besoin."
           >
-            <div className="choice-grid choice-grid--checklist">
+            <div className="flow-level-list">
               {checklistLevelOptions.map((level) => (
-                <ChoiceChip
+                <ChecklistLevelButton
                   key={level.value}
-                  compact
-                  label={level.label}
-                  onPress={() => setAllChecklistLevels(level.value)}
-                  selected={false}
+                  level={level.value}
+                  onClick={() => setAllChecklistLevels(level.value)}
                 />
               ))}
             </div>
-          </SectionCard>
+          </InterventionFlowCard>
 
-          {checklistSteps.map((step, index) => (
-            <SectionCard
-              key={step.id}
-              description={`Étape ${index + 1}`}
-              title={step.label}
-            >
-              <div className="choice-grid choice-grid--checklist">
-                {checklistLevelOptions.map((level) => (
-                  <ChoiceChip
-                    key={level.value}
-                    compact
-                    label={level.label}
-                    onPress={() => setChecklistLevel(step.id, level.value)}
-                    selected={draft.checklist[step.id] === level.value}
-                  />
-                ))}
-              </div>
-            </SectionCard>
-          ))}
+          <InterventionFlowCard title="Étapes de l’intervention">
+            <div className="flow-checklist-table">
+              {checklistSteps.map((step) => (
+                <div className="flow-checklist-row" key={step.id}>
+                  <strong className="flow-checklist-row__label">{step.label}</strong>
+                  <div className="flow-checklist-row__actions">
+                    {checklistLevelOptions.map((level) => (
+                      <ChecklistLevelButton
+                        key={level.value}
+                        level={level.value}
+                        onClick={() => setChecklistLevel(step.id, level.value)}
+                        selected={draft.checklist[step.id] === level.value}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </InterventionFlowCard>
         </>
       ) : (
-        <SectionCard
-          title="Checklist non définie"
-          description="Aucune checklist spécifique n’est définie pour cette configuration."
+        <InterventionFlowCard
+          description="Aucune checklist spécifique n’est définie pour cette intervention."
+          title="Étapes de l’intervention"
         >
-          <p className="field-helper">
-            Pour cette intervention, l’enregistrement peut être validé sans
-            grille technique supplémentaire.
+          <p className="flow-empty-state">
+            Tu peux poursuivre directement vers le récapitulatif.
           </p>
-        </SectionCard>
+        </InterventionFlowCard>
       )}
 
-      <div className="action-stack">
-        <PrimaryButton
-          label="Retour au formulaire"
-          onPress={backToForm}
-          variant="secondary"
-        />
-        <PrimaryButton
+      <InterventionFlowCard className="flow-summary-card">
+        <div className="flow-summary-card__body">
+          <div>
+            <strong className="flow-summary-card__headline">
+              {checklistProgress.completed} / {checklistProgress.total} étapes
+              renseignées
+            </strong>
+            <p className="flow-summary-card__caption">Autonomie moyenne</p>
+          </div>
+          <span className="flow-score-badge">
+            {formatChecklistAverage(autonomyAverage)}
+          </span>
+        </div>
+      </InterventionFlowCard>
+
+      <div className="flow-actions flow-actions--split">
+        <button
+          className="flow-button flow-button--secondary"
+          onClick={backToForm}
+          type="button"
+        >
+          Retour à l’étape 1
+        </button>
+        <button
+          className="flow-button flow-button--primary"
           disabled={!checklistProgress.isComplete}
-          label="Voir le récapitulatif"
-          onPress={goToSummary}
-        />
+          onClick={goToSummary}
+          type="button"
+        >
+          Continuer
+        </button>
       </div>
-    </ScreenContainer>
+    </InterventionFlowLayout>
   );
 }
 
-function InfoBlock({ label, value }: { label: string; value: string }) {
+function ChecklistLevelButton({
+  level,
+  selected = false,
+  onClick,
+}: {
+  level: 'NA' | '0' | '1' | '2' | '3' | '4';
+  selected?: boolean;
+  onClick: () => void;
+}) {
   return (
-    <div className="info-block">
-      <span className="info-block__label">{label}</span>
-      <strong className="info-block__value">{value}</strong>
-    </div>
+    <button
+      className={`flow-level-pill flow-level-pill--${getLevelColorName(level)} ${
+        selected ? 'flow-level-pill--selected' : ''
+      }`.trim()}
+      onClick={onClick}
+      type="button"
+    >
+      {level}
+    </button>
   );
+}
+
+function getLevelColorName(level: 'NA' | '0' | '1' | '2' | '3' | '4') {
+  if (level === 'NA') {
+    return 'na';
+  }
+
+  return `level-${level}`;
 }

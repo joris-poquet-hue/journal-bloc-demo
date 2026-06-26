@@ -5,7 +5,7 @@ import { PrimaryButton } from '../components/PrimaryButton';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionCard } from '../components/SectionCard';
 import { useAppContext } from '../context/AppContext';
-import { formatDisplayName, seniors } from '../data/mockData';
+import { formatDisplayName, formatSeniorDisplayName } from '../data/mockData';
 import { isValidIsoDate } from '../utils/date';
 
 const obstetricGestureOptions = [
@@ -89,7 +89,8 @@ export function ObstetricJournalScreen() {
   const {
     selectedInternal,
     obstetricDraft,
-    goToObstetricPortal,
+    selectableSeniors,
+    goToSurgeryPortal,
     saveObstetricGesture,
     updateObstetricDraftField,
   } = useAppContext();
@@ -99,11 +100,11 @@ export function ObstetricJournalScreen() {
       <ScreenContainer
         eyebrow="Journal SDN"
         title="Aucun interne sélectionné"
-        subtitle="Retourne au portail obstétrique pour reprendre la saisie."
+        subtitle="Retourne à l’accueil pour reprendre la saisie."
       >
         <PrimaryButton
-          label="Retour au portail obstétrique"
-          onPress={goToObstetricPortal}
+          label="Retour à l’accueil"
+          onPress={goToSurgeryPortal}
         />
       </ScreenContainer>
     );
@@ -146,9 +147,9 @@ export function ObstetricJournalScreen() {
         columns={1}
         description="Choisis le senior superviseur de la salle de naissance."
         onChange={(value) => updateObstetricDraftField('seniorId', value)}
-        options={seniors.map((senior) => ({
+        options={selectableSeniors.map((senior) => ({
           value: senior.id,
-          label: `${senior.firstName} ${senior.lastName}`,
+          label: formatSeniorDisplayName(senior),
         }))}
         title="Senior"
         value={obstetricDraft.seniorId}
@@ -228,8 +229,8 @@ export function ObstetricJournalScreen() {
 
       <div className="action-stack">
         <PrimaryButton
-          label="Retour au portail obstétrique"
-          onPress={goToObstetricPortal}
+          label="Retour à l’accueil"
+          onPress={goToSurgeryPortal}
           variant="secondary"
         />
         <PrimaryButton

@@ -1,232 +1,176 @@
-import { PrimaryButton } from '../components/PrimaryButton';
+import {
+  CalendarDays,
+  CheckCircle2,
+  ClipboardList,
+  Eye,
+  Gauge,
+  LucideIcon,
+  Scissors,
+  UserRound,
+} from 'lucide-react';
+
+import { InterventionFlowCard } from '../components/InterventionFlowCard';
+import { InterventionFlowLayout } from '../components/InterventionFlowLayout';
 import { ScreenContainer } from '../components/ScreenContainer';
-import { SectionCard } from '../components/SectionCard';
 import { useAppContext } from '../context/AppContext';
 import {
   approachOptions,
-  checklistLevelOptions,
-  contextOptions,
   entryTechniqueOptions,
   formatComplexityRating,
-  formatDisplayName,
-  getFixedContextForIntervention,
+  formatSeniorDisplayName,
   getChecklistStepsForIntervention,
   getChoiceLabel,
-  getInternalById,
-  getSeniorById,
-  getSurgicalInterventionDefinition,
   indicationOptions,
-  lateralityOptions,
-  roleOptions,
 } from '../data/mockData';
+import {
+  formatChecklistAverage,
+  getChecklistAverage,
+} from '../utils/checklistSummary';
 import { formatIsoDate } from '../utils/date';
 
 export function SummaryScreen() {
   const {
-    summaryMode,
-    internalProfiles,
     selectedInternal,
     draft,
-    lastSavedIntervention,
-    savedInterventions,
     customSurgicalInterventions,
+    selectableSeniors,
     surgicalProcedureOptions,
     saveIntervention,
-    backToForm,
-    startNewIntervention,
-    backToWelcome,
+    backToChecklist,
   } = useAppContext();
 
-  if (summaryMode === 'confirmed' && !lastSavedIntervention) {
+  if (!selectedInternal) {
     return (
       <ScreenContainer
         eyebrow="Récapitulatif"
-        title="Aucune intervention enregistrée"
-        subtitle="Repars du formulaire pour ajouter une intervention."
+        title="Aucune intervention disponible"
+        subtitle="Retourne au formulaire pour reprendre la saisie."
       >
-        <PrimaryButton label="Retour à l’accueil" onPress={backToWelcome} />
+        <button
+          className="flow-button flow-button--secondary"
+          onClick={backToChecklist}
+          type="button"
+        >
+          Retour à l’étape 2
+        </button>
       </ScreenContainer>
     );
   }
 
-  const intervention =
-    summaryMode === 'confirmed' && lastSavedIntervention ? lastSavedIntervention : draft;
-  const internalId = intervention.internalId ?? selectedInternal?.id ?? null;
-  const internal = getInternalById(internalId, internalProfiles);
-  const senior = getSeniorById(intervention.seniorId);
-  const isSalpingectomy = intervention.procedure === 'salpingectomie';
-  const interventionDefinition = getSurgicalInterventionDefinition(
-    intervention.procedure,
-    customSurgicalInterventions
-  );
-  const checklistSteps = getChecklistStepsForIntervention(
-    intervention.procedure,
-    intervention.indication,
-    intervention.approach,
-    intervention.entryTechnique,
-    customSurgicalInterventions
-  );
-  const hasChecklist = checklistSteps.length > 0;
-  const resolvedContext =
-    intervention.context ??
-    getFixedContextForIntervention(intervention.procedure, intervention.indication);
-  const procedureLabel = getChoiceLabel(
-    surgicalProcedureOptions,
-    intervention.procedure
-  );
-  const confirmedProcedureLabel =
-    intervention.procedure === 'colpoclesis'
-      ? `${procedureLabel} validé`
-      : `${procedureLabel} validée`;
+  const senior = selectableSeniors.find((item) => item.id === draft.seniorId) ?? null;
+  const procedureLabel = getChoiceLabel(surgicalProcedureOptions, draft.procedure);
   const indicationLabel =
-    intervention.indication === 'autre' && intervention.indicationComment.trim()
-      ? `Autre · ${intervention.indicationComment.trim()}`
-      : getChoiceLabel(indicationOptions, intervention.indication);
-  const customIndicationLabel = intervention.customIndication?.trim() ?? '';
+    draft.procedure === 'salpingectomie'
+      ? draft.indication === 'autre' && draft.indicationComment.trim()
+        ? `Autre · ${draft.indicationComment.trim()}`
+        : getChoiceLabel(indicationOptions, draft.indication)
+      : draft.customIndication?.trim() ?? 'Non renseigné';
+  const approachLabel = getChoiceLabel(approachOptions, draft.approach);
+  const entryTechniqueLabel = getChoiceLabel(entryTechniqueOptions, draft.entryTechnique);
+  const approachSummary =
+    draft.approach && draft.entryTechnique
+      ? `${approachLabel} – ${entryTechniqueLabel}`
+      : approachLabel;
+  const checklistSteps = getChecklistStepsForIntervention(
+    draft.procedure,
+    draft.indication,
+    draft.approach,
+    draft.entryTechnique,
+    customSurgicalInterventions
+  );
+  const autonomyAverage = getChecklistAverage(
+    checklistSteps.map((step) => draft.checklist[step.id])
+  );
 
   return (
-    <ScreenContainer
-      eyebrow="Étape 3 sur 3"
-      title={
-        summaryMode === 'confirmed'
-          ? 'Intervention enregistrée'
-          : 'Récapitulatif avant enregistrement'
-      }
-      subtitle={
-        summaryMode === 'confirmed'
-          ? 'Le récapitulatif reprend l’ensemble des informations saisies.'
-          : 'Relis les informations et confirme l’enregistrement si tout est correct.'
-      }
+    <InterventionFlowLayout
+      onBack={backToChecklist}
+      step={3}
+      subtitle="Vérifie les informations et confirme l’enregistrement si tout est correct."
+      title="Récapitulatif avant enregistrement"
     >
-      <SectionCard>
-        <div className="summary-hero">
-          <strong>
-            {summaryMode === 'confirmed'
-              ? confirmedProcedureLabel
-              : procedureLabel}
-          </strong>
-          <span>
-            {internal
-              ? formatDisplayName(internal.firstName, internal.lastName)
-              : 'Interne non retrouvé'} ·{' '}
-            {formatIsoDate(intervention.date)}
+      <InterventionFlowCard>
+        <div className="flow-summary-list">
+          <SummaryInfoRow icon={CalendarDays} label="Date" value={formatIsoDate(draft.date)} />
+          <SummaryInfoRow
+            icon={UserRound}
+            label="Senior"
+            value={senior ? formatSeniorDisplayName(senior) : 'Non renseigné'}
+          />
+          <SummaryInfoRow icon={Scissors} label="Intervention" value={procedureLabel} />
+          <SummaryInfoRow
+            icon={ClipboardList}
+            label="Indication"
+            value={indicationLabel}
+          />
+          <SummaryInfoRow icon={Eye} label="Voie d’abord" value={approachSummary} />
+          <SummaryInfoRow
+            icon={Gauge}
+            label="Difficulté ressentie"
+            value={formatComplexityRating(draft.complexity)}
+          />
+        </div>
+      </InterventionFlowCard>
+
+      <InterventionFlowCard className="flow-summary-card">
+        <div className="flow-summary-card__body">
+          <span className="flow-summary-card__caption flow-summary-card__caption--strong">
+            Autonomie moyenne
+          </span>
+          <span className="flow-score-badge">
+            {formatChecklistAverage(autonomyAverage)}
           </span>
         </div>
-      </SectionCard>
+      </InterventionFlowCard>
 
-      <SectionCard title="Profil interne">
-        <SummaryRow
-          label="Interne"
-          value={internal ? formatDisplayName(internal.firstName, internal.lastName) : 'Non renseigné'}
-        />
-        <SummaryRow label="Promotion" value={internal?.promotion ?? 'Non renseigné'} />
-        <SummaryRow label="Semestre" value={internal?.semester ?? 'Non renseigné'} />
-        <SummaryRow
-          label="Stage actuel"
-          value={internal?.currentRotation ?? 'Non renseigné'}
-        />
-      </SectionCard>
-
-      <SectionCard title="Détails de l’intervention">
-        <SummaryRow label="Date" value={formatIsoDate(intervention.date)} />
-        <SummaryRow
-          label="Senior"
-          value={senior ? `${senior.firstName} ${senior.lastName}` : 'Non renseigné'}
-        />
-        <SummaryRow label="Intervention" value={procedureLabel} />
-        {isSalpingectomy || customIndicationLabel ? (
-          <SummaryRow
-            label="Indication"
-            value={isSalpingectomy ? indicationLabel : customIndicationLabel}
-          />
-        ) : null}
-        {isSalpingectomy || interventionDefinition?.isCustom ? (
-          <>
-            <SummaryRow
-              label="Voie d’abord"
-              value={getChoiceLabel(approachOptions, intervention.approach)}
-            />
-            {intervention.approach === 'coelioscopie' ||
-            intervention.approach === 'robot' ? (
-              <SummaryRow
-                label="Technique d’entrée"
-                value={getChoiceLabel(entryTechniqueOptions, intervention.entryTechnique)}
-              />
-            ) : null}
-            <SummaryRow
-              label="Latéralité"
-              value={getChoiceLabel(lateralityOptions, intervention.laterality)}
-            />
-          </>
-        ) : null}
-        {resolvedContext ? (
-          <SummaryRow
-            label="Contexte"
-            value={getChoiceLabel(contextOptions, resolvedContext)}
-          />
-        ) : null}
-        <SummaryRow
-          label="Difficulté ressentie"
-          value={formatComplexityRating(intervention.complexity)}
-        />
-        <SummaryRow
-          label="Rôle global"
-          value={getChoiceLabel(roleOptions, intervention.role)}
-        />
-      </SectionCard>
-
-      {hasChecklist ? (
-        <SectionCard
-          title={`Checklist technique ${procedureLabel}`}
-          description="Niveau déclaré pour chaque étape."
-        >
-          <div className="checklist-list">
-            {checklistSteps.map((step) => (
-              <div key={step.id} className="checklist-row">
-                <span>{step.label}</span>
-                <strong>
-                  {getChoiceLabel(checklistLevelOptions, intervention.checklist[step.id])}
-                </strong>
-              </div>
-            ))}
+      <InterventionFlowCard className="flow-success-card">
+        <div className="flow-success-card__body">
+          <span className="flow-success-card__icon" aria-hidden="true">
+            <CheckCircle2 strokeWidth={2.4} />
+          </span>
+          <div>
+            <strong>Tout semble complet !</strong>
+            <p>Tu peux enregistrer ton intervention.</p>
           </div>
-        </SectionCard>
-      ) : null}
+        </div>
+      </InterventionFlowCard>
 
-      {summaryMode === 'confirmed' ? (
-        <div className="action-stack">
-          <PrimaryButton
-            label="Nouvelle intervention"
-            onPress={startNewIntervention}
-          />
-          <PrimaryButton
-            label="Retour à l’accueil"
-            onPress={backToWelcome}
-            variant="secondary"
-          />
-        </div>
-      ) : (
-        <div className="action-stack">
-          <PrimaryButton
-            label="Confirmer l’enregistrement"
-            onPress={saveIntervention}
-          />
-          <PrimaryButton
-            label="Modifier la saisie"
-            onPress={backToForm}
-            variant="secondary"
-          />
-        </div>
-      )}
-    </ScreenContainer>
+      <div className="flow-actions">
+        <button
+          className="flow-button flow-button--primary"
+          onClick={saveIntervention}
+          type="button"
+        >
+          Enregistrer l’intervention
+        </button>
+        <button
+          className="flow-button flow-button--secondary"
+          onClick={backToChecklist}
+          type="button"
+        >
+          Retour à l’étape 2
+        </button>
+      </div>
+    </InterventionFlowLayout>
   );
 }
 
-function SummaryRow({ label, value }: { label: string; value: string }) {
+function SummaryInfoRow({
+  icon: Icon,
+  label,
+  value,
+}: {
+  icon: LucideIcon;
+  label: string;
+  value: string;
+}) {
   return (
-    <div className="summary-row">
-      <span className="summary-row__label">{label}</span>
-      <strong className="summary-row__value">{value}</strong>
+    <div className="flow-summary-row">
+      <span className="flow-summary-row__icon" aria-hidden="true">
+        <Icon strokeWidth={2.1} />
+      </span>
+      <span className="flow-summary-row__label">{label}</span>
+      <strong className="flow-summary-row__value">{value}</strong>
     </div>
   );
 }

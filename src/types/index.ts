@@ -4,11 +4,12 @@ export type AppScreen =
   | 'preblock'
   | 'surgery-history'
   | 'form'
+  | 'profile'
+  | 'notebook'
   | 'obstetric-journal'
   | 'checklist'
   | 'summary'
-  | 'admin'
-  | 'obstetric-portal';
+  | 'admin';
 
 export type SessionRole = 'internal' | 'admin' | 'senior';
 
@@ -61,6 +62,17 @@ export type CreateInternalProfileResult = {
   profile?: InternalProfile;
 };
 
+export type UpdateInternalCredentialsInput = {
+  loginId: string;
+  password: string;
+};
+
+export type UpdateInternalCredentialsResult = {
+  success: boolean;
+  message: string;
+  profile?: InternalProfile;
+};
+
 export type BadgeMetricKey =
   | 'primary_salpingectomy'
   | 'master_salpingectomy'
@@ -94,6 +106,20 @@ export type ProgressBadge = {
   progressLabel: string;
 };
 
+export type NotebookNote = {
+  id: string;
+  internalId: string;
+  content: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type NotebookDocument = {
+  internalId: string;
+  contentHtml: string;
+  updatedAt: string;
+};
+
 export type BadgeCatalogItem = {
   id: string;
   title: string;
@@ -109,8 +135,34 @@ export type Senior = {
   id: string;
   firstName: string;
   lastName: string;
+  loginId?: string;
+  password?: string;
+  createdAt?: string;
+  isCustom?: boolean;
+};
+
+export type CreateSeniorProfileInput = {
+  firstName: string;
+  lastName: string;
   loginId: string;
   password: string;
+};
+
+export type CreateSeniorProfileResult = {
+  success: boolean;
+  message: string;
+  senior?: Senior;
+};
+
+export type UpdateSeniorCredentialsInput = {
+  loginId: string;
+  password: string;
+};
+
+export type UpdateSeniorCredentialsResult = {
+  success: boolean;
+  message: string;
+  senior?: Senior;
 };
 
 export type InterventionType = 'salpingectomie' | 'colpoclesis' | `custom-${string}`;
@@ -202,7 +254,26 @@ export type AdminInterventionEvaluation = {
   interventionId: string;
   globalPerformance: AdminPerformanceRating | null;
   categoryDifficulty: AdminCategoryDifficultyRating | null;
+  seniorComment: string;
   updatedAt: string | null;
+};
+
+export type TestFeedback = {
+  id: string;
+  message: string;
+  authorRole: SessionRole;
+  authorLabel: string;
+  createdAt: string;
+};
+
+export type ActivityLogEntry = {
+  id: string;
+  actorRole: SessionRole;
+  actorLabel: string;
+  action: string;
+  targetType: string;
+  targetLabel: string;
+  createdAt: string;
 };
 
 export type ObstetricJournalDraft = {

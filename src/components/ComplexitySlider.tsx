@@ -12,22 +12,6 @@ function getSafeValue(value: Complexity | null) {
   return value ?? defaultComplexityRating;
 }
 
-function getDifficultyColor(value: Complexity) {
-  if (value <= 3) {
-    return '#2f9e44';
-  }
-
-  if (value <= 5) {
-    return '#f0c341';
-  }
-
-  if (value <= 7) {
-    return '#f58f29';
-  }
-
-  return '#d64545';
-}
-
 export function ComplexitySlider({
   value,
   onChange,
@@ -35,7 +19,6 @@ export function ComplexitySlider({
   const safeValue = getSafeValue(value);
   const progress = Math.max(8, ((safeValue - 1) / 9) * 100);
   const sliderStyle = {
-    '--difficulty-color': getDifficultyColor(safeValue),
     '--difficulty-progress': `${progress}%`,
   } as CSSProperties;
 
