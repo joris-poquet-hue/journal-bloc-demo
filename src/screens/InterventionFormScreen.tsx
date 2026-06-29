@@ -5,8 +5,10 @@ import {
   Eye,
   Gauge,
   LucideIcon,
-  Scissors,
+  PocketKnife,
+  Signpost,
   UserRound,
+  UsersRound,
 } from 'lucide-react';
 import { ChangeEvent } from 'react';
 
@@ -18,7 +20,6 @@ import { useAppContext } from '../context/AppContext';
 import {
   approachOptions,
   entryTechniqueOptions,
-  formatDisplayName,
   formatSeniorDisplayName,
   getApproachOptionsForIndication,
   getSurgicalInterventionDefinition,
@@ -27,6 +28,7 @@ import {
   roleOptions,
 } from '../data/mockData';
 import { ChoiceOption } from '../types';
+import { formatIsoDate } from '../utils/date';
 
 export function InterventionFormScreen() {
   const {
@@ -114,8 +116,15 @@ export function InterventionFormScreen() {
   );
   const procedureOptions = sortOptionsWithOtherLast(surgicalProcedureOptions);
   const sortedIndicationOptions = sortOptionsWithOtherLast(indicationOptions);
-  const sortedLateralityOptions = sortOptionsAlphabetically(lateralityOptions);
-  const sortedRoleOptions = sortOptionsAlphabetically(roleOptions);
+  const orderedLateralityOptions = ['gauche', 'bilateral', 'droite'].flatMap((value) =>
+    lateralityOptions.filter((option) => option.value === value)
+  );
+  const orderedRoleOptions = [
+    'operateur_principal',
+    'aide_principal',
+    'aide_secondaire',
+    'observateur',
+  ].flatMap((value) => roleOptions.filter((option) => option.value === value));
   const missingFieldsLabel =
     formMissingFields.length > 0
       ? `Champs à compléter : ${formMissingFields.join(', ')}.`
@@ -123,30 +132,26 @@ export function InterventionFormScreen() {
 
   return (
     <InterventionFlowLayout
-      onBack={backToWelcome}
       step={1}
-      subtitle={`${formatDisplayName(selectedInternal.firstName, selectedInternal.lastName)} · ${selectedInternal.currentRotation}`}
       title="Ajouter une intervention"
     >
       <InterventionFlowCard
-        description="Date préremplie à aujourd’hui, modifiable si nécessaire."
         icon={CalendarDays}
         title="Date de l’intervention"
       >
-        <label className="flow-input-shell">
+        <label className="flow-input-shell flow-input-shell--date">
+          <span className="flow-input-shell__display">{formatIsoDate(draft.date)}</span>
           <input
             aria-label="Date de l’intervention"
-            className="flow-input-shell__control"
+            className="flow-input-shell__control flow-input-shell__control--date-overlay"
             onChange={handleDateChange}
             type="date"
             value={draft.date}
           />
-          <CalendarDays aria-hidden="true" className="flow-input-shell__icon" />
         </label>
       </InterventionFlowCard>
 
       <InterventionFlowCard
-        description="Choisis le senior superviseur de l’intervention."
         icon={UserRound}
         title="Senior"
       >
@@ -170,30 +175,48 @@ export function InterventionFormScreen() {
         />
       </InterventionFlowCard>
 
-      <div className="flow-grid flow-grid--two">
-        <ChoiceListCard
-          description="Choisis l’intervention à ajouter au journal."
-          icon={Scissors}
-          options={procedureOptions}
+      <div className="flow-grid flow-grid--single">
+        <InterventionFlowCard
+          icon={PocketKnife}
           title="Intervention"
-          value={draft.procedure}
-          onChange={(value) => updateDraftField('procedure', value)}
-        />
+        >
+          <SelectField
+            ariaLabel="Intervention"
+            options={procedureOptions}
+            placeholder="Choisir l’intervention"
+            value={draft.procedure}
+            onChange={(value) => updateDraftField('procedure', value)}
+          />
+        </InterventionFlowCard>
 
-        <ChoiceListCard
-          description="Indication principale de l’intervention."
-          emptyState="Aucune indication spécifique pour cette intervention."
-          icon={ClipboardList}
-          options={isSalpingectomy ? sortedIndicationOptions : customIndicationOptions}
-          title="Indication"
-          value={isSalpingectomy ? draft.indication : draft.customIndication}
-          onChange={(value) =>
-            isSalpingectomy
-              ? updateDraftField('indication', value)
-              : updateDraftField('customIndication', value)
-          }
-          visible={isSalpingectomy || shouldShowCustomIndication}
-        />
+        {isSalpingectomy ? (
+          <ChoiceListCard
+            className={
+              !sortedIndicationOptions.length ? 'flow-card--empty' : undefined
+            }
+            emptyState="Aucune indication n'est à renseigner pour cette intervention."
+            icon={ClipboardList}
+            options={sortedIndicationOptions}
+            title="Indication"
+            value={draft.indication}
+            onChange={(value) => updateDraftField('indication', value)}
+          />
+        ) : (
+          <ChoiceListCard
+            className={
+              !shouldShowCustomIndication || !customIndicationOptions.length
+                ? 'flow-card--empty'
+                : undefined
+            }
+            emptyState="Aucune indication n'est à renseigner pour cette intervention."
+            icon={ClipboardList}
+            options={customIndicationOptions}
+            title="Indication"
+            value={draft.customIndication}
+            onChange={(value) => updateDraftField('customIndication', value)}
+            visible={shouldShowCustomIndication}
+          />
+        )}
       </div>
 
       {isSalpingectomy && draft.indication === 'autre' ? (
@@ -212,12 +235,12 @@ export function InterventionFormScreen() {
       ) : null}
 
       <InterventionFlowCard
-        description="Précise la voie d’abord utilisée et la technique d’entrée associée."
+        className={availableApproachOptions.length === 0 ? 'flow-card--empty' : undefined}
         icon={Eye}
         title="Voie d’abord et technique d’entrée"
       >
         {availableApproachOptions.length > 0 ? (
-          <div className="flow-field-grid">
+          <div className="flow-field-grid flow-field-grid--single">
             <SelectField
               ariaLabel="Voie d’abord"
               label="Voie d’abord"
@@ -237,50 +260,58 @@ export function InterventionFormScreen() {
               />
             ) : (
               <div className="flow-note-box">
-                <strong>Technique d’entrée</strong>
-                <span>
-                  Affichée uniquement pour la cœlioscopie et le robot.
-                </span>
+                <strong className="flow-note-box__label">Technique d’entrée</strong>
               </div>
             )}
           </div>
         ) : (
           <p className="flow-empty-state">
-            Aucune voie d’abord spécifique n’est à renseigner pour cette intervention.
+            Aucune voie d’abord n’est à renseigner pour cette intervention.
           </p>
         )}
       </InterventionFlowCard>
 
-      <div
-        className={`flow-grid ${
-          shouldShowLaterality ? 'flow-grid--two' : 'flow-grid--single'
-        }`}
-      >
+      <div className="flow-grid flow-grid--single">
         <InterventionFlowCard
-          description="Rôle au cours de l’intervention."
+          description="Rôle que tu as eu sur au moins la moitié de l'intervention."
+          icon={UsersRound}
           title="Rôle global"
         >
-          <SelectField
-            ariaLabel="Rôle global"
-            options={sortedRoleOptions}
-            placeholder="Choisir"
-            value={draft.role}
-            onChange={(value) => updateDraftField('role', value)}
-          />
+          <div className="flow-choice-stack flow-choice-stack--role" role="group" aria-label="Rôle global">
+            {orderedRoleOptions.map((option) => (
+              <button
+                className={`flow-choice-pill flow-choice-pill--role ${
+                  draft.role === option.value ? 'flow-choice-pill--selected' : ''
+                }`.trim()}
+                key={option.value}
+                onClick={() => updateDraftField('role', option.value)}
+                type="button"
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
         </InterventionFlowCard>
 
         {shouldShowLaterality ? (
           <InterventionFlowCard
-            description="Précise le côté concerné si nécessaire."
+            icon={Signpost}
             title="Latéralité"
           >
-            <SelectField
-              ariaLabel="Latéralité"
-              options={sortedLateralityOptions}
-              placeholder="Choisir"
-              value={draft.laterality}
-              onChange={(value) => updateDraftField('laterality', value)}
-            />
+            <div className="flow-choice-stack flow-choice-stack--laterality" role="group" aria-label="Latéralité">
+              {orderedLateralityOptions.map((option) => (
+                <button
+                  className={`flow-choice-pill flow-choice-pill--laterality ${
+                    draft.laterality === option.value ? 'flow-choice-pill--selected' : ''
+                  }`.trim()}
+                  key={option.value}
+                  onClick={() => updateDraftField('laterality', option.value)}
+                  type="button"
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
           </InterventionFlowCard>
         ) : null}
       </div>
@@ -329,7 +360,9 @@ function SelectField<T extends string>({
       <span className="flow-select-field__control">
         <select
           aria-label={ariaLabel}
-          className="flow-select-field__select"
+          className={`flow-select-field__select ${
+            value == null ? 'flow-select-field__select--placeholder' : ''
+          }`.trim()}
           onChange={(event) => {
             if (!event.target.value) {
               return;
@@ -354,13 +387,14 @@ function SelectField<T extends string>({
 
 type ChoiceListCardProps<T extends string> = {
   title: string;
-  description: string;
+  description?: string;
   options: ChoiceOption<T>[];
   value: T | null;
   onChange: (value: T) => void;
   icon: LucideIcon;
   emptyState?: string;
   visible?: boolean;
+  className?: string;
 };
 
 function ChoiceListCard<T extends string>({
@@ -372,9 +406,15 @@ function ChoiceListCard<T extends string>({
   icon,
   emptyState,
   visible = true,
+  className,
 }: ChoiceListCardProps<T>) {
   return (
-    <InterventionFlowCard description={description} icon={icon} title={title}>
+    <InterventionFlowCard
+      className={className}
+      description={description}
+      icon={icon}
+      title={title}
+    >
       {visible && options.length > 0 ? (
         <div className="flow-choice-stack">
           {options.map((option) => (

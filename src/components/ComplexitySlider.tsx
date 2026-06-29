@@ -40,10 +40,6 @@ export function ComplexitySlider({
         type="range"
         value={safeValue}
       />
-      <div className="complexity-slider__scale" aria-hidden="true">
-        <span>1</span>
-        <span>10</span>
-      </div>
     </div>
   );
 }

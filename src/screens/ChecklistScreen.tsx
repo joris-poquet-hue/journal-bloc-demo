@@ -91,7 +91,7 @@ export function ChecklistScreen() {
             )}
           </button>
         }
-        description="Comprendre le barème"
+        className={!isScaleOpen ? 'flow-card--header-only' : undefined}
         icon={BookOpen}
         title="Barème d’autonomie"
       >

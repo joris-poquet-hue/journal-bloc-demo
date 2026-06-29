@@ -1,12 +1,5 @@
 import {
-  CalendarDays,
   CheckCircle2,
-  ClipboardList,
-  Eye,
-  Gauge,
-  LucideIcon,
-  Scissors,
-  UserRound,
 } from 'lucide-react';
 
 import { InterventionFlowCard } from '../components/InterventionFlowCard';
@@ -18,21 +11,15 @@ import {
   entryTechniqueOptions,
   formatComplexityRating,
   formatSeniorDisplayName,
-  getChecklistStepsForIntervention,
   getChoiceLabel,
   indicationOptions,
 } from '../data/mockData';
-import {
-  formatChecklistAverage,
-  getChecklistAverage,
-} from '../utils/checklistSummary';
 import { formatIsoDate } from '../utils/date';
 
 export function SummaryScreen() {
   const {
     selectedInternal,
     draft,
-    customSurgicalInterventions,
     selectableSeniors,
     surgicalProcedureOptions,
     saveIntervention,
@@ -71,17 +58,6 @@ export function SummaryScreen() {
     draft.approach && draft.entryTechnique
       ? `${approachLabel} – ${entryTechniqueLabel}`
       : approachLabel;
-  const checklistSteps = getChecklistStepsForIntervention(
-    draft.procedure,
-    draft.indication,
-    draft.approach,
-    draft.entryTechnique,
-    customSurgicalInterventions
-  );
-  const autonomyAverage = getChecklistAverage(
-    checklistSteps.map((step) => draft.checklist[step.id])
-  );
-
   return (
     <InterventionFlowLayout
       onBack={backToChecklist}
@@ -91,35 +67,21 @@ export function SummaryScreen() {
     >
       <InterventionFlowCard>
         <div className="flow-summary-list">
-          <SummaryInfoRow icon={CalendarDays} label="Date" value={formatIsoDate(draft.date)} />
+          <SummaryInfoRow label="Date" value={formatIsoDate(draft.date)} />
           <SummaryInfoRow
-            icon={UserRound}
             label="Senior"
             value={senior ? formatSeniorDisplayName(senior) : 'Non renseigné'}
           />
-          <SummaryInfoRow icon={Scissors} label="Intervention" value={procedureLabel} />
+          <SummaryInfoRow label="Intervention" value={procedureLabel} />
           <SummaryInfoRow
-            icon={ClipboardList}
             label="Indication"
             value={indicationLabel}
           />
-          <SummaryInfoRow icon={Eye} label="Voie d’abord" value={approachSummary} />
+          <SummaryInfoRow label="Voie d’abord" value={approachSummary} />
           <SummaryInfoRow
-            icon={Gauge}
             label="Difficulté ressentie"
             value={formatComplexityRating(draft.complexity)}
           />
-        </div>
-      </InterventionFlowCard>
-
-      <InterventionFlowCard className="flow-summary-card">
-        <div className="flow-summary-card__body">
-          <span className="flow-summary-card__caption flow-summary-card__caption--strong">
-            Autonomie moyenne
-          </span>
-          <span className="flow-score-badge">
-            {formatChecklistAverage(autonomyAverage)}
-          </span>
         </div>
       </InterventionFlowCard>
 
@@ -156,19 +118,14 @@ export function SummaryScreen() {
 }
 
 function SummaryInfoRow({
-  icon: Icon,
   label,
   value,
 }: {
-  icon: LucideIcon;
   label: string;
   value: string;
 }) {
   return (
     <div className="flow-summary-row">
-      <span className="flow-summary-row__icon" aria-hidden="true">
-        <Icon strokeWidth={2.1} />
-      </span>
       <span className="flow-summary-row__label">{label}</span>
       <strong className="flow-summary-row__value">{value}</strong>
     </div>

@@ -1,5 +1,5 @@
-import { LucideIcon } from 'lucide-react';
-import { ReactNode } from 'react';
+import { Info, LucideIcon } from 'lucide-react';
+import { Children, ReactNode, useState } from 'react';
 
 type InterventionFlowCardProps = {
   title?: string;
@@ -18,6 +18,9 @@ export function InterventionFlowCard({
   className,
   children,
 }: InterventionFlowCardProps) {
+  const [isInfoOpen, setIsInfoOpen] = useState(false);
+  const hasContent = Children.toArray(children).length > 0;
+
   return (
     <section className={['flow-card', className].filter(Boolean).join(' ')}>
       {title || description || Icon || action ? (
@@ -29,15 +32,40 @@ export function InterventionFlowCard({
               </span>
             ) : null}
             <div className="flow-card__copy">
-              {title ? <h2>{title}</h2> : null}
-              {description ? <p>{description}</p> : null}
+              {title || description ? (
+                <div className="flow-card__title-row">
+                  {title ? <h2>{title}</h2> : null}
+                  {description ? (
+                    <span
+                      className={`flow-card__info ${
+                        isInfoOpen ? 'flow-card__info--open' : ''
+                      }`.trim()}
+                    >
+                      <button
+                        aria-expanded={isInfoOpen}
+                        aria-label={`Informations sur ${title ?? 'cette section'}`}
+                        className="flow-card__info-button"
+                        onBlur={() => setIsInfoOpen(false)}
+                        onClick={() => setIsInfoOpen((current) => !current)}
+                        onMouseLeave={() => setIsInfoOpen(false)}
+                        type="button"
+                      >
+                        <Info aria-hidden="true" strokeWidth={2.1} />
+                      </button>
+                      <span className="flow-card__info-tooltip" role="note">
+                        {description}
+                      </span>
+                    </span>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </div>
           {action ? <div className="flow-card__action">{action}</div> : null}
         </header>
       ) : null}
 
-      <div className="flow-card__content">{children}</div>
+      {hasContent ? <div className="flow-card__content">{children}</div> : null}
     </section>
   );
 }

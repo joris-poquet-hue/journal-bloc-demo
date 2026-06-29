@@ -1,3 +1,4 @@
+import { ChevronRight, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { PrimaryButton } from '../components/PrimaryButton';
@@ -49,23 +50,22 @@ function GuideFigure({
 }
 
 export function PreBlockScreen() {
-  const { backToWelcome, preBlockContext } = useAppContext();
+  const { preBlockContext } = useAppContext();
   const [view, setView] = useState<GuideView>('menu');
   const [expandedFigure, setExpandedFigure] = useState<ExpandedFigure | null>(null);
   const selectedGuide =
     view === 'menu'
       ? null
       : techniqueGuides.find((guide) => guide.id === view) ?? null;
-  const screenEyebrow =
-    preBlockContext === 'obstetric'
-      ? 'Avant la salle de naissance'
-      : 'Avant le bloc';
   const menuSubtitle =
     preBlockContext === 'obstetric'
       ? 'Les fiches dédiées à la salle de naissance seront regroupées ici.'
-      : 'Choisis la fiche de rappels à consulter avant l’intervention.';
+      : 'Consulte une fiche de rappel avant l’intervention.';
   const availableGuides =
     preBlockContext === 'obstetric' ? [] : techniqueGuides;
+  const sortedGuides = [...availableGuides].sort((left, right) =>
+    left.title.localeCompare(right.title, 'fr', { sensitivity: 'base' })
+  );
 
   useEffect(() => {
     if (!expandedFigure) {
@@ -92,36 +92,33 @@ export function PreBlockScreen() {
   if (view === 'menu') {
     return (
       <ScreenContainer
-        eyebrow={screenEyebrow}
         title="Fiches techniques"
         subtitle={menuSubtitle}
       >
-        <SectionCard>
-          {availableGuides.length ? (
-            <>
-              <p>{`${availableGuides.length} fiches sont déjà disponibles.`}</p>
-              <div className="action-stack">
-                {availableGuides.map((guide) => (
-                  <PrimaryButton
-                    key={guide.id}
-                    label={guide.title}
-                    onPress={() => setView(guide.id)}
-                  />
-                ))}
+        {availableGuides.length ? (
+          <div className="guide-menu-list">
+            {sortedGuides.map((guide) => (
+              <GuideMenuCard
+                key={guide.id}
+                guide={guide}
+                onPress={() => setView(guide.id)}
+              />
+            ))}
+          </div>
+        ) : (
+          <SectionCard className="guide-menu-empty-card">
+            <div className="guide-menu-empty-card__body">
+              <span className="guide-menu-empty-card__icon" aria-hidden="true">
+                <Sparkles strokeWidth={2.1} />
+              </span>
+              <div>
+                <strong>Bientôt disponible</strong>
+                <p>Les fiches obstétricales seront ajoutées dans cet espace.</p>
               </div>
-            </>
-          ) : (
-            <p>
-              Les fiches obstétricales seront ajoutées dans cet espace.
-            </p>
-          )}
-        </SectionCard>
+            </div>
+          </SectionCard>
+        )}
 
-        <PrimaryButton
-          label="Retour à l’accueil"
-          onPress={backToWelcome}
-          variant="secondary"
-        />
       </ScreenContainer>
     );
   }
@@ -133,7 +130,6 @@ export function PreBlockScreen() {
   if (selectedGuide.kind !== 'geu') {
     return (
       <ScreenContainer
-        eyebrow={screenEyebrow}
         title={`${selectedGuide.title} : fiche technique`}
       >
         {(selectedGuide.sections ?? []).map((section) => (
@@ -179,15 +175,11 @@ export function PreBlockScreen() {
           </SectionCard>
         ))}
 
-        <div className="action-stack">
+        <div className="action-stack guide-detail-actions">
           <PrimaryButton
             label="Retour aux fiches"
+            className="guide-detail-back-button"
             onPress={() => setView('menu')}
-            variant="secondary"
-          />
-          <PrimaryButton
-            label="Retour à l’accueil"
-            onPress={backToWelcome}
             variant="secondary"
           />
         </div>
@@ -230,7 +222,6 @@ export function PreBlockScreen() {
 
   return (
     <ScreenContainer
-      eyebrow={screenEyebrow}
       title="GEU : fiche technique"
       subtitle="Repères synthétiques pour la prise en charge chirurgicale d’une grossesse extra-utérine."
     >
@@ -329,15 +320,11 @@ export function PreBlockScreen() {
         </div>
       </SectionCard>
 
-      <div className="action-stack">
+      <div className="action-stack guide-detail-actions">
         <PrimaryButton
           label="Retour aux fiches"
+          className="guide-detail-back-button"
           onPress={() => setView('menu')}
-          variant="secondary"
-        />
-        <PrimaryButton
-          label="Retour à l’accueil"
-          onPress={backToWelcome}
           variant="secondary"
         />
       </div>
@@ -373,5 +360,22 @@ export function PreBlockScreen() {
         </div>
       ) : null}
     </ScreenContainer>
+  );
+}
+
+function GuideMenuCard({
+  guide,
+  onPress,
+}: {
+  guide: TechniqueGuide;
+  onPress: () => void;
+}) {
+  return (
+    <button className="guide-menu-card" onClick={onPress} type="button">
+      <span className="guide-menu-card__content">
+        <strong>{guide.title}</strong>
+      </span>
+      <ChevronRight aria-hidden="true" className="guide-menu-card__chevron" />
+    </button>
   );
 }

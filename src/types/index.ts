@@ -32,6 +32,7 @@ export type InternalProfile = {
   promotion: string;
   semester: string;
   currentRotation: string;
+  avatarImageSrc?: string | null;
   createdAt: string;
   lastLoginAt: string | null;
   achievementBadges?: AchievementBadge[];
@@ -68,6 +69,18 @@ export type UpdateInternalCredentialsInput = {
 };
 
 export type UpdateInternalCredentialsResult = {
+  success: boolean;
+  message: string;
+  profile?: InternalProfile;
+};
+
+export type UpdateInternalProfileSettingsInput = {
+  semester?: string;
+  currentRotation?: string;
+  avatarImageSrc?: string | null;
+};
+
+export type UpdateInternalProfileSettingsResult = {
   success: boolean;
   message: string;
   profile?: InternalProfile;
@@ -131,6 +144,76 @@ export type BadgeCatalogItem = {
   prerequisiteTitle?: string;
 };
 
+export type TrophyStatus = 'draft' | 'active' | 'inactive';
+export type TrophyType = 'operatoire' | 'special';
+export type TrophyFormat = 'unique' | 'levels';
+export type TrophyVisibility = 'visible' | 'surprise';
+export type TrophyTrackedStatus = 'recorded' | 'evaluated';
+export type TrophyConditionType =
+  | 'first_recorded'
+  | 'total_recorded'
+  | 'total_evaluated'
+  | 'procedure_count'
+  | 'approach_count'
+  | 'recording_time_range'
+  | 'average_autonomy'
+  | 'cross_procedure_autonomy'
+  | 'distinct_procedures'
+  | 'role'
+  | 'intervention_status';
+
+export type TrophyCondition = {
+  id: string;
+  type: TrophyConditionType;
+  procedure?: InterventionType | '';
+  approach?: SurgicalApproach | '';
+  role?: GlobalRole | '';
+  trackedStatus?: TrophyTrackedStatus;
+  threshold?: number | null;
+  autonomyMin?: number | null;
+  distinctProcedureCount?: number | null;
+  minEvaluatedPerProcedure?: number | null;
+  startHour?: string;
+  endHour?: string;
+  interventionStatus?: 'evaluated' | 'pending' | '';
+};
+
+export type TrophyLevelDefinition = {
+  tier: BadgeTier;
+  label: string;
+  trackedStatus: TrophyTrackedStatus;
+  threshold: number | null;
+  autonomyMin: number | null;
+  imageSrc: string | null;
+};
+
+export type TrophyImageSet = {
+  single: string | null;
+  bronze: string | null;
+  silver: string | null;
+  gold: string | null;
+  diamond: string | null;
+};
+
+export type AdminTrophyDefinition = {
+  id: string;
+  title: string;
+  description: string;
+  type: TrophyType;
+  format: TrophyFormat;
+  status: TrophyStatus;
+  visibility: TrophyVisibility;
+  associatedProcedure: InterventionType | '';
+  associatedApproach: SurgicalApproach | '';
+  trackedRole: GlobalRole | '';
+  trackedInterventionStatus: TrophyTrackedStatus;
+  conditions: TrophyCondition[];
+  levels: TrophyLevelDefinition[];
+  images: TrophyImageSet;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type Senior = {
   id: string;
   firstName: string;
@@ -175,6 +258,7 @@ export type SurgicalApproach =
   | 'hysteroscopie'
   | 'laparotomie'
   | 'robot'
+  | 'voie_vaginale'
   | 'vnotes';
 export type EntryTechnique = 'trocart_direct' | 'open' | 'veress';
 export type Laterality = 'droite' | 'gauche' | 'bilateral';
@@ -193,17 +277,59 @@ export type ChecklistStep = {
   applicableApproaches?: SurgicalApproach[];
 };
 
+export type InterventionStatus = 'active' | 'inactive' | 'archived';
+export type InterventionLateralityMode =
+  | 'none'
+  | 'right_left'
+  | 'right_left_bilateral';
+
+export type InterventionIndicationOption = {
+  id: string;
+  label: string;
+  active: boolean;
+  isOther?: boolean;
+  isDefault?: boolean;
+};
+
+export type InterventionEntryTechniqueOption = {
+  id: string;
+  label: EntryTechnique;
+  active: boolean;
+};
+
+export type OperativeStepDefinition = {
+  id: string;
+  label: string;
+  scored: boolean;
+  order: number;
+};
+
+export type InterventionApproachConfig = {
+  id: string;
+  approach: SurgicalApproach;
+  active: boolean;
+  entryTechniques?: InterventionEntryTechniqueOption[];
+  steps: OperativeStepDefinition[];
+};
+
 export type SurgicalInterventionDefinition = {
   id: InterventionType;
   name: string;
   indications: string[];
+  indicationOptions?: InterventionIndicationOption[];
   allowedApproaches: SurgicalApproach[];
   allowedEntryTechniques: EntryTechnique[];
   requiresLaterality: boolean;
   checklistSteps: ChecklistStep[];
   keyStepIds: string[];
+  status?: InterventionStatus;
+  lateralityMode?: InterventionLateralityMode;
+  approachConfigs?: InterventionApproachConfig[];
   isCustom?: boolean;
   createdAt?: string;
+  updatedAt?: string;
+  archivedAt?: string | null;
+  usedCount?: number;
 };
 
 export type CreateSurgicalInterventionInput = {
@@ -216,6 +342,10 @@ export type CreateSurgicalInterventionInput = {
   keyStepLabels: string[];
   stepOrderLabels: string[];
   stepApproachLabels: Record<string, SurgicalApproach[]>;
+  status?: InterventionStatus;
+  lateralityMode?: InterventionLateralityMode;
+  indicationOptions?: InterventionIndicationOption[];
+  approachConfigs?: InterventionApproachConfig[];
 };
 
 export type CreateSurgicalInterventionResult = {

@@ -29,7 +29,7 @@ export function BottomNavigation() {
       label: 'Progression',
       isActive: (currentScreen) =>
         currentScreen === 'surgery-history' || currentScreen === 'badges',
-      onPress: goToSurgeryHistory,
+      onPress: () => goToSurgeryHistory(undefined, 'progress'),
     },
     {
       label: 'Fiches',

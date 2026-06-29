@@ -1,20 +1,15 @@
 import {
   ArrowLeft,
   BarChart3,
-  CalendarDays,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock3,
-  ClipboardList,
-  FileText,
   Info,
   LockKeyhole,
-  Stethoscope,
-  Target,
   Trophy,
-  UserRound,
 } from 'lucide-react';
-import { CSSProperties, useMemo, useState } from 'react';
+import { CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
 import {
   ApproachIcon,
@@ -23,6 +18,10 @@ import {
 import { PrimaryButton } from '../components/PrimaryButton';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionCard } from '../components/SectionCard';
+import {
+  formatInterventionCardDate,
+  SurgeryInterventionCard,
+} from '../components/SurgeryInterventionCard';
 import { useAppContext } from '../context/AppContext';
 import {
   approachOptions,
@@ -74,8 +73,20 @@ type ProgressStepRow = {
   id: string;
   label: string;
   score: number;
-  isWeakest: boolean;
+  isCritical: boolean;
 };
+
+function getProgressStepTone(score: number) {
+  if (score < 50) {
+    return 'danger';
+  }
+
+  if (score < 75) {
+    return 'warning';
+  }
+
+  return 'success';
+}
 
 const ADMIN_EVALUATIONS_STORAGE_KEY =
   'journal-bord:admin-intervention-evaluations:v1';
@@ -451,23 +462,14 @@ function buildStepRows(
     id,
     label: item.label,
     score: Math.round(item.scoreTotal / item.count),
-    isWeakest: false,
+    isCritical: Math.round(item.scoreTotal / item.count) < 50,
   }));
 
   if (!rows.length) {
     return [];
   }
 
-  const weakestIndex = rows.reduce(
-    (currentWeakestIndex, row, index) =>
-      row.score < rows[currentWeakestIndex].score ? index : currentWeakestIndex,
-    0
-  );
-
-  return rows.map((row, index) => ({
-    ...row,
-    isWeakest: index === weakestIndex,
-  }));
+  return rows;
 }
 
 function buildDetailChecklistRows(
@@ -535,7 +537,10 @@ function buildDetailChecklistRows(
 
 export function SurgeryHistoryScreen() {
   const {
+    clearHistoryNavigationDate,
     customSurgicalInterventions,
+    historyNavigationDate,
+    historyNavigationView,
     selectedInternal,
     savedInterventions,
     selectableSeniors,
@@ -543,7 +548,9 @@ export function SurgeryHistoryScreen() {
     goToSurgeryPortal,
   } = useAppContext();
   const [adminEvaluations] = useState(loadStoredAdminEvaluations);
-  const [viewMode, setViewMode] = useState<HistoryViewMode>('calendar');
+  const [viewMode, setViewMode] = useState<HistoryViewMode>(
+    historyNavigationView ?? 'calendar'
+  );
   const [progressSubTab, setProgressSubTab] =
     useState<ProgressSubTab>('autonomy');
   const [selectedProgressKey, setSelectedProgressKey] = useState('');
@@ -569,6 +576,31 @@ export function SurgeryHistoryScreen() {
 
     return new Date(date.getFullYear(), date.getMonth(), 1);
   });
+
+  useLayoutEffect(() => {
+    if (!historyNavigationDate && !historyNavigationView) {
+      return;
+    }
+
+    if (historyNavigationView) {
+      setViewMode(historyNavigationView);
+      setSelectedDetailId(null);
+    }
+
+    if (historyNavigationDate) {
+      const targetDate = parseIsoDate(historyNavigationDate);
+
+      setSelectedDetailId(null);
+      setSelectedDate(historyNavigationDate);
+      setVisibleMonth(new Date(targetDate.getFullYear(), targetDate.getMonth(), 1));
+    }
+
+    if (historyNavigationView === 'calendar' && !historyNavigationDate) {
+      setSelectedDetailId(null);
+    }
+
+    clearHistoryNavigationDate();
+  }, [clearHistoryNavigationDate, historyNavigationDate, historyNavigationView]);
 
   const scoredInterventions = useMemo<ScoredHistoryIntervention[]>(
     () =>
@@ -628,6 +660,9 @@ export function SurgeryHistoryScreen() {
   const selectedDetailEvolution = selectedDetail
     ? getPreviousFiveScoreEvolution(scoredInterventions, selectedDetail)
     : null;
+  const selectedDetailAutonomyTone = getProgressStepTone(
+    selectedDetail?.autonomyScore ?? 0
+  );
   const progressGroups = useMemo(
     () => buildProgressGroups(scoredInterventions, surgicalProcedureOptions),
     [scoredInterventions, surgicalProcedureOptions]
@@ -652,7 +687,6 @@ export function SurgeryHistoryScreen() {
     selectedPointIndex != null && selectedPointIndex < autonomySeries.length
       ? selectedPointIndex
       : null;
-  const weakestStep = stepRows.find((row) => row.isWeakest) ?? null;
 
   function getSeniorLabel(intervention: SavedIntervention) {
     const senior = selectableSeniors.find(
@@ -700,7 +734,7 @@ export function SurgeryHistoryScreen() {
 
   if (selectedDetail && selectedDetail.isValidated) {
     return (
-      <ScreenContainer eyebrow="Progression" title="Détail de l’intervention">
+      <ScreenContainer title="Détail de l’intervention">
         <button
           className="history-back-button"
           onClick={() => setSelectedDetailId(null)}
@@ -723,13 +757,12 @@ export function SurgeryHistoryScreen() {
               <span>{getInterventionApproachLabel(selectedDetail.intervention)}</span>
             </div>
             <span className="dashboard-status-pill dashboard-status-pill--valid">
-              Validée
+              Évaluée
             </span>
           </div>
 
           <div className="history-detail-grid">
             <div className="history-detail-row">
-              <CalendarDays aria-hidden="true" />
               <span>Date et heure</span>
               <strong>
                 {formatIsoDate(selectedDetail.intervention.date)} ·{' '}
@@ -737,7 +770,6 @@ export function SurgeryHistoryScreen() {
               </strong>
             </div>
             <div className="history-detail-row">
-              <UserRound aria-hidden="true" />
               <span>Senior</span>
               <strong>
                 {selectedDetailSenior
@@ -746,7 +778,6 @@ export function SurgeryHistoryScreen() {
               </strong>
             </div>
             <div className="history-detail-row">
-              <ClipboardList aria-hidden="true" />
               <span>Intervention</span>
               <strong>
                 {getChoiceLabel(
@@ -756,12 +787,10 @@ export function SurgeryHistoryScreen() {
               </strong>
             </div>
             <div className="history-detail-row">
-              <FileText aria-hidden="true" />
               <span>Indication</span>
               <strong>{getInterventionIndicationLabel(selectedDetail.intervention)}</strong>
             </div>
             <div className="history-detail-row">
-              <Stethoscope aria-hidden="true" />
               <span>Voie d’abord</span>
               <strong>
                 {selectedDetail.intervention.approach
@@ -778,7 +807,7 @@ export function SurgeryHistoryScreen() {
               aria-label={`Score d’autonomie ${Math.round(
                 selectedDetail.autonomyScore ?? 0
               )} pour cent`}
-              className="history-score-gauge"
+              className={`history-score-gauge history-score-gauge--${selectedDetailAutonomyTone}`}
               role="img"
               style={
                 {
@@ -841,16 +870,7 @@ export function SurgeryHistoryScreen() {
 
   return (
     <ScreenContainer
-      eyebrow="Progression"
       title={viewMode === 'calendar' ? 'Historique des blocs' : 'Ma progression'}
-      subtitle={
-        viewMode === 'calendar'
-          ? `${formatDisplayName(
-              selectedInternal.firstName,
-              selectedInternal.lastName
-            )} · ${selectedInternal.currentRotation}`
-          : undefined
-      }
     >
       <div className="history-view-switch" aria-label="Mode d’affichage">
         <button
@@ -928,12 +948,6 @@ export function SurgeryHistoryScreen() {
           <SectionCard className="history-day-card">
             <div className="history-day-card__header">
               <h2>{getDayTitle(selectedDate)}</h2>
-              <span>
-                {selectedDayInterventions.length}{' '}
-                {selectedDayInterventions.length > 1
-                  ? 'interventions'
-                  : 'intervention'}
-              </span>
             </div>
 
             {selectedDayInterventions.length ? (
@@ -961,21 +975,24 @@ export function SurgeryHistoryScreen() {
           {progressGroups.length ? (
             <>
               <label className="progress-selector">
-                <span>Intervention</span>
-                <select
-                  aria-label="Choisir une intervention"
-                  onChange={(event) => {
-                    setSelectedProgressKey(event.target.value);
-                    setSelectedPointIndex(null);
-                  }}
-                  value={selectedProgressGroup?.key ?? ''}
-                >
-                  {progressGroups.map((group) => (
-                    <option key={group.key} value={group.key}>
-                      {group.label}
-                    </option>
-                  ))}
-                </select>
+                <span className="progress-selector__label">Intervention</span>
+                <span className="progress-selector__control">
+                  <select
+                    aria-label="Choisir une intervention"
+                    onChange={(event) => {
+                      setSelectedProgressKey(event.target.value);
+                      setSelectedPointIndex(null);
+                    }}
+                    value={selectedProgressGroup?.key ?? ''}
+                  >
+                    {progressGroups.map((group) => (
+                      <option key={group.key} value={group.key}>
+                        {group.label}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown aria-hidden="true" className="progress-selector__chevron" />
+                </span>
               </label>
 
               <div className="progress-subtabs" aria-label="Analyse de progression">
@@ -1022,7 +1039,6 @@ export function SurgeryHistoryScreen() {
                   <SectionCard className="progress-chart-card">
                     <div className="progress-card-title">
                       <h2>Score d’autonomie opératoire</h2>
-                      <Info aria-hidden="true" />
                     </div>
                     <AutonomyLineChart
                       onSelect={setSelectedPointIndex}
@@ -1059,11 +1075,13 @@ export function SurgeryHistoryScreen() {
                     <div className="progress-steps-list">
                       {stepRows.map((row) => (
                         <div
-                          className={
-                            row.isWeakest
-                              ? 'progress-step-row progress-step-row--weak'
-                              : 'progress-step-row'
-                          }
+                          className={[
+                            'progress-step-row',
+                            row.isCritical ? 'progress-step-row--weak' : '',
+                            `progress-step-row--${getProgressStepTone(row.score)}`,
+                          ]
+                            .filter(Boolean)
+                            .join(' ')}
                           key={row.id}
                         >
                           <div className="progress-step-row__header">
@@ -1077,21 +1095,6 @@ export function SurgeryHistoryScreen() {
                       ))}
                     </div>
                   </SectionCard>
-
-                  {weakestStep ? (
-                    <section className="progress-focus-card">
-                      <Target aria-hidden="true" />
-                      <div>
-                        <h2>Focus : {weakestStep.label}</h2>
-                        <p>
-                          C’est l’étape avec le score le plus faible.
-                          Entraînez-vous à sécuriser cette étape.
-                        </p>
-                        <span>Étape la moins maîtrisée sur vos 5 dernières interventions</span>
-                      </div>
-                      <strong>{weakestStep.score}%</strong>
-                    </section>
-                  ) : null}
                 </div>
               ) : null}
 
@@ -1123,76 +1126,22 @@ function HistoryInterventionCard({
   onOpen,
   procedureLabel,
   seniorLabel,
-  showDate = false,
 }: {
   intervention: ScoredHistoryIntervention;
   onOpen: () => void;
   procedureLabel: string;
   seniorLabel: string;
-  showDate?: boolean;
 }) {
-  const time = getInterventionTime(intervention.intervention);
-  const content = (
-    <>
-      <span className="history-intervention-card__time">
-        {showDate ? (
-          <>
-            {formatIsoDate(intervention.intervention.date)}
-            <small>{time}</small>
-          </>
-        ) : (
-          time
-        )}
-      </span>
-      <ApproachIcon intervention={intervention.intervention} />
-      <span className="history-intervention-card__main">
-        <strong>{procedureLabel}</strong>
-        <span>{seniorLabel}</span>
-        {intervention.isValidated && intervention.autonomyScore != null ? (
-          <span className="dashboard-score-pill">
-            Score autonomie {Math.round(intervention.autonomyScore)}%
-          </span>
-        ) : (
-          <span className="history-pending-message">
-            En attente d’évaluation du senior
-          </span>
-        )}
-      </span>
-      <span className="history-intervention-card__status">
-        <span
-          className={`dashboard-status-pill ${
-            intervention.isValidated
-              ? 'dashboard-status-pill--valid'
-              : 'dashboard-status-pill--pending'
-          }`}
-        >
-          {intervention.isValidated ? 'Validée' : 'En attente'}
-        </span>
-        {intervention.isValidated ? (
-          <ChevronRight aria-hidden="true" />
-        ) : (
-          <LockKeyhole aria-hidden="true" />
-        )}
-      </span>
-    </>
-  );
-
-  if (intervention.isValidated) {
-    return (
-      <button
-        className="history-intervention-card history-intervention-card--clickable"
-        onClick={onOpen}
-        type="button"
-      >
-        {content}
-      </button>
-    );
-  }
-
   return (
-    <article className="history-intervention-card history-intervention-card--locked">
-      {content}
-    </article>
+    <SurgeryInterventionCard
+      dateLabel={formatInterventionCardDate(intervention.intervention.date)}
+      dateMetaLabel={getInterventionTime(intervention.intervention)}
+      intervention={intervention.intervention}
+      isValidated={intervention.isValidated}
+      onPress={intervention.isValidated ? onOpen : undefined}
+      procedureLabel={procedureLabel}
+      seniorLabel={seniorLabel}
+    />
   );
 }
 
@@ -1201,10 +1150,11 @@ function AutonomyLineChart({
   selectedIndex,
   series,
 }: {
-  onSelect: (index: number) => void;
+  onSelect: (index: number | null) => void;
   selectedIndex: number | null;
   series: AutonomySeriesPoint[];
 }) {
+  const chartRef = useRef<HTMLDivElement | null>(null);
   const width = 330;
   const height = 235;
   const left = 42;
@@ -1234,12 +1184,45 @@ function AutonomyLineChart({
       : `${selectedPoint.index}e intervention`
     : '';
 
+  useEffect(() => {
+    if (selectedIndex == null) {
+      return;
+    }
+
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const target = event.target;
+
+      if (!(target instanceof Node)) {
+        return;
+      }
+
+      if (chartRef.current?.contains(target)) {
+        return;
+      }
+
+      onSelect(null);
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+    };
+  }, [onSelect, selectedIndex]);
+
   if (!series.length) {
     return <p className="field-helper">Aucun score disponible pour cette intervention.</p>;
   }
 
   return (
-    <div className="progress-line-chart" role="img" aria-label="Évolution du score d’autonomie">
+    <div
+      ref={chartRef}
+      className="progress-line-chart"
+      role="img"
+      aria-label="Évolution du score d’autonomie"
+    >
       <svg viewBox={`0 0 ${width} ${height}`}>
         {[100, 75, 50, 25, 0].map((value) => {
           const y = top + chartHeight - (value / 100) * chartHeight;

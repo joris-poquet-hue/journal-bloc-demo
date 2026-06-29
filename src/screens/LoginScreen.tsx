@@ -130,17 +130,19 @@ export function LoginScreen() {
 
       <div className="login-page__frame">
         <header className="login-brand">
-          <img
-            alt="Mon Journal de Bloc"
-            className="login-brand__logo"
-            src="/images/brand/MonJDB_logoH.png"
-          />
+          <span className="login-brand__logo-shell" aria-hidden="true">
+            <img
+              alt="Mon Journal de Bloc"
+              className="login-brand__logo"
+              src="/images/brand/MonJDB_logoH.png"
+            />
+          </span>
           <div className="login-brand__copy">
             <p className="login-brand__title">
               Journal opératoire des internes en chirurgie
             </p>
             <p className="login-brand__subtitle">
-              Suivi pédagogique, progression au bloc et autonomie opératoire
+              Suivi, progression au bloc et autonomie opératoire
             </p>
           </div>
         </header>

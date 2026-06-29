@@ -45,10 +45,16 @@ import {
   SummaryMode,
   UpdateInternalCredentialsInput,
   UpdateInternalCredentialsResult,
+  UpdateInternalProfileSettingsInput,
+  UpdateInternalProfileSettingsResult,
   UpdateSeniorCredentialsInput,
   UpdateSeniorCredentialsResult,
 } from '../types';
 import { getTodayIsoDate } from '../utils/date';
+import {
+  buildSurgicalInterventionDefinitionFromInput,
+  ensureSurgicalInterventionDefinitionShape,
+} from '../utils/surgicalInterventions';
 import { canSaveIntervention, getChecklistProgress, getMissingFormFields } from '../utils/validation';
 import {
   clearPersistentStorageCredentials,
@@ -66,6 +72,7 @@ type AppContextValue = {
   sessionRole: SessionRole | null;
   summaryMode: SummaryMode;
   preBlockContext: PreBlockContext;
+  historyNavigationView: 'calendar' | 'progress' | null;
   internalProfiles: InternalProfile[];
   selectedInternal: InternalProfile | null;
   selectedSenior: Senior | null;
@@ -85,7 +92,9 @@ type AppContextValue = {
   logout: () => void;
   goToSurgeryPortal: () => void;
   goToObstetricJournal: () => void;
-  goToSurgeryHistory: () => void;
+  historyNavigationDate: string | null;
+  clearHistoryNavigationDate: () => void;
+  goToSurgeryHistory: (targetDate?: string, targetView?: 'calendar' | 'progress') => void;
   goToBadges: () => void;
   goToProfile: () => void;
   goToNotebook: () => void;
@@ -106,6 +115,10 @@ type AppContextValue = {
     profileId: string,
     input: UpdateInternalCredentialsInput
   ) => UpdateInternalCredentialsResult;
+  updateInternalProfileSettings: (
+    profileId: string,
+    input: UpdateInternalProfileSettingsInput
+  ) => UpdateInternalProfileSettingsResult;
   createSeniorProfile: (
     input: CreateSeniorProfileInput
   ) => CreateSeniorProfileResult;
@@ -153,6 +166,7 @@ const NOTEBOOK_DOCUMENTS_STORAGE_KEY = 'journal-bord:notebook-documents:v1';
 const CUSTOM_SURGICAL_INTERVENTIONS_STORAGE_KEY =
   'journal-bord:custom-surgical-interventions:v1';
 const CUSTOM_SENIORS_STORAGE_KEY = 'journal-bord:custom-seniors:v2';
+const SENIOR_LAST_LOGIN_STORAGE_KEY = 'journal-bord:senior-last-logins:v1';
 const ACCOUNT_RESET_CUTOFF = Date.parse('2026-06-26T00:00:00.000Z');
 const REMOVED_DEMO_PROFILE_IDS = new Set([
   'int-1',
@@ -181,6 +195,7 @@ function isCreatedAfterAccountReset(createdAt: string | undefined) {
 function hydrateInternalProfile(profile: InternalProfile) {
   return {
     ...profile,
+    avatarImageSrc: profile.avatarImageSrc ?? null,
     lastLoginAt: profile.lastLoginAt ?? null,
     achievementBadges: profile.achievementBadges ?? [],
     badgeMetrics: {
@@ -268,6 +283,28 @@ function loadStoredArray<T>(storageKey: string, fallbackValue: T[]) {
     return Array.isArray(parsedValue) ? (parsedValue as T[]) : fallbackValue;
   } catch {
     return fallbackValue;
+  }
+}
+
+function saveSeniorLastLogin(seniorId: string, lastLoginAt: string) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(SENIOR_LAST_LOGIN_STORAGE_KEY);
+    const currentValue =
+      rawValue != null ? (JSON.parse(rawValue) as Record<string, string>) : {};
+
+    window.localStorage.setItem(
+      SENIOR_LAST_LOGIN_STORAGE_KEY,
+      JSON.stringify({
+        ...currentValue,
+        [seniorId]: lastLoginAt,
+      })
+    );
+  } catch {
+    // Ignore storage failures and keep authentication flow uninterrupted.
   }
 }
 
@@ -360,19 +397,9 @@ function hydrateSavedInterventions(interventions: SavedIntervention[]) {
 function hydrateSurgicalInterventionDefinitions(
   interventions: SurgicalInterventionDefinition[]
 ) {
-  return interventions.map((intervention) => ({
-    ...intervention,
-    indications: intervention.indications ?? [],
-    allowedApproaches: intervention.allowedApproaches ?? [],
-    allowedEntryTechniques: intervention.allowedEntryTechniques ?? [],
-    checklistSteps: (intervention.checklistSteps ?? []).map((step) => ({
-      ...step,
-      applicableApproaches: (step.applicableApproaches ?? []).filter((approach) =>
-        (intervention.allowedApproaches ?? []).includes(approach)
-      ),
-    })),
-    keyStepIds: intervention.keyStepIds ?? [],
-  }));
+  return interventions.map((intervention) =>
+    ensureSurgicalInterventionDefinitionShape(intervention)
+  );
 }
 
 const DEFAULT_CUSTOM_INTERVENTION_STEP_LABELS = [
@@ -490,6 +517,12 @@ function createInitialObstetricDraft(
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [screen, setScreen] = useState<AppScreen>('welcome');
+  const [historyNavigationDate, setHistoryNavigationDate] = useState<string | null>(
+    null
+  );
+  const [historyNavigationView, setHistoryNavigationView] = useState<
+    'calendar' | 'progress' | null
+  >(null);
   const [sessionRole, setSessionRole] = useState<SessionRole | null>(null);
   const [summaryMode, setSummaryMode] = useState<SummaryMode>('review');
   const [preBlockContext, setPreBlockContext] =
@@ -762,6 +795,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const senior = getSeniorByCredentials(loginId, password, seniorsForLogin);
 
     if (senior) {
+      saveSeniorLastLogin(senior.id, new Date().toISOString());
       setSessionRole('senior');
       setSelectedInternalId(null);
       setSelectedSeniorId(senior.id);
@@ -851,12 +885,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setScreen('form');
   };
 
-  const goToSurgeryHistory = () => {
+  const goToSurgeryHistory = (
+    targetDate?: string,
+    targetView: 'calendar' | 'progress' = 'calendar'
+  ) => {
     if (!selectedInternal) {
       return;
     }
 
+    setHistoryNavigationDate(targetDate ?? null);
+    setHistoryNavigationView(targetView);
     setScreen('surgery-history');
+  };
+
+  const clearHistoryNavigationDate = () => {
+    setHistoryNavigationDate(null);
+    setHistoryNavigationView(null);
   };
 
   const goToBadges = () => {
@@ -1073,6 +1117,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       promotion: sanitizedInput.promotion,
       semester: sanitizedInput.semester,
       currentRotation: sanitizedInput.currentRotation,
+      avatarImageSrc: null,
       createdAt: now,
       lastLoginAt: null,
       achievementBadges: [],
@@ -1158,6 +1203,73 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return {
       success: true,
       message: 'Les identifiants de l’interne ont bien été modifiés.',
+      profile: updatedProfile,
+    };
+  };
+
+  const updateInternalProfileSettings = (
+    profileId: string,
+    input: UpdateInternalProfileSettingsInput
+  ): UpdateInternalProfileSettingsResult => {
+    const existingProfile =
+      internalProfiles.find((profile) => profile.id === profileId) ?? null;
+
+    if (!existingProfile) {
+      return {
+        success: false,
+        message: 'Ce profil interne est introuvable.',
+      };
+    }
+
+    const hasTrainingUpdate =
+      typeof input.semester === 'string' ||
+      typeof input.currentRotation === 'string';
+    const hasAvatarUpdate = Object.prototype.hasOwnProperty.call(
+      input,
+      'avatarImageSrc'
+    );
+
+    if (!hasTrainingUpdate && !hasAvatarUpdate) {
+      return {
+        success: false,
+        message: 'Aucune modification du profil n’a été transmise.',
+      };
+    }
+
+    const semester = hasTrainingUpdate
+      ? input.semester?.trim().toUpperCase() ?? ''
+      : existingProfile.semester;
+    const currentRotation = hasTrainingUpdate
+      ? input.currentRotation?.trim() ?? ''
+      : existingProfile.currentRotation;
+
+    if (hasTrainingUpdate && (!semester || !currentRotation)) {
+      return {
+        success: false,
+        message: 'Le semestre et le stage doivent être renseignés.',
+      };
+    }
+
+    const updatedProfile: InternalProfile = {
+      ...existingProfile,
+      semester,
+      currentRotation,
+      avatarImageSrc: hasAvatarUpdate
+        ? input.avatarImageSrc ?? null
+        : existingProfile.avatarImageSrc ?? null,
+    };
+
+    setInternalProfiles((current) =>
+      current.map((profile) =>
+        profile.id === profileId ? updatedProfile : profile
+      )
+    );
+
+    return {
+      success: true,
+      message: hasTrainingUpdate
+        ? 'Les informations de formation ont bien été mises à jour.'
+        : 'La photo de profil a bien été mise à jour.',
       profile: updatedProfile,
     };
   };
@@ -1321,85 +1433,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
       };
     }
 
-    const needsEntryTechnique =
-      input.allowedApproaches.includes('coelioscopie') ||
-      input.allowedApproaches.includes('robot');
-
-    if (needsEntryTechnique && input.allowedEntryTechniques.length === 0) {
-      return {
-        success: false,
-        message:
-          'Sélectionne au moins une technique d’entrée pour la cœlioscopie ou le robot.',
-      };
-    }
-
-    const automaticStepLabels = [
-      ...DEFAULT_CUSTOM_INTERVENTION_STEP_LABELS,
-      ...(needsEntryTechnique ? LAPAROSCOPIC_CUSTOM_INTERVENTION_STEP_LABELS : []),
-    ];
-    const availableStepLabels = normalizeStepLabels([
-      ...automaticStepLabels,
-      ...input.customChecklistSteps,
-    ]);
-    const orderedInputStepLabels = normalizeStepLabels(input.stepOrderLabels);
-    const allStepLabels = [
-      ...orderedInputStepLabels.filter((label) =>
-        availableStepLabels.includes(label)
-      ),
-      ...availableStepLabels.filter(
-        (label) => !orderedInputStepLabels.includes(label)
-      ),
-    ];
-
-    if (allStepLabels.length === 0) {
-      return {
-        success: false,
-        message: 'Ajoute au moins une étape de checklist.',
-      };
-    }
-
-    const keyStepLabels = normalizeStepLabels(input.keyStepLabels).filter((label) =>
-      allStepLabels.includes(label)
-    );
-
-    if (keyStepLabels.length === 0) {
-      return {
-        success: false,
-        message: 'Sélectionne au moins une étape clé de l’intervention.',
-      };
-    }
-
-    const checklistSteps = allStepLabels.map((label, index) => {
-      const applicableApproaches = getStepApproachesFromInput(input, label);
-
-      return {
-        id: `${id}-step-${index + 1}`,
-        label,
-        ...(applicableApproaches.length > 0 ? { applicableApproaches } : {}),
-      };
-    });
-    const keyStepIds = checklistSteps
-      .filter((step) => keyStepLabels.includes(step.label))
-      .map((step) => step.id);
-
     const existingIntervention = customSurgicalInterventions.find(
       (intervention) => intervention.id === id
     );
-
-    const intervention: SurgicalInterventionDefinition = {
-      id,
-      name,
-      indications: normalizeStepLabels(input.indications),
-      allowedApproaches: [...new Set(input.allowedApproaches)],
-      allowedEntryTechniques: needsEntryTechnique
-        ? [...new Set(input.allowedEntryTechniques)]
-        : [],
-      requiresLaterality: input.requiresLaterality,
-      checklistSteps,
-      keyStepIds,
-      isCustom: true,
-      createdAt: existingIntervention?.createdAt ?? new Date().toISOString(),
-    };
+    const intervention = ensureSurgicalInterventionDefinitionShape(
+      buildSurgicalInterventionDefinitionFromInput(
+        {
+          ...input,
+          name,
+        },
+        existingIntervention
+          ? {
+              ...existingIntervention,
+              id,
+            }
+          : {
+              id,
+              name,
+              indications: [],
+              allowedApproaches: [],
+              allowedEntryTechniques: [],
+              requiresLaterality: false,
+              checklistSteps: [],
+              keyStepIds: [],
+              isCustom: true,
+              createdAt: new Date().toISOString(),
+            }
+      )
+    );
 
     return {
       success: true,
@@ -1767,11 +1828,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
         surgicalProcedureOptions,
         formMissingFields,
         checklistProgress,
+        historyNavigationDate,
+        historyNavigationView,
         login,
         logout,
         goToSurgeryPortal,
         goToObstetricJournal,
         goToSurgeryHistory,
+        clearHistoryNavigationDate,
         goToBadges,
         goToProfile,
         goToNotebook,
@@ -1787,6 +1851,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         saveObstetricGesture,
         createInternalProfile,
         updateInternalCredentials,
+        updateInternalProfileSettings,
         createSeniorProfile,
         updateSeniorCredentials,
         deleteSeniorProfile,

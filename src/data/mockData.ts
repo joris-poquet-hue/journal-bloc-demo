@@ -22,6 +22,7 @@ import {
   SurgeryContext,
   TechniqueGuide,
 } from '../types';
+import { ensureSurgicalInterventionDefinitionShape } from '../utils/surgicalInterventions';
 
 export const internalProfiles: InternalProfile[] = [
   {
@@ -102,6 +103,7 @@ export const approachOptions: ChoiceOption<SurgicalApproach>[] = [
   { value: 'hysteroscopie', label: 'Hystéroscopie' },
   { value: 'laparotomie', label: 'Laparotomie' },
   { value: 'robot', label: 'Robot' },
+  { value: 'voie_vaginale', label: 'Voie vaginale' },
   { value: 'vnotes', label: 'vNotes' },
 ];
 
@@ -327,26 +329,36 @@ export const allChecklistSteps: ChecklistStep[] = [
 ];
 
 export const builtInSurgicalInterventions: SurgicalInterventionDefinition[] = [
-  {
+  ensureSurgicalInterventionDefinitionShape({
     id: 'salpingectomie',
     name: 'Salpingectomie',
-    indications: [],
+    indications: [
+      'Grossesse extra-utérine',
+      'Hydrosalpinx',
+      'Salpingectomie prophylactique',
+      'Stérilisation tubaire',
+      'Autre',
+    ],
     allowedApproaches: ['coelioscopie', 'laparotomie', 'robot', 'vnotes'],
     allowedEntryTechniques: ['trocart_direct', 'open', 'veress'],
     requiresLaterality: true,
     checklistSteps: salpingectomyChecklistSteps,
     keyStepIds: ['step-9', 'step-10', 'step-12'],
-  },
-  {
+    status: 'active',
+    lateralityMode: 'right_left_bilateral',
+  }),
+  ensureSurgicalInterventionDefinitionShape({
     id: 'colpoclesis',
     name: 'Colpoclésis',
-    indications: [],
-    allowedApproaches: [],
+    indications: ['Prolapsus avancé', 'Autre'],
+    allowedApproaches: ['voie_vaginale'],
     allowedEntryTechniques: [],
     requiresLaterality: false,
     checklistSteps: colpoclesisChecklistSteps,
     keyStepIds: ['colpo-step-3', 'colpo-step-4', 'colpo-step-5'],
-  },
+    status: 'active',
+    lateralityMode: 'none',
+  }),
 ];
 
 export function getSurgicalInterventionDefinitions(
@@ -359,13 +371,21 @@ export function getSurgicalInterventionDefinitions(
     builtInSurgicalInterventions.map((intervention) => intervention.id)
   );
   const resolvedBuiltIns = builtInSurgicalInterventions.map(
-    (intervention) => customById.get(intervention.id) ?? intervention
+    (intervention) =>
+      ensureSurgicalInterventionDefinitionShape(
+        customById.get(intervention.id) ?? intervention
+      )
   );
   const additionalCustomInterventions = customInterventions.filter(
     (intervention) => !builtInIds.has(intervention.id)
   );
 
-  return [...resolvedBuiltIns, ...additionalCustomInterventions];
+  return [
+    ...resolvedBuiltIns,
+    ...additionalCustomInterventions.map((intervention) =>
+      ensureSurgicalInterventionDefinitionShape(intervention)
+    ),
+  ];
 }
 
 export function getProcedureOptions(
@@ -398,7 +418,24 @@ export function getChecklistStepsForIntervention(
   );
 
   if (customIntervention) {
-    return customIntervention.checklistSteps.filter((step) => {
+    const normalizedIntervention =
+      ensureSurgicalInterventionDefinitionShape(customIntervention);
+    const matchingApproachConfig =
+      normalizedIntervention.approachConfigs?.find(
+        (config) => config.active && config.approach === approach
+      ) ?? null;
+
+    if (matchingApproachConfig) {
+      return [...matchingApproachConfig.steps]
+        .sort((left, right) => left.order - right.order)
+        .map((step) => ({
+          id: step.id,
+          label: step.label,
+          applicableApproaches: [matchingApproachConfig.approach],
+        }));
+    }
+
+    return normalizedIntervention.checklistSteps.filter((step) => {
       const applicableApproaches = step.applicableApproaches ?? [];
 
       return (
