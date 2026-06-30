@@ -1,10 +1,10 @@
-import { Info, LucideIcon } from 'lucide-react';
-import { Children, ReactNode, useState } from 'react';
+import { Info, LucideProps } from 'lucide-react';
+import { Children, ComponentType, ReactNode, useState } from 'react';
 
 type InterventionFlowCardProps = {
   title?: string;
   description?: string;
-  icon?: LucideIcon;
+  icon?: ComponentType<LucideProps>;
   action?: ReactNode;
   className?: string;
   children: ReactNode;

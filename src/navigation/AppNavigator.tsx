@@ -14,7 +14,7 @@ import { WelcomeScreen } from '../screens/WelcomeScreen';
 import { useScrollResetOnChange } from '../utils/useScrollResetOnChange';
 
 export function AppNavigator() {
-  const { isAuthenticated, screen, sessionRole } = useAppContext();
+  const { isAuthenticated, persistentSyncWarning, screen, sessionRole } = useAppContext();
   useScrollResetOnChange([isAuthenticated, screen, sessionRole]);
 
   if (!isAuthenticated) {
@@ -60,13 +60,24 @@ export function AppNavigator() {
 
     return <WelcomeScreen />;
   })();
+  const syncWarning = persistentSyncWarning ? (
+    <div className="app-shell__sync-warning auth-error" role="status">
+      {persistentSyncWarning}
+    </div>
+  ) : null;
 
   if (sessionRole !== 'internal') {
-    return currentScreen;
+    return (
+      <div className="app-shell">
+        {syncWarning}
+        {currentScreen}
+      </div>
+    );
   }
 
   return (
     <div className="app-shell app-shell--with-bottom-nav">
+      {syncWarning}
       {currentScreen}
       <BottomNavigation />
     </div>

@@ -1,6 +1,7 @@
-type PersistentArrayKey =
+export type PersistentArrayKey =
   | 'internal_profiles'
   | 'saved_interventions'
+  | 'notebook_documents'
   | 'custom_surgical_interventions'
   | 'custom_seniors'
   | 'admin_trophies'
@@ -10,6 +11,7 @@ type PersistentArrayKey =
 
 type AppStateRow<T> = {
   data: T[];
+  exists: boolean;
 };
 
 const APP_STATE_API_PATH = '/api/app-state';
@@ -69,6 +71,10 @@ export async function loadPersistentArray<T>(
     }
 
     const row = (await response.json()) as AppStateRow<T>;
+    if (!row.exists) {
+      return null;
+    }
+
     const data = row.data;
 
     return Array.isArray(data) ? data : null;
@@ -83,7 +89,7 @@ export async function savePersistentArray<T>(
   data: T[]
 ) {
   if (!isPersistentStorageConfigured()) {
-    return;
+    return false;
   }
 
   try {
@@ -103,7 +109,10 @@ export async function savePersistentArray<T>(
     if (!response.ok) {
       throw new Error(`Supabase save failed with status ${response.status}`);
     }
+
+    return true;
   } catch (error) {
     console.warn(`Persistent storage save failed for ${key}`, error);
+    return false;
   }
 }

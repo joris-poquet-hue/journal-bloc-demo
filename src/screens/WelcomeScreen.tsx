@@ -14,11 +14,11 @@ import {
 } from '../data/mockData';
 import {
   buildTrophyDisplayModels,
-  loadStoredAdminEvaluations,
 } from '../utils/trophyDisplay';
 
 export function WelcomeScreen() {
   const {
+    adminEvaluations,
     adminTrophies,
     selectedInternal,
     savedInterventions,
@@ -28,8 +28,6 @@ export function WelcomeScreen() {
     goToNotebook,
     goToSurgeryHistory,
   } = useAppContext();
-
-  const adminEvaluations = useMemo(loadStoredAdminEvaluations, []);
 
   if (!selectedInternal) {
     return null;

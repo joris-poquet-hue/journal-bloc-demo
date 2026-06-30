@@ -1653,6 +1653,15 @@ button {
   min-height: 100vh;
 }
 
+.app-shell__sync-warning {
+  position: sticky;
+  top: max(12px, env(safe-area-inset-top));
+  z-index: 30;
+  width: min(720px, calc(100% - 32px));
+  margin: 16px auto 0;
+  box-shadow: 0 14px 28px rgba(180, 35, 24, 0.14);
+}
+
 .app-shell--with-bottom-nav .screen-shell {
   padding-bottom: calc(132px + env(safe-area-inset-bottom));
 }

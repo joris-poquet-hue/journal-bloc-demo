@@ -17,7 +17,6 @@ import { useAppContext } from '../context/AppContext';
 import {
   TrophyDisplayModel,
   buildTrophyDisplayModels,
-  loadStoredAdminEvaluations,
 } from '../utils/trophyDisplay';
 
 type TrophySectionId = 'earned' | 'progress' | 'secret';
@@ -165,6 +164,7 @@ function TrophyCard({
 
 export function TrophiesScreen() {
   const {
+    adminEvaluations,
     adminTrophies,
     selectedInternal,
     savedInterventions,
@@ -184,8 +184,6 @@ export function TrophiesScreen() {
       </ScreenContainer>
     );
   }
-
-  const adminEvaluations = useMemo(loadStoredAdminEvaluations, []);
   const trophyDisplay = useMemo(
     () =>
       buildTrophyDisplayModels({

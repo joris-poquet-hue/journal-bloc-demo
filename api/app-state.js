@@ -1,6 +1,7 @@
 const ALLOWED_KEYS = new Set([
   'internal_profiles',
   'saved_interventions',
+  'notebook_documents',
   'custom_surgical_interventions',
   'custom_seniors',
   'admin_trophies',
@@ -136,7 +137,10 @@ async function loadAppState(key) {
   }
 
   const rows = await supabaseResponse.json();
-  return Array.isArray(rows[0]?.data) ? rows[0].data : [];
+  return {
+    data: Array.isArray(rows[0]?.data) ? rows[0].data : [],
+    exists: rows.length > 0,
+  };
 }
 
 async function isAuthorized(request) {
@@ -166,14 +170,14 @@ async function isAuthorized(request) {
     const profilesByLogin = new Map();
 
     if (
-      customSeniors
+      customSeniors.data
         .filter((senior) => !isRemovedCustomSenior(senior))
         .some((senior) => credentialsMatch(senior, loginId, password))
     ) {
       return true;
     }
 
-    [...SEEDED_INTERNAL_PROFILES, ...storedProfiles].forEach((profile) => {
+    [...SEEDED_INTERNAL_PROFILES, ...storedProfiles.data].forEach((profile) => {
       const profileLoginId = normalizeCredentialValue(profile.loginId);
 
       if (profileLoginId && !isRemovedDemoProfile(profile)) {
@@ -227,10 +231,10 @@ module.exports = async function handler(request, response) {
       return sendJson(response, 400, { error: 'Invalid app state key.' });
     }
 
-    let data;
+    let storedState;
 
     try {
-      data = await loadAppState(key);
+      storedState = await loadAppState(key);
     } catch {
       return sendJson(response, 502, {
         error: 'Unable to load app state.',
@@ -238,7 +242,8 @@ module.exports = async function handler(request, response) {
     }
 
     return sendJson(response, 200, {
-      data: sanitizeAppState(key, data),
+      exists: storedState.exists,
+      data: sanitizeAppState(key, storedState.data),
     });
   }
 

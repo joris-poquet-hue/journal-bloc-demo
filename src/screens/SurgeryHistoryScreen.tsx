@@ -33,7 +33,6 @@ import {
   getProgressBadgesForInternal,
   getChecklistStepsForIntervention,
   getChoiceLabel,
-  hydrateAdminInterventionEvaluations,
   indicationOptions,
 } from '../data/mockData';
 import {
@@ -111,8 +110,6 @@ function getProgressRatio(target: number, current: number) {
   return target > 0 ? current / target : 0;
 }
 
-const ADMIN_EVALUATIONS_STORAGE_KEY =
-  'journal-bord:admin-intervention-evaluations:v1';
 const WEEKDAY_LABELS = ['LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM', 'DIM'];
 const difficultyLabels = {
   '1': 'Simple',
@@ -176,30 +173,6 @@ function renderHistoryPerformanceBadge(
       <span>{performanceLabels[performance]}</span>
     </strong>
   );
-}
-
-function loadStoredAdminEvaluations() {
-  if (typeof window === 'undefined') {
-    return hydrateAdminInterventionEvaluations();
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(ADMIN_EVALUATIONS_STORAGE_KEY);
-
-    if (!rawValue) {
-      return hydrateAdminInterventionEvaluations();
-    }
-
-    const parsedValue = JSON.parse(rawValue);
-
-    return parsedValue && typeof parsedValue === 'object'
-      ? hydrateAdminInterventionEvaluations(
-          parsedValue as Record<string, AdminInterventionEvaluation>
-        )
-      : hydrateAdminInterventionEvaluations();
-  } catch {
-    return hydrateAdminInterventionEvaluations();
-  }
 }
 
 function parseIsoDate(value: string) {
@@ -626,6 +599,7 @@ function buildDetailChecklistRows(
 
 export function SurgeryHistoryScreen() {
   const {
+    adminEvaluations,
     clearHistoryNavigationDate,
     customSurgicalInterventions,
     historyNavigationDate,
@@ -636,7 +610,6 @@ export function SurgeryHistoryScreen() {
     surgicalProcedureOptions,
     goToSurgeryPortal,
   } = useAppContext();
-  const [adminEvaluations] = useState(loadStoredAdminEvaluations);
   const [viewMode, setViewMode] = useState<HistoryViewMode>(
     historyNavigationView ?? 'calendar'
   );

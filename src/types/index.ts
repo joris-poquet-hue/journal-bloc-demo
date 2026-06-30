@@ -225,6 +225,7 @@ export type Senior = {
   mustChangePassword?: boolean;
   createdAt?: string;
   isCustom?: boolean;
+  lastLoginAt?: string | null;
   managedInternalIds?: string[];
 };
 

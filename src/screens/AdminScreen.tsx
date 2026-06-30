@@ -44,7 +44,6 @@ import {
   getProgressBadgesForInternal,
   getSurgicalInterventionDefinition,
   getSurgicalInterventionDefinitions,
-  hydrateAdminInterventionEvaluations,
   indicationOptions,
   roleOptions,
 } from '../data/mockData';
@@ -75,6 +74,7 @@ import {
   TrophyType,
   TrophyVisibility,
   UpdateInternalCredentialsInput,
+  UpdateSeniorCredentialsResult,
   UpdateSeniorCredentialsInput,
 } from '../types';
 import { formatIsoDate } from '../utils/date';
@@ -224,7 +224,6 @@ const EMPTY_INTERVENTION_FILTERS: AdminInterventionFilters = {
 const ADMIN_EVALUATIONS_STORAGE_KEY =
   'journal-bord:admin-intervention-evaluations:v1';
 const TEST_FEEDBACK_STORAGE_KEY = 'journal-bord:test-feedback:v1';
-const SENIOR_LAST_LOGIN_STORAGE_KEY = 'journal-bord:senior-last-logins:v1';
 
 const ADMIN_ACTIVITY_RANGE_OPTIONS: Array<{
   value: AdminActivityRange;
@@ -597,30 +596,6 @@ function getInterventionKeyStepLabels(
     .map((step) => step.label);
 }
 
-function loadStoredAdminEvaluations() {
-  if (typeof window === 'undefined') {
-    return hydrateAdminInterventionEvaluations();
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(ADMIN_EVALUATIONS_STORAGE_KEY);
-
-    if (!rawValue) {
-      return hydrateAdminInterventionEvaluations();
-    }
-
-    const parsedValue = JSON.parse(rawValue);
-
-    return parsedValue && typeof parsedValue === 'object'
-      ? hydrateAdminInterventionEvaluations(
-          parsedValue as Record<string, AdminInterventionEvaluation>
-        )
-      : hydrateAdminInterventionEvaluations();
-  } catch {
-    return hydrateAdminInterventionEvaluations();
-  }
-}
-
 function loadStoredArray<T>(storageKey: string, fallbackValue: T[] = []) {
   if (typeof window === 'undefined') {
     return fallbackValue;
@@ -639,18 +614,6 @@ function loadStoredArray<T>(storageKey: string, fallbackValue: T[] = []) {
   } catch {
     return fallbackValue;
   }
-}
-
-function evaluationsArrayToRecord(evaluations: AdminInterventionEvaluation[]) {
-  return Object.fromEntries(
-    evaluations.map((evaluation) => [evaluation.interventionId, evaluation])
-  ) as Record<string, AdminInterventionEvaluation>;
-}
-
-function evaluationsRecordToArray(
-  evaluations: Record<string, AdminInterventionEvaluation>
-) {
-  return Object.values(evaluations);
 }
 
 function getInterventionIndicationLabel(intervention: SavedIntervention) {
@@ -915,28 +878,6 @@ function formatActivityLogEntrySummary(entry: ActivityLogEntry) {
   return entry.targetLabel
     ? `${entry.action} · ${entry.targetLabel}`
     : entry.action;
-}
-
-function loadSeniorLastLoginMap() {
-  if (typeof window === 'undefined') {
-    return {} as Record<string, string>;
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(SENIOR_LAST_LOGIN_STORAGE_KEY);
-
-    if (!rawValue) {
-      return {} as Record<string, string>;
-    }
-
-    const parsedValue = JSON.parse(rawValue);
-
-    return parsedValue && typeof parsedValue === 'object'
-      ? (parsedValue as Record<string, string>)
-      : ({} as Record<string, string>);
-  } catch {
-    return {} as Record<string, string>;
-  }
 }
 
 function parseOptionalNumber(value: string) {
@@ -1577,6 +1518,7 @@ function buildSeniorXAxisTicks(maxIndex: number) {
 
 export function AdminScreen() {
   const {
+    adminEvaluations,
     createInternalProfile,
     createSeniorProfile,
     createSurgicalIntervention,
@@ -1595,6 +1537,7 @@ export function AdminScreen() {
     logout,
     recordActivity,
     savedInterventions,
+    setAdminEvaluations,
     setAdminTrophies,
     selectableSeniors,
     selectedSenior,
@@ -1635,8 +1578,6 @@ export function AdminScreen() {
     useState<ProfileProgressPeriod>('12m');
   const [expandedHistoryInterventionId, setExpandedHistoryInterventionId] =
     useState<string | null>(null);
-  const [seniorLastLoginMap, setSeniorLastLoginMap] =
-    useState<Record<string, string>>(loadSeniorLastLoginMap);
   const [trophyFilter, setTrophyFilter] = useState<AdminTrophyFilter>('all');
   const [trophySearch, setTrophySearch] = useState('');
   const [selectedTrophyId, setSelectedTrophyId] = useState<string | null>(null);
@@ -1680,12 +1621,6 @@ export function AdminScreen() {
   const [draggedStepLabel, setDraggedStepLabel] = useState<string | null>(null);
   const [selectedEvaluationInterventionId, setSelectedEvaluationInterventionId] =
     useState<string | null>(null);
-  const [adminEvaluations, setAdminEvaluations] =
-    useState<Record<string, AdminInterventionEvaluation>>(
-      loadStoredAdminEvaluations
-    );
-  const [hasLoadedPersistentAdminEvaluations, setHasLoadedPersistentAdminEvaluations] =
-    useState(false);
   const [testFeedbackItems, setTestFeedbackItems] = useState<TestFeedback[]>(() =>
     loadStoredArray<TestFeedback>(TEST_FEEDBACK_STORAGE_KEY)
   );
@@ -1706,55 +1641,6 @@ export function AdminScreen() {
     seniorComment: '',
   });
   const [isAutoEvaluationOpen, setIsAutoEvaluationOpen] = useState(false);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    async function loadPersistentAdminEvaluations() {
-      const persistentEvaluations =
-        await loadPersistentArray<AdminInterventionEvaluation>(
-          'admin_evaluations'
-        );
-
-      if (isCancelled) {
-        return;
-      }
-
-      if (persistentEvaluations) {
-        setAdminEvaluations(
-          hydrateAdminInterventionEvaluations(
-            evaluationsArrayToRecord(persistentEvaluations)
-          )
-        );
-      }
-
-      setHasLoadedPersistentAdminEvaluations(true);
-    }
-
-    void loadPersistentAdminEvaluations();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(
-      ADMIN_EVALUATIONS_STORAGE_KEY,
-      JSON.stringify(adminEvaluations)
-    );
-
-    if (hasLoadedPersistentAdminEvaluations) {
-      void savePersistentArray(
-        'admin_evaluations',
-        evaluationsRecordToArray(adminEvaluations)
-      );
-    }
-  }, [adminEvaluations, hasLoadedPersistentAdminEvaluations]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -1792,13 +1678,19 @@ export function AdminScreen() {
     );
 
     if (hasLoadedPersistentTestFeedback) {
-      void savePersistentArray('test_feedback', testFeedbackItems);
+      void (async () => {
+        const isSaved = await savePersistentArray('test_feedback', testFeedbackItems);
+
+        if (!isSaved) {
+          setTestFeedbackStatus({
+            kind: 'error',
+            message:
+              'Les remarques de test sont bien visibles sur cet appareil, mais la synchronisation serveur a echoue. Verifie la connexion avant de recharger.',
+          });
+        }
+      })();
     }
   }, [testFeedbackItems, hasLoadedPersistentTestFeedback]);
-
-  useEffect(() => {
-    setSeniorLastLoginMap(loadSeniorLastLoginMap());
-  }, []);
 
   const sortedInterventions = useMemo(
     () =>
@@ -1994,20 +1886,20 @@ export function AdminScreen() {
       .filter(
         (senior) =>
           senior.id !== 'sen-other' &&
-          seniorLastLoginMap[senior.id] != null
+          senior.lastLoginAt != null
       )
       .map((senior) => ({
         actorRole: 'senior',
         id: senior.id,
         name: formatSeniorDisplayName(senior),
         role: 'Senior',
-        lastLoginAt: seniorLastLoginMap[senior.id] as string,
+        lastLoginAt: senior.lastLoginAt as string,
       }));
 
     return [...internalConnections, ...seniorConnections].sort((left, right) =>
       right.lastLoginAt.localeCompare(left.lastLoginAt)
     );
-  }, [internalProfiles, selectableSeniors, seniorLastLoginMap]);
+  }, [internalProfiles, selectableSeniors]);
   const recentUserConnections = useMemo(() => {
     const now = Date.now();
     const fortyEightHoursInMs = 48 * 60 * 60 * 1000;
@@ -7778,7 +7670,7 @@ function SeniorDashboard({
   updateSeniorCredentials: (
     seniorId: string,
     input: UpdateSeniorCredentialsInput
-  ) => ReturnType<typeof useAppContext>['updateSeniorCredentials'];
+  ) => UpdateSeniorCredentialsResult;
   updateSeniorManagedInternals: (seniorId: string, internalIds: string[]) => void;
 }) {
   const seniorName = formatDisplayName(

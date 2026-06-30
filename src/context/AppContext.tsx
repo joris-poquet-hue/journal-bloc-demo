@@ -10,6 +10,7 @@ import {
 
 import {
   ADMIN_LOGIN_ID,
+  hydrateAdminInterventionEvaluations,
   allChecklistSteps,
   defaultComplexityRating,
   formatDisplayName,
@@ -34,6 +35,7 @@ import {
 } from '../data/mockData';
 import {
   ActivityLogEntry,
+  AdminInterventionEvaluation,
   AdminTrophyDefinition,
   AppScreen,
   ChecklistLevel,
@@ -72,6 +74,7 @@ import {
   clearPersistentStorageCredentials,
   isPersistentStorageConfigured,
   loadPersistentArray,
+  type PersistentArrayKey,
   savePersistentArray,
   setPersistentStorageCredentials,
 } from '../services/persistentStorage';
@@ -94,8 +97,10 @@ type AppContextValue = {
   notebookDocuments: NotebookDocument[];
   customSurgicalInterventions: SurgicalInterventionDefinition[];
   customSeniors: Senior[];
+  adminEvaluations: Record<string, AdminInterventionEvaluation>;
   adminTrophies: AdminTrophyDefinition[];
   adminTrophyStorageWarning: string | null;
+  persistentSyncWarning: string | null;
   passwordChangeChallenge: {
     loginId: string;
     role: 'internal' | 'senior';
@@ -183,6 +188,9 @@ type AppContextValue = {
   deleteCustomSurgicalIntervention: (interventionId: string) => void;
   deleteInternalProfile: (profileId: string) => void;
   deleteSavedInterventions: (ids: string[]) => void;
+  setAdminEvaluations: Dispatch<
+    SetStateAction<Record<string, AdminInterventionEvaluation>>
+  >;
   setAdminTrophies: Dispatch<SetStateAction<AdminTrophyDefinition[]>>;
   updateNotebookDocument: (contentHtml: string) => void;
   clearNotebookDocument: () => void;
@@ -254,6 +262,26 @@ const LOCAL_STATE_STORAGE_KEYS = [
   SENIOR_LAST_LOGIN_STORAGE_KEY,
   SENIOR_MANAGED_INTERNALS_STORAGE_KEY,
 ];
+const PERSISTENT_SYNC_MESSAGES: Record<PersistentArrayKey, string> = {
+  internal_profiles:
+    'Les profils internes ont bien ete modifies sur cet appareil, mais la synchronisation serveur a echoue. Verifie la connexion avant de recharger.',
+  saved_interventions:
+    'Les interventions sont bien visibles sur cet appareil, mais la synchronisation serveur a echoue. Verifie la connexion avant de recharger.',
+  notebook_documents:
+    'Le bloc-notes a ete mis a jour localement, mais la synchronisation serveur a echoue. Verifie la connexion avant de changer d appareil.',
+  custom_surgical_interventions:
+    'Les interventions personnalisees ont ete modifiees localement, mais la synchronisation serveur a echoue. Verifie la connexion avant de recharger.',
+  custom_seniors:
+    'Les comptes seniors ont ete modifies localement, mais la synchronisation serveur a echoue. Verifie la connexion avant de recharger.',
+  admin_trophies:
+    'Les trophées ont ete modifies localement, mais la synchronisation serveur a echoue. Verifie la connexion avant de recharger.',
+  admin_evaluations:
+    'Les evaluations ont ete mises a jour localement, mais la synchronisation serveur a echoue. Verifie la connexion avant de recharger.',
+  test_feedback:
+    'Les remarques de test ont ete enregistrees localement, mais la synchronisation serveur a echoue. Verifie la connexion avant de recharger.',
+  activity_log:
+    'Le journal d activite a ete mis a jour localement, mais la synchronisation serveur a echoue. Verifie la connexion avant de recharger.',
+};
 
 type PasswordChangeChallengeState = {
   currentPassword: string;
@@ -323,6 +351,9 @@ function hydrateInternalProfiles(profiles: InternalProfile[]) {
 }
 
 function hydrateCustomSeniors(customSeniors: Senior[]) {
+  const legacySeniorLastLoginMap = loadLegacySeniorLastLoginMap();
+  const legacySeniorManagedInternalsMap = loadSeniorManagedInternalsMap();
+
   return customSeniors
     .filter(
       (senior) =>
@@ -344,9 +375,10 @@ function hydrateCustomSeniors(customSeniors: Senior[]) {
       password: senior.password?.trim(),
       createdAt: senior.createdAt ?? new Date().toISOString(),
       isCustom: true,
+      lastLoginAt: senior.lastLoginAt ?? legacySeniorLastLoginMap[senior.id] ?? null,
       managedInternalIds: Array.isArray(senior.managedInternalIds)
         ? senior.managedInternalIds.filter((id) => typeof id === 'string')
-        : [],
+        : legacySeniorManagedInternalsMap[senior.id] ?? [],
     }));
 }
 
@@ -370,25 +402,25 @@ function loadStoredArray<T>(storageKey: string, fallbackValue: T[]) {
   }
 }
 
-function saveSeniorLastLogin(seniorId: string, lastLoginAt: string) {
+function loadLegacySeniorLastLoginMap() {
   if (typeof window === 'undefined') {
-    return;
+    return {} as Record<string, string>;
   }
 
   try {
     const rawValue = window.localStorage.getItem(SENIOR_LAST_LOGIN_STORAGE_KEY);
-    const currentValue =
-      rawValue != null ? (JSON.parse(rawValue) as Record<string, string>) : {};
 
-    window.localStorage.setItem(
-      SENIOR_LAST_LOGIN_STORAGE_KEY,
-      JSON.stringify({
-        ...currentValue,
-        [seniorId]: lastLoginAt,
-      })
-    );
+    if (!rawValue) {
+      return {} as Record<string, string>;
+    }
+
+    const parsedValue = JSON.parse(rawValue);
+
+    return parsedValue && typeof parsedValue === 'object'
+      ? (parsedValue as Record<string, string>)
+      : ({} as Record<string, string>);
   } catch {
-    // Ignore storage failures and keep authentication flow uninterrupted.
+    return {} as Record<string, string>;
   }
 }
 
@@ -477,6 +509,59 @@ function loadNotebookDocuments() {
   return migrateLegacyNotebookNotes(
     loadStoredArray<NotebookNote>(LEGACY_NOTEBOOK_NOTES_STORAGE_KEY, [])
   );
+}
+
+function hydrateNotebookDocuments(documents: NotebookDocument[]) {
+  return documents
+    .filter(
+      (document) =>
+        typeof document?.internalId === 'string' &&
+        typeof document?.contentHtml === 'string' &&
+        typeof document?.updatedAt === 'string'
+    )
+    .map((document) => ({
+      internalId: document.internalId,
+      contentHtml: document.contentHtml,
+      updatedAt: document.updatedAt,
+    }));
+}
+
+function loadStoredAdminEvaluations() {
+  if (typeof window === 'undefined') {
+    return hydrateAdminInterventionEvaluations();
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(ADMIN_EVALUATIONS_STORAGE_KEY);
+
+    if (!rawValue) {
+      return hydrateAdminInterventionEvaluations();
+    }
+
+    const parsedValue = JSON.parse(rawValue);
+
+    return parsedValue && typeof parsedValue === 'object'
+      ? hydrateAdminInterventionEvaluations(
+          parsedValue as Record<string, AdminInterventionEvaluation>
+        )
+      : hydrateAdminInterventionEvaluations();
+  } catch {
+    return hydrateAdminInterventionEvaluations();
+  }
+}
+
+function evaluationsArrayToRecord(
+  evaluations: AdminInterventionEvaluation[]
+) {
+  return Object.fromEntries(
+    evaluations.map((evaluation) => [evaluation.interventionId, evaluation])
+  ) as Record<string, AdminInterventionEvaluation>;
+}
+
+function evaluationsRecordToArray(
+  evaluations: Record<string, AdminInterventionEvaluation>
+) {
+  return Object.values(evaluations);
 }
 
 function hydrateSavedIntervention(intervention: SavedIntervention) {
@@ -677,7 +762,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     )
   );
   const [notebookDocuments, setNotebookDocuments] =
-    useState<NotebookDocument[]>(loadNotebookDocuments);
+    useState<NotebookDocument[]>(() =>
+      hydrateNotebookDocuments(loadNotebookDocuments())
+    );
   const [customSurgicalInterventions, setCustomSurgicalInterventions] =
     useState<SurgicalInterventionDefinition[]>(() =>
       hydrateSurgicalInterventionDefinitions(
@@ -692,6 +779,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       loadStoredArray<Senior>(CUSTOM_SENIORS_STORAGE_KEY, [])
     )
   );
+  const [adminEvaluations, setAdminEvaluations] =
+    useState<Record<string, AdminInterventionEvaluation>>(
+      loadStoredAdminEvaluations
+    );
   const [adminTrophies, setAdminTrophies] = useState<AdminTrophyDefinition[]>(() =>
     hydrateAdminTrophies(
       loadStoredArray<AdminTrophyDefinition>(ADMIN_TROPHIES_STORAGE_KEY, [])
@@ -703,19 +794,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [adminTrophyStorageWarning, setAdminTrophyStorageWarning] = useState<
     string | null
   >(null);
+  const [persistentSyncIssues, setPersistentSyncIssues] = useState<
+    Partial<Record<PersistentArrayKey, string>>
+  >({});
   const [passwordChangeChallengeState, setPasswordChangeChallengeState] =
     useState<PasswordChangeChallengeState | null>(null);
-  const [seniorManagedInternalsMap, setSeniorManagedInternalsMap] = useState<
-    Record<string, string[]>
-  >(loadSeniorManagedInternalsMap);
+  const [hasLoadedPersistentAdminEvaluations, setHasLoadedPersistentAdminEvaluations] =
+    useState(false);
   const [canSavePersistentState, setCanSavePersistentState] = useState(false);
   const selectedInternal =
     internalProfiles.find((profile) => profile.id === selectedInternalId) ?? null;
-  const selectableSeniors = getSelectableSeniors(customSeniors).map((senior) => ({
-    ...senior,
-    managedInternalIds:
-      seniorManagedInternalsMap[senior.id] ?? senior.managedInternalIds ?? [],
-  }));
+  const selectableSeniors = getSelectableSeniors(customSeniors);
   const selectedSenior =
     selectableSeniors.find((senior) => senior.id === selectedSeniorId) ?? null;
   const surgicalProcedureOptions = getProcedureOptions(customSurgicalInterventions);
@@ -728,9 +817,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     draft,
     customSurgicalInterventions
   );
+  const persistentSyncWarning = Object.values(persistentSyncIssues)[0] ?? null;
   const isAuthenticated = sessionRole !== null;
   const isAdmin = sessionRole === 'admin';
   const isSenior = sessionRole === 'senior';
+
+  const persistArrayWithFeedback = async <T,>(
+    key: PersistentArrayKey,
+    data: T[]
+  ) => {
+    const isSaved = await savePersistentArray(key, data);
+
+    setPersistentSyncIssues((current) => {
+      if (isSaved) {
+        if (!(key in current)) {
+          return current;
+        }
+
+        const nextIssues = { ...current };
+        delete nextIssues[key];
+        return nextIssues;
+      }
+
+      return {
+        ...current,
+        [key]: PERSISTENT_SYNC_MESSAGES[key],
+      };
+    });
+
+    return isSaved;
+  };
 
   const appendActivityLogEntry = (
     actor: {
@@ -756,10 +872,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         },
         ...current,
       ].slice(0, 150);
-
-      if (isPersistentStorageConfigured() && canSavePersistentState) {
-        void savePersistentArray('activity_log', nextActivityLog);
-      }
 
       return nextActivityLog;
     });
@@ -818,9 +930,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
 
     if (canSavePersistentState) {
-      void savePersistentArray('internal_profiles', internalProfiles);
+      void persistArrayWithFeedback('internal_profiles', internalProfiles);
     }
-  }, [internalProfiles]);
+  }, [canSavePersistentState, internalProfiles]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -833,9 +945,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
 
     if (canSavePersistentState) {
-      void savePersistentArray('saved_interventions', savedInterventions);
+      void persistArrayWithFeedback('saved_interventions', savedInterventions);
     }
-  }, [savedInterventions]);
+  }, [canSavePersistentState, savedInterventions]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -846,7 +958,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       NOTEBOOK_DOCUMENTS_STORAGE_KEY,
       JSON.stringify(notebookDocuments)
     );
-  }, [notebookDocuments]);
+
+    if (canSavePersistentState) {
+      void persistArrayWithFeedback('notebook_documents', notebookDocuments);
+    }
+  }, [notebookDocuments, canSavePersistentState]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -859,12 +975,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
 
     if (canSavePersistentState) {
-      void savePersistentArray(
+      void persistArrayWithFeedback(
         'custom_surgical_interventions',
         customSurgicalInterventions
       );
     }
-  }, [customSurgicalInterventions]);
+  }, [canSavePersistentState, customSurgicalInterventions]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -877,31 +993,75 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
 
     if (canSavePersistentState) {
-      void savePersistentArray('custom_seniors', customSeniors);
+      void persistArrayWithFeedback('custom_seniors', customSeniors);
     }
-  }, [customSeniors]);
+  }, [canSavePersistentState, customSeniors]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
     }
 
+    window.localStorage.setItem(
+      ADMIN_EVALUATIONS_STORAGE_KEY,
+      JSON.stringify(adminEvaluations)
+    );
+
+    if (hasLoadedPersistentAdminEvaluations && canSavePersistentState) {
+      void persistArrayWithFeedback(
+        'admin_evaluations',
+        evaluationsRecordToArray(adminEvaluations)
+      );
+    }
+  }, [adminEvaluations, canSavePersistentState, hasLoadedPersistentAdminEvaluations]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    let isCancelled = false;
+    let savedLocally = false;
+
     try {
       window.localStorage.setItem(
         ADMIN_TROPHIES_STORAGE_KEY,
         JSON.stringify(adminTrophies)
       );
-      setAdminTrophyStorageWarning(null);
+      savedLocally = true;
     } catch (error) {
       console.warn('Admin trophies storage failed', error);
-      setAdminTrophyStorageWarning(
-        'Le trophée a bien été enregistré dans la session en cours, mais ses données sont trop volumineuses pour être sauvegardées localement. Réduis la taille des images si tu veux conserver cette configuration après rechargement.'
-      );
     }
 
-    if (canSavePersistentState) {
-      void savePersistentArray('admin_trophies', adminTrophies);
-    }
+    void (async () => {
+      const savedRemotely = canSavePersistentState
+        ? await persistArrayWithFeedback('admin_trophies', adminTrophies)
+        : false;
+
+      if (isCancelled) {
+        return;
+      }
+
+      if (savedLocally) {
+        setAdminTrophyStorageWarning(null);
+        return;
+      }
+
+      if (savedRemotely) {
+        setAdminTrophyStorageWarning(
+          'Le trophée a bien été enregistré sur le serveur, mais ses images sont trop volumineuses pour le stockage local du navigateur. Il sera rechargé après connexion, mais pas conservé hors ligne sur cet appareil.'
+        );
+        return;
+      }
+
+      setAdminTrophyStorageWarning(
+        'Le trophée a bien été enregistré dans la session en cours, mais ses données sont trop volumineuses pour être sauvegardées localement. La sauvegarde serveur n’a pas pu être confirmée. Réduis la taille des images si tu veux garantir sa conservation après rechargement.'
+      );
+    })();
+
+    return () => {
+      isCancelled = true;
+    };
   }, [adminTrophies, canSavePersistentState]);
 
   useEffect(() => {
@@ -915,20 +1075,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
 
     if (canSavePersistentState) {
-      void savePersistentArray('activity_log', activityLog.slice(0, 150));
+      void persistArrayWithFeedback('activity_log', activityLog.slice(0, 150));
     }
   }, [activityLog, canSavePersistentState]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(
-      SENIOR_MANAGED_INTERNALS_STORAGE_KEY,
-      JSON.stringify(seniorManagedInternalsMap)
-    );
-  }, [seniorManagedInternalsMap]);
 
   const loadPersistentState = async () => {
     if (!isPersistentStorageConfigured()) {
@@ -938,17 +1087,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const [
       persistentInternalProfiles,
       persistentSavedInterventions,
+      persistentNotebookDocuments,
       persistentCustomSurgicalInterventions,
       persistentCustomSeniors,
+      persistentAdminEvaluations,
       persistentAdminTrophies,
       persistentActivityLog,
     ] = await Promise.all([
       loadPersistentArray<InternalProfile>('internal_profiles'),
       loadPersistentArray<SavedIntervention>('saved_interventions'),
+      loadPersistentArray<NotebookDocument>('notebook_documents'),
       loadPersistentArray<SurgicalInterventionDefinition>(
         'custom_surgical_interventions'
       ),
       loadPersistentArray<Senior>('custom_seniors'),
+      loadPersistentArray<AdminInterventionEvaluation>('admin_evaluations'),
       loadPersistentArray<AdminTrophyDefinition>('admin_trophies'),
       loadPersistentArray<ActivityLogEntry>('activity_log'),
     ]);
@@ -956,11 +1109,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (
       !persistentInternalProfiles &&
       !persistentSavedInterventions &&
+      !persistentNotebookDocuments &&
       !persistentCustomSurgicalInterventions &&
       !persistentCustomSeniors &&
+      !persistentAdminEvaluations &&
       !persistentAdminTrophies &&
       !persistentActivityLog
     ) {
+      setHasLoadedPersistentAdminEvaluations(true);
+      setCanSavePersistentState(true);
       return null;
     }
 
@@ -970,6 +1127,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const nextSavedInterventions = persistentSavedInterventions
       ? hydrateSavedInterventions(persistentSavedInterventions)
       : savedInterventions;
+    const nextNotebookDocuments = persistentNotebookDocuments
+      ? hydrateNotebookDocuments(persistentNotebookDocuments)
+      : notebookDocuments;
     const nextCustomSurgicalInterventions =
       persistentCustomSurgicalInterventions
         ? hydrateSurgicalInterventionDefinitions(
@@ -979,6 +1139,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const nextCustomSeniors = persistentCustomSeniors
       ? hydrateCustomSeniors(persistentCustomSeniors)
       : customSeniors;
+    const nextAdminEvaluations = persistentAdminEvaluations
+      ? hydrateAdminInterventionEvaluations(
+          evaluationsArrayToRecord(persistentAdminEvaluations)
+        )
+      : adminEvaluations;
     const nextAdminTrophies = persistentAdminTrophies
       ? hydrateAdminTrophies(persistentAdminTrophies)
       : adminTrophies;
@@ -992,12 +1157,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSavedInterventions(nextSavedInterventions);
     }
 
+    if (persistentNotebookDocuments) {
+      setNotebookDocuments(nextNotebookDocuments);
+    }
+
     if (persistentCustomSurgicalInterventions) {
       setCustomSurgicalInterventions(nextCustomSurgicalInterventions);
     }
 
     if (persistentCustomSeniors) {
       setCustomSeniors(nextCustomSeniors);
+    }
+
+    if (persistentAdminEvaluations) {
+      setAdminEvaluations(nextAdminEvaluations);
     }
 
     if (persistentAdminTrophies) {
@@ -1008,12 +1181,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setActivityLog(nextActivityLog);
     }
 
+    setHasLoadedPersistentAdminEvaluations(true);
     setCanSavePersistentState(true);
     return {
       internalProfiles: nextInternalProfiles,
       savedInterventions: nextSavedInterventions,
+      notebookDocuments: nextNotebookDocuments,
       customSurgicalInterventions: nextCustomSurgicalInterventions,
       customSeniors: nextCustomSeniors,
+      adminEvaluations: nextAdminEvaluations,
       adminTrophies: nextAdminTrophies,
       activityLog: nextActivityLog,
     };
@@ -1046,7 +1222,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const authenticateSenior = (senior: Senior, lastLoginAt: string) => {
-    saveSeniorLastLogin(senior.id, lastLoginAt);
+    setCustomSeniors((current) =>
+      current.map((existingSenior) =>
+        existingSenior.id === senior.id
+          ? {
+              ...existingSenior,
+              lastLoginAt,
+            }
+          : existingSenior
+      )
+    );
     setPasswordChangeChallengeState(null);
     setSessionRole('senior');
     setSelectedInternalId(null);
@@ -1060,6 +1245,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const login = async (loginId: string, password: string) => {
     setPersistentStorageCredentials(loginId, password);
     setCanSavePersistentState(false);
+    setHasLoadedPersistentAdminEvaluations(false);
+    setPersistentSyncIssues({});
 
     const persistentState = await loadPersistentState();
     const profilesForLogin =
@@ -1141,6 +1328,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setPasswordChangeChallengeState(null);
     clearPersistentStorageCredentials();
     setCanSavePersistentState(false);
+    setHasLoadedPersistentAdminEvaluations(false);
+    setPersistentSyncIssues({});
   };
 
   const completePasswordChangeChallenge = async (
@@ -1205,7 +1394,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       if (isPersistentStorageConfigured()) {
         setPersistentStorageCredentials(updatedProfile.loginId, challenge.currentPassword);
-        await savePersistentArray('internal_profiles', nextInternalProfiles);
+        await persistArrayWithFeedback('internal_profiles', nextInternalProfiles);
       }
 
       setInternalProfiles(nextInternalProfiles);
@@ -1240,7 +1429,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     if (isPersistentStorageConfigured()) {
       setPersistentStorageCredentials(seniorLoginId, challenge.currentPassword);
-      await savePersistentArray('custom_seniors', nextCustomSeniors);
+      await persistArrayWithFeedback('custom_seniors', nextCustomSeniors);
     }
 
     setCustomSeniors(nextCustomSeniors);
@@ -1257,6 +1446,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const logout = () => {
     clearPersistentStorageCredentials();
     setCanSavePersistentState(false);
+    setHasLoadedPersistentAdminEvaluations(false);
+    setPersistentSyncIssues({});
     setPasswordChangeChallengeState(null);
     setSessionRole(null);
     setSelectedInternalId(null);
@@ -1402,6 +1593,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         draft.context,
       internalId,
       id: `${Date.now()}`,
+      procedure: draft.procedure as InterventionType,
       autonomyScore: null,
       savedAt: new Date().toISOString(),
     };
@@ -1750,6 +1942,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       password: sanitizedInput.password,
       createdAt: new Date().toISOString(),
       isCustom: true,
+      lastLoginAt: null,
+      managedInternalIds: [],
     };
 
     setCustomSeniors((current) => [senior, ...current]);
@@ -1901,25 +2095,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
       )
     );
 
-    setSeniorManagedInternalsMap((current) => ({
-      ...current,
-      [seniorId]: sanitizedInternalIds,
-    }));
+    setCustomSeniors((current) =>
+      current.map((senior) =>
+        senior.id === seniorId
+          ? {
+              ...senior,
+              managedInternalIds: sanitizedInternalIds,
+            }
+          : senior
+      )
+    );
   };
 
   const deleteSeniorProfile = (seniorId: string) => {
     setCustomSeniors((current) =>
       current.filter((senior) => senior.id !== seniorId)
     );
-    setSeniorManagedInternalsMap((current) => {
-      if (!(seniorId in current)) {
-        return current;
-      }
-
-      const nextMap = { ...current };
-      delete nextMap[seniorId];
-      return nextMap;
-    });
     setSelectedSeniorId((current) => (current === seniorId ? null : current));
   };
 
@@ -2300,8 +2491,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         notebookDocuments,
         customSurgicalInterventions,
         customSeniors,
+        adminEvaluations,
         adminTrophies,
         adminTrophyStorageWarning,
+        persistentSyncWarning,
         passwordChangeChallenge: passwordChangeChallengeState
           ? {
               loginId: passwordChangeChallengeState.loginId,
@@ -2349,6 +2542,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         deleteCustomSurgicalIntervention,
         deleteInternalProfile,
         deleteSavedInterventions,
+        setAdminEvaluations,
         setAdminTrophies,
         updateNotebookDocument,
         clearNotebookDocument,
