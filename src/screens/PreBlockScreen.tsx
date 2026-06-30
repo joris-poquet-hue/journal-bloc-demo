@@ -7,6 +7,7 @@ import { SectionCard } from '../components/SectionCard';
 import { useAppContext } from '../context/AppContext';
 import { techniqueGuides } from '../data/mockData';
 import { TechniqueGuide } from '../types';
+import { useScrollResetOnChange } from '../utils/useScrollResetOnChange';
 
 type GuideView = 'menu' | TechniqueGuide['id'];
 type ExpandedFigure = {
@@ -53,6 +54,7 @@ export function PreBlockScreen() {
   const { preBlockContext } = useAppContext();
   const [view, setView] = useState<GuideView>('menu');
   const [expandedFigure, setExpandedFigure] = useState<ExpandedFigure | null>(null);
+  useScrollResetOnChange([view]);
   const selectedGuide =
     view === 'menu'
       ? null

@@ -1,7 +1,6 @@
 import { BottomNavigation } from '../components/BottomNavigation';
 import { useAppContext } from '../context/AppContext';
 import { AdminScreen } from '../screens/AdminScreen';
-import { BadgesScreen } from '../screens/BadgesScreen';
 import { ChecklistScreen } from '../screens/ChecklistScreen';
 import { InterventionFormScreen } from '../screens/InterventionFormScreen';
 import { LoginScreen } from '../screens/LoginScreen';
@@ -10,10 +9,13 @@ import { PreBlockScreen } from '../screens/PreBlockScreen';
 import { ProfileScreen } from '../screens/ProfileScreen';
 import { SurgeryHistoryScreen } from '../screens/SurgeryHistoryScreen';
 import { SummaryScreen } from '../screens/SummaryScreen';
+import { TrophiesScreen } from '../screens/BadgesScreen';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
+import { useScrollResetOnChange } from '../utils/useScrollResetOnChange';
 
 export function AppNavigator() {
   const { isAuthenticated, screen, sessionRole } = useAppContext();
+  useScrollResetOnChange([isAuthenticated, screen, sessionRole]);
 
   if (!isAuthenticated) {
     return <LoginScreen />;
@@ -24,8 +26,8 @@ export function AppNavigator() {
   }
 
   const currentScreen = (() => {
-    if (screen === 'badges') {
-      return <BadgesScreen />;
+    if (screen === 'trophies') {
+      return <TrophiesScreen />;
     }
 
     if (screen === 'surgery-history') {

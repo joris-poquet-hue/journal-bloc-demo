@@ -15,6 +15,15 @@ import {
   TrophyType,
 } from '../types';
 
+export type TrophyProgressSnapshot = {
+  awardedAt: string | null;
+  nextThreshold: number | null;
+  nextTier: BadgeTier | null;
+  progressCurrent: number | null;
+  progressTarget: number | null;
+  unlockedTier: BadgeTier | null;
+};
+
 const TROPHY_TIERS: Array<{ tier: BadgeTier; label: string }> = [
   { tier: 'bronze', label: 'Bronze' },
   { tier: 'silver', label: 'Argent' },
@@ -75,8 +84,10 @@ export function createEmptyTrophyDefinition(type: TrophyType): AdminTrophyDefini
     format: isOperative ? 'levels' : 'unique',
     status: 'draft',
     visibility: isOperative ? 'visible' : 'surprise',
+    operativeScope: 'procedure',
     associatedProcedure: '',
     associatedApproach: '',
+    associatedIndication: '',
     trackedRole: 'operateur_principal',
     trackedInterventionStatus: 'evaluated',
     conditions: isOperative ? [] : [createEmptyTrophyCondition('total_recorded')],
@@ -119,8 +130,10 @@ export function ensureTrophyDefinitionShape(
     ...definition,
     title: definition.title ?? '',
     description: definition.description ?? '',
+    operativeScope: definition.operativeScope ?? 'procedure',
     associatedProcedure: definition.associatedProcedure ?? '',
     associatedApproach: definition.associatedApproach ?? '',
+    associatedIndication: definition.associatedIndication ?? '',
     trackedRole: definition.trackedRole ?? 'operateur_principal',
     trackedInterventionStatus: definition.trackedInterventionStatus ?? 'evaluated',
     visibility:
@@ -173,6 +186,7 @@ function matchesBaseFilters(
   adminEvaluations: Record<string, AdminInterventionEvaluation>
 ) {
   if (
+    definition.operativeScope === 'procedure' &&
     definition.associatedProcedure &&
     intervention.procedure !== definition.associatedProcedure
   ) {
@@ -182,6 +196,13 @@ function matchesBaseFilters(
   if (
     definition.associatedApproach &&
     intervention.approach !== definition.associatedApproach
+  ) {
+    return false;
+  }
+
+  if (
+    definition.associatedIndication &&
+    intervention.indication !== definition.associatedIndication
   ) {
     return false;
   }
@@ -208,6 +229,124 @@ function getRelevantInterventionsForProfile(
       intervention.internalId === profile.id &&
       matchesBaseFilters(intervention, definition, adminEvaluations)
   );
+}
+
+function getCountProgressForCondition(
+  condition: TrophyCondition,
+  definition: AdminTrophyDefinition,
+  profile: InternalProfile,
+  interventions: SavedIntervention[],
+  adminEvaluations: Record<string, AdminInterventionEvaluation>
+) {
+  const profileInterventions = interventions.filter(
+    (intervention) => intervention.internalId === profile.id
+  );
+  const filteredByRole = condition.role
+    ? profileInterventions.filter((intervention) => intervention.role === condition.role)
+    : profileInterventions;
+  const filteredByStatus =
+    condition.trackedStatus != null
+      ? filteredByRole.filter((intervention) =>
+          matchesTrackedStatus(intervention, adminEvaluations, condition.trackedStatus!)
+        )
+      : filteredByRole;
+  const threshold = condition.threshold ?? 0;
+
+  switch (condition.type) {
+    case 'first_recorded':
+      return {
+        awardedAt: profileInterventions[0]?.savedAt ?? null,
+        progressCurrent: Math.min(profileInterventions.length, 1),
+        progressTarget: 1,
+      };
+    case 'total_recorded':
+      return {
+        awardedAt: profileInterventions[threshold - 1]?.savedAt ?? null,
+        progressCurrent: profileInterventions.length,
+        progressTarget: threshold,
+      };
+    case 'total_evaluated': {
+      const evaluatedInterventions = profileInterventions.filter((intervention) =>
+        matchesTrackedStatus(intervention, adminEvaluations, 'evaluated')
+      );
+
+      return {
+        awardedAt: evaluatedInterventions[threshold - 1]?.savedAt ?? null,
+        progressCurrent: evaluatedInterventions.length,
+        progressTarget: threshold,
+      };
+    }
+    case 'procedure_count': {
+      const matchingInterventions = filteredByStatus.filter(
+        (intervention) =>
+          intervention.procedure === (condition.procedure || definition.associatedProcedure)
+      );
+
+      return {
+        awardedAt: matchingInterventions[threshold - 1]?.savedAt ?? null,
+        progressCurrent: matchingInterventions.length,
+        progressTarget: threshold,
+      };
+    }
+    case 'approach_count': {
+      const matchingInterventions = filteredByStatus.filter(
+        (intervention) =>
+          intervention.approach === (condition.approach || definition.associatedApproach)
+      );
+
+      return {
+        awardedAt: matchingInterventions[threshold - 1]?.savedAt ?? null,
+        progressCurrent: matchingInterventions.length,
+        progressTarget: threshold,
+      };
+    }
+    case 'recording_time_range': {
+      const matchingInterventions = filteredByRole.filter((intervention) =>
+        isWithinTimeRange(
+          intervention.savedAt,
+          getHourLabel(condition.startHour),
+          getHourLabel(condition.endHour)
+        )
+      );
+
+      return {
+        awardedAt: matchingInterventions[threshold - 1]?.savedAt ?? null,
+        progressCurrent: matchingInterventions.length,
+        progressTarget: threshold,
+      };
+    }
+    case 'distinct_procedures': {
+      const sortedInterventions = filteredByStatus.filter((intervention) =>
+        matchesRole(intervention, condition.role ?? '')
+      );
+      const seenProcedures = new Set<InterventionType>();
+      let awardedAt: string | null = null;
+
+      sortedInterventions.forEach((intervention) => {
+        if (awardedAt) {
+          return;
+        }
+
+        seenProcedures.add(intervention.procedure);
+
+        if (seenProcedures.size >= (condition.distinctProcedureCount ?? threshold)) {
+          awardedAt = intervention.savedAt;
+        }
+      });
+
+      return {
+        awardedAt,
+        progressCurrent: seenProcedures.size,
+        progressTarget: condition.distinctProcedureCount ?? threshold,
+      };
+    }
+    default:
+      return {
+        awardedAt: null,
+        progressCurrent: null,
+        progressTarget: null,
+      };
+  }
 }
 
 function getAverageAutonomy(interventions: SavedIntervention[]) {
@@ -398,7 +537,11 @@ export function getUnlockedTrophyTierForProfile(
     definition.levels.forEach((level) => {
       const threshold = level.threshold ?? 0;
       const matchingInterventions = relevantInterventions.filter((intervention) =>
-        matchesTrackedStatus(intervention, adminEvaluations, level.trackedStatus)
+        matchesTrackedStatus(
+          intervention,
+          adminEvaluations,
+          definition.trackedInterventionStatus
+        )
       );
       const averageAutonomy = getAverageAutonomy(matchingInterventions);
 
@@ -427,6 +570,126 @@ export function getUnlockedTrophyTierForProfile(
   return allConditionsMatch ? 'bronze' : null;
 }
 
+export function getTrophyProgressSnapshotForProfile(
+  definition: AdminTrophyDefinition,
+  profile: InternalProfile,
+  interventions: SavedIntervention[],
+  adminEvaluations: Record<string, AdminInterventionEvaluation>
+): TrophyProgressSnapshot {
+  if (definition.status !== 'active') {
+    return {
+      awardedAt: null,
+      nextThreshold: null,
+      nextTier: null,
+      progressCurrent: null,
+      progressTarget: null,
+      unlockedTier: null,
+    };
+  }
+
+  if (definition.format === 'levels') {
+    const relevantInterventions = getRelevantInterventionsForProfile(
+      definition,
+      profile,
+      interventions,
+      adminEvaluations
+    ).sort((left, right) => left.savedAt.localeCompare(right.savedAt));
+    const currentCount = relevantInterventions.length;
+    const averageAutonomy = getAverageAutonomy(relevantInterventions);
+    let unlockedTier: BadgeTier | null = null;
+    let awardedAt: string | null = null;
+    let nextTier: BadgeTier | null = null;
+    let nextThreshold: number | null = null;
+    const lastRelevantIntervention =
+      relevantInterventions.length > 0
+        ? relevantInterventions[relevantInterventions.length - 1]
+        : null;
+
+    definition.levels.forEach((level) => {
+      const threshold = level.threshold ?? 0;
+      const autonomySatisfied =
+        level.autonomyMin == null ||
+        (averageAutonomy != null && averageAutonomy >= level.autonomyMin);
+      const levelUnlocked = currentCount >= threshold && autonomySatisfied;
+
+      if (levelUnlocked) {
+        unlockedTier = level.tier;
+        awardedAt =
+          relevantInterventions[Math.max(0, threshold - 1)]?.savedAt ??
+          lastRelevantIntervention?.savedAt ??
+          awardedAt;
+      } else if (!nextTier) {
+        nextTier = level.tier;
+        nextThreshold = threshold;
+      }
+    });
+
+    return {
+      awardedAt,
+      nextThreshold,
+      nextTier,
+      progressCurrent: nextThreshold != null ? currentCount : currentCount || null,
+      progressTarget: nextThreshold,
+      unlockedTier,
+    };
+  }
+
+  const unlockedTier = getUnlockedTrophyTierForProfile(
+    definition,
+    profile,
+    interventions,
+    adminEvaluations
+  );
+  const progressCondition = definition.conditions.find((condition) =>
+    [
+      'first_recorded',
+      'total_recorded',
+      'total_evaluated',
+      'procedure_count',
+      'approach_count',
+      'recording_time_range',
+      'distinct_procedures',
+    ].includes(condition.type)
+  );
+
+  if (!progressCondition) {
+    const relevantInterventions = getRelevantInterventionsForProfile(
+      definition,
+      profile,
+      interventions,
+      adminEvaluations
+    ).sort((left, right) => left.savedAt.localeCompare(right.savedAt));
+
+    return {
+      awardedAt: unlockedTier
+        ? relevantInterventions[relevantInterventions.length - 1]?.savedAt ?? null
+        : null,
+      nextThreshold: null,
+      nextTier: null,
+      progressCurrent: null,
+      progressTarget: null,
+      unlockedTier,
+    };
+  }
+
+  const progress = getCountProgressForCondition(
+    progressCondition,
+    definition,
+    profile,
+    interventions,
+    adminEvaluations
+  );
+
+  return {
+    awardedAt: unlockedTier ? progress.awardedAt : null,
+    nextThreshold: unlockedTier ? null : progress.progressTarget,
+    nextTier: unlockedTier ? null : 'bronze',
+    progressCurrent: progress.progressCurrent,
+    progressTarget: progress.progressTarget,
+    unlockedTier,
+  };
+}
+
 export function countProfilesWithTrophy(
   definition: AdminTrophyDefinition,
   profiles: InternalProfile[],
@@ -450,7 +713,9 @@ export function buildTrophyRuleSummary(definition: AdminTrophyDefinition) {
       .filter((level) => level.threshold != null)
       .map((level) => {
         const thresholdLabel = `${level.label} : au moins ${level.threshold} intervention(s) ${
-          level.trackedStatus === 'evaluated' ? 'évaluée(s)' : 'enregistrée(s)'
+          definition.trackedInterventionStatus === 'evaluated'
+            ? 'évaluée(s)'
+            : 'enregistrée(s)'
         }`;
         const autonomyLabel =
           level.autonomyMin != null
@@ -546,8 +811,20 @@ export function validateTrophyDefinition(definition: AdminTrophyDefinition) {
     errors.push('La description courte est obligatoire.');
   }
 
-  if (definition.type === 'operatoire' && !definition.associatedProcedure) {
-    errors.push('Sélectionnez une intervention associée pour ce trophée opératoire.');
+  if (definition.type === 'operatoire') {
+    if (
+      definition.operativeScope === 'procedure' &&
+      !definition.associatedProcedure
+    ) {
+      errors.push('Sélectionnez une intervention associée pour ce trophée opératoire.');
+    }
+
+    if (
+      definition.operativeScope === 'approach' &&
+      !definition.associatedApproach
+    ) {
+      errors.push('Sélectionnez une voie d’abord suivie pour ce trophée opératoire.');
+    }
   }
 
   if (definition.format === 'levels') {

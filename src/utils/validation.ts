@@ -39,6 +39,10 @@ export function getMissingFormFields(
     missingFields.push('senior');
   }
 
+  if (!draft.procedure) {
+    missingFields.push('intervention');
+  }
+
   if (isSalpingectomy && !draft.indication) {
     missingFields.push('indication');
   }

@@ -21,6 +21,7 @@ import { downloadInterventionsExcel } from '../utils/export';
 
 type AccountSheet =
   | 'training'
+  | 'photo'
   | 'password'
   | 'export'
   | 'support'
@@ -31,6 +32,16 @@ type FeedbackState = {
   tone: 'success' | 'error';
   message: string;
 } | null;
+
+type PhotoCropState = {
+  fileName: string;
+  height: number;
+  panX: number;
+  panY: number;
+  sourceDataUrl: string;
+  width: number;
+  zoom: number;
+};
 
 const semesterOptions = Array.from({ length: 12 }, (_, index) => ({
   label: `S${index + 1}`,
@@ -44,8 +55,8 @@ const rotationOptions = [
   { label: 'DAN', value: 'DAN' },
 ];
 
-async function createAvatarDataUrl(file: File) {
-  const sourceDataUrl = await new Promise<string>((resolve, reject) => {
+async function readImageDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
 
     reader.onload = () => {
@@ -59,7 +70,9 @@ async function createAvatarDataUrl(file: File) {
     reader.onerror = () => reject(new Error('Impossible de lire ce fichier.'));
     reader.readAsDataURL(file);
   });
+}
 
+async function loadImageElement(sourceDataUrl: string) {
   const image = await new Promise<HTMLImageElement>((resolve, reject) => {
     const nextImage = new Image();
 
@@ -67,6 +80,36 @@ async function createAvatarDataUrl(file: File) {
     nextImage.onerror = () => reject(new Error('Impossible de charger cette image.'));
     nextImage.src = sourceDataUrl;
   });
+
+  return image;
+}
+
+function getCropGeometry(
+  width: number,
+  height: number,
+  size: number,
+  zoom: number,
+  panX: number,
+  panY: number
+) {
+  const scale = Math.max(size / width, size / height) * zoom;
+  const drawWidth = width * scale;
+  const drawHeight = height * scale;
+  const maxOffsetX = Math.max(0, (drawWidth - size) / 2);
+  const maxOffsetY = Math.max(0, (drawHeight - size) / 2);
+  const offsetX = (panX / 100) * maxOffsetX;
+  const offsetY = (panY / 100) * maxOffsetY;
+
+  return {
+    drawHeight,
+    drawWidth,
+    offsetX,
+    offsetY,
+  };
+}
+
+async function createAvatarDataUrl(crop: PhotoCropState) {
+  const image = await loadImageElement(crop.sourceDataUrl);
 
   const size = 512;
   const canvas = document.createElement('canvas');
@@ -79,15 +122,24 @@ async function createAvatarDataUrl(file: File) {
   canvas.width = size;
   canvas.height = size;
 
-  const scale = Math.max(size / image.width, size / image.height);
-  const drawWidth = image.width * scale;
-  const drawHeight = image.height * scale;
-  const offsetX = (size - drawWidth) / 2;
-  const offsetY = (size - drawHeight) / 2;
+  const { drawWidth, drawHeight, offsetX, offsetY } = getCropGeometry(
+    crop.width,
+    crop.height,
+    size,
+    crop.zoom,
+    crop.panX,
+    crop.panY
+  );
 
   context.fillStyle = '#ffffff';
   context.fillRect(0, 0, size, size);
-  context.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+  context.drawImage(
+    image,
+    (size - drawWidth) / 2 + offsetX,
+    (size - drawHeight) / 2 + offsetY,
+    drawWidth,
+    drawHeight
+  );
 
   return canvas.toDataURL('image/jpeg', 0.86);
 }
@@ -106,6 +158,7 @@ export function ProfileScreen() {
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [activeSheet, setActiveSheet] = useState<AccountSheet>(null);
   const [feedback, setFeedback] = useState<FeedbackState>(null);
+  const [photoCrop, setPhotoCrop] = useState<PhotoCropState | null>(null);
   const [trainingForm, setTrainingForm] = useState({
     semester: selectedInternal?.semester ?? '',
     currentRotation: selectedInternal?.currentRotation ?? '',
@@ -163,6 +216,7 @@ export function ProfileScreen() {
 
   const closeSheet = () => {
     setActiveSheet(null);
+    setPhotoCrop(null);
   };
 
   const handleTrainingSubmit = (event: FormEvent<HTMLFormElement>) => {
@@ -209,6 +263,7 @@ export function ProfileScreen() {
 
     const result = updateInternalCredentials(selectedInternal.id, {
       loginId: selectedInternal.loginId,
+      mustChangePassword: false,
       password: passwordForm.nextPassword,
     });
 
@@ -305,15 +360,19 @@ export function ProfileScreen() {
     }
 
     try {
-      const avatarImageSrc = await createAvatarDataUrl(file);
-      const result = updateInternalProfileSettings(selectedInternal.id, {
-        avatarImageSrc,
-      });
+      const sourceDataUrl = await readImageDataUrl(file);
+      const image = await loadImageElement(sourceDataUrl);
 
-      setFeedback({
-        tone: result.success ? 'success' : 'error',
-        message: result.message,
+      setPhotoCrop({
+        fileName: file.name,
+        height: image.height,
+        panX: 0,
+        panY: 0,
+        sourceDataUrl,
+        width: image.width,
+        zoom: 1,
       });
+      setActiveSheet('photo');
     } catch (error) {
       setFeedback({
         tone: 'error',
@@ -324,6 +383,50 @@ export function ProfileScreen() {
       });
     }
   };
+
+  const handlePhotoCropSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!photoCrop) {
+      return;
+    }
+
+    try {
+      const avatarImageSrc = await createAvatarDataUrl(photoCrop);
+      const result = updateInternalProfileSettings(selectedInternal.id, {
+        avatarImageSrc,
+      });
+
+      setFeedback({
+        tone: result.success ? 'success' : 'error',
+        message: result.message,
+      });
+
+      if (result.success) {
+        closeSheet();
+      }
+    } catch (error) {
+      setFeedback({
+        tone: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Impossible de mettre a jour la photo de profil.',
+      });
+    }
+  };
+
+  const photoPreview =
+    photoCrop != null
+      ? getCropGeometry(
+          photoCrop.width,
+          photoCrop.height,
+          220,
+          photoCrop.zoom,
+          photoCrop.panX,
+          photoCrop.panY
+        )
+      : null;
 
   return (
     <ScreenContainer
@@ -447,7 +550,7 @@ export function ProfileScreen() {
           >
             {activeSheet === 'training' ? (
               <AccountSheetFrame
-                description="Mets à jour les informations visibles dans ton profil."
+                description="Mets à jour tes informations profil."
                 title="Formation"
                 onClose={closeSheet}
               >
@@ -483,9 +586,102 @@ export function ProfileScreen() {
               </AccountSheetFrame>
             ) : null}
 
+            {activeSheet === 'photo' && photoCrop && photoPreview ? (
+              <AccountSheetFrame
+                description="Recadre ta photo avant de l’enregistrer."
+                title="Photo de profil"
+                onClose={closeSheet}
+              >
+                <form className="account-sheet__form" onSubmit={handlePhotoCropSubmit}>
+                  <div className="account-photo-cropper">
+                    <div className="account-photo-cropper__viewport">
+                      <img
+                        alt=""
+                        className="account-photo-cropper__image"
+                        src={photoCrop.sourceDataUrl}
+                        style={{
+                          height: `${photoPreview.drawHeight}px`,
+                          transform: `translate(${photoPreview.offsetX}px, ${photoPreview.offsetY}px)`,
+                          width: `${photoPreview.drawWidth}px`,
+                        }}
+                      />
+                    </div>
+                    <div className="account-photo-cropper__meta">
+                      <strong>{photoCrop.fileName}</strong>
+                      <span>L’aperçu montre le cadrage final du profil.</span>
+                    </div>
+                  </div>
+
+                  <SheetRange
+                    label="Zoom"
+                    max={200}
+                    min={100}
+                    onChange={(event) =>
+                      setPhotoCrop((current) =>
+                        current
+                          ? {
+                              ...current,
+                              zoom: Number(event.target.value) / 100,
+                            }
+                          : current
+                      )
+                    }
+                    value={Math.round(photoCrop.zoom * 100)}
+                  />
+                  <SheetRange
+                    disabled={photoPreview.drawWidth <= 220}
+                    label="Déplacement horizontal"
+                    max={100}
+                    min={-100}
+                    onChange={(event) =>
+                      setPhotoCrop((current) =>
+                        current
+                          ? {
+                              ...current,
+                              panX: Number(event.target.value),
+                            }
+                          : current
+                      )
+                    }
+                    value={photoCrop.panX}
+                  />
+                  <SheetRange
+                    disabled={photoPreview.drawHeight <= 220}
+                    label="Déplacement vertical"
+                    max={100}
+                    min={-100}
+                    onChange={(event) =>
+                      setPhotoCrop((current) =>
+                        current
+                          ? {
+                              ...current,
+                              panY: Number(event.target.value),
+                            }
+                          : current
+                      )
+                    }
+                    value={photoCrop.panY}
+                  />
+
+                  <div className="account-sheet__actions account-sheet__actions--split">
+                    <button
+                      className="flow-button flow-button--secondary"
+                      onClick={closeSheet}
+                      type="button"
+                    >
+                      Annuler
+                    </button>
+                    <button className="flow-button flow-button--primary" type="submit">
+                      Enregistrer
+                    </button>
+                  </div>
+                </form>
+              </AccountSheetFrame>
+            ) : null}
+
             {activeSheet === 'password' ? (
               <AccountSheetFrame
-                description="Change ton mot de passe personnel."
+                description="Modifie ton mot de passe à tout moment."
                 title="Mot de passe"
                 onClose={closeSheet}
               >
@@ -559,7 +755,6 @@ export function ProfileScreen() {
 
             {activeSheet === 'support' ? (
               <AccountSheetFrame
-                description="Prépare un mail au support avec ton message."
                 title="Contacter le support"
                 onClose={closeSheet}
               >
@@ -586,7 +781,7 @@ export function ProfileScreen() {
                   />
                   <div className="account-sheet__actions">
                     <button className="flow-button flow-button--primary" type="submit">
-                      Préparer l’e-mail
+                      Envoyer
                     </button>
                   </div>
                 </form>
@@ -672,7 +867,7 @@ function AccountSheetFrame({
   children,
 }: {
   title: string;
-  description: string;
+  description?: string;
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -694,6 +889,43 @@ function AccountSheetFrame({
       </div>
       {children}
     </>
+  );
+}
+
+function SheetRange({
+  label,
+  value,
+  onChange,
+  min,
+  max,
+  disabled = false,
+}: {
+  label: string;
+  value: number;
+  onChange: (event: ChangeEvent<HTMLInputElement>) => void;
+  min: number;
+  max: number;
+  disabled?: boolean;
+}) {
+  return (
+    <label className="account-sheet__field">
+      <span>{label}</span>
+      <div className="account-sheet__range-wrap">
+        <input
+          className="account-sheet__range"
+          disabled={disabled}
+          max={max}
+          min={min}
+          onChange={onChange}
+          step={1}
+          type="range"
+          value={value}
+        />
+        <strong className="account-sheet__range-value">
+          {label === 'Zoom' ? `${value}%` : value}
+        </strong>
+      </div>
+    </label>
   );
 }
 

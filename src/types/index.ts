@@ -1,6 +1,6 @@
 export type AppScreen =
   | 'welcome'
-  | 'badges'
+  | 'trophies'
   | 'preblock'
   | 'surgery-history'
   | 'form'
@@ -29,6 +29,7 @@ export type InternalProfile = {
   lastName: string;
   loginId: string;
   password: string;
+  mustChangePassword?: boolean;
   promotion: string;
   semester: string;
   currentRotation: string;
@@ -66,6 +67,7 @@ export type CreateInternalProfileResult = {
 export type UpdateInternalCredentialsInput = {
   loginId: string;
   password: string;
+  mustChangePassword?: boolean;
 };
 
 export type UpdateInternalCredentialsResult = {
@@ -149,6 +151,7 @@ export type TrophyType = 'operatoire' | 'special';
 export type TrophyFormat = 'unique' | 'levels';
 export type TrophyVisibility = 'visible' | 'surprise';
 export type TrophyTrackedStatus = 'recorded' | 'evaluated';
+export type TrophyOperativeScope = 'procedure' | 'approach';
 export type TrophyConditionType =
   | 'first_recorded'
   | 'total_recorded'
@@ -203,8 +206,10 @@ export type AdminTrophyDefinition = {
   format: TrophyFormat;
   status: TrophyStatus;
   visibility: TrophyVisibility;
+  operativeScope: TrophyOperativeScope;
   associatedProcedure: InterventionType | '';
   associatedApproach: SurgicalApproach | '';
+  associatedIndication: Indication | '';
   trackedRole: GlobalRole | '';
   trackedInterventionStatus: TrophyTrackedStatus;
   conditions: TrophyCondition[];
@@ -220,8 +225,10 @@ export type Senior = {
   lastName: string;
   loginId?: string;
   password?: string;
+  mustChangePassword?: boolean;
   createdAt?: string;
   isCustom?: boolean;
+  managedInternalIds?: string[];
 };
 
 export type CreateSeniorProfileInput = {
@@ -240,6 +247,7 @@ export type CreateSeniorProfileResult = {
 export type UpdateSeniorCredentialsInput = {
   loginId: string;
   password: string;
+  mustChangePassword?: boolean;
 };
 
 export type UpdateSeniorCredentialsResult = {
@@ -358,7 +366,7 @@ export type InterventionDraft = {
   date: string;
   internalId: string | null;
   seniorId: string | null;
-  procedure: InterventionType;
+  procedure: InterventionType | null;
   indication: Indication | null;
   indicationComment: string;
   customIndication: string | null;
@@ -371,8 +379,9 @@ export type InterventionDraft = {
   checklist: Record<string, ChecklistLevel | null>;
 };
 
-export type SavedIntervention = InterventionDraft & {
+export type SavedIntervention = Omit<InterventionDraft, 'procedure'> & {
   id: string;
+  procedure: InterventionType;
   savedAt: string;
   autonomyScore: number | null;
 };

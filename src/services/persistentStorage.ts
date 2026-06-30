@@ -4,6 +4,7 @@ type PersistentArrayKey =
   | 'saved_obstetric_gestures'
   | 'custom_surgical_interventions'
   | 'custom_seniors'
+  | 'admin_trophies'
   | 'admin_evaluations'
   | 'test_feedback'
   | 'activity_log';

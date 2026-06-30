@@ -5,7 +5,7 @@ import {
   Eye,
   Gauge,
   LucideIcon,
-  PocketKnife,
+  LucideProps,
   Signpost,
   UserRound,
   UsersRound,
@@ -29,6 +29,29 @@ import {
 } from '../data/mockData';
 import { ChoiceOption } from '../types';
 import { formatIsoDate } from '../utils/date';
+
+function SurgicalMaskIcon(props: LucideProps) {
+  return (
+    <svg
+      fill="none"
+      height="24"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth={props.strokeWidth ?? 2}
+      viewBox="0 0 24 24"
+      width="24"
+      {...props}
+    >
+      <path d="M4.5 10.5C6.2 8.9 8.8 8 12 8s5.8.9 7.5 2.5" />
+      <path d="M6.5 10.5v4.2c0 .8.4 1.5 1 2l2.7 2c1.1.8 2.5.8 3.6 0l2.7-2c.6-.5 1-1.2 1-2v-4.2" />
+      <path d="M9 12.5h6" />
+      <path d="M9 15h6" />
+      <path d="M6.5 11.5H5a2 2 0 0 0-2 2" />
+      <path d="M17.5 11.5H19a2 2 0 0 1 2 2" />
+    </svg>
+  );
+}
 
 export function InterventionFormScreen() {
   const {
@@ -177,13 +200,13 @@ export function InterventionFormScreen() {
 
       <div className="flow-grid flow-grid--single">
         <InterventionFlowCard
-          icon={PocketKnife}
+          icon={SurgicalMaskIcon}
           title="Intervention"
         >
           <SelectField
             ariaLabel="Intervention"
             options={procedureOptions}
-            placeholder="Choisir l’intervention"
+            placeholder="Sélectionne une intervention"
             value={draft.procedure}
             onChange={(value) => updateDraftField('procedure', value)}
           />

@@ -5,15 +5,11 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  CircleUserRound,
-  Clock3,
   FolderOpen,
   Info,
-  LifeBuoy,
   LogOut,
   Pencil,
   Settings,
-  Shield,
   Search,
   Star,
   Trophy,
@@ -27,6 +23,7 @@ import {
   ApproachIcon,
   getInterventionApproachLabel,
 } from '../components/ApproachIcon';
+import { InternalAvatar } from '../components/InternalAvatar';
 import { ProgressBadgeCard } from '../components/ProgressBadgeCard';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -34,9 +31,9 @@ import { SectionCard } from '../components/SectionCard';
 import { AdminInterventionsManager } from '../components/AdminInterventionsManager';
 import { useAppContext } from '../context/AppContext';
 import {
+  allChecklistSteps,
   approachOptions,
   checklistLevelOptions,
-  contextOptions,
   entryTechniqueOptions,
   formatComplexityRating,
   formatDisplayName,
@@ -72,6 +69,7 @@ import {
   TrophyCondition,
   TrophyConditionType,
   TrophyLevelDefinition,
+  TrophyOperativeScope,
   TrophyStatus,
   TrophyTrackedStatus,
   TrophyType,
@@ -81,6 +79,7 @@ import {
 } from '../types';
 import { formatIsoDate } from '../utils/date';
 import { calculateAutonomyScore } from '../utils/autonomyScore';
+import { useScrollResetOnChange } from '../utils/useScrollResetOnChange';
 import {
   buildConditionSummary,
   buildTrophyRuleSummary,
@@ -102,7 +101,7 @@ import {
 
 type AdminView =
   | 'home'
-  | 'badges'
+  | 'trophies'
   | 'trophy-create-type'
   | 'trophy-editor'
   | 'history'
@@ -143,6 +142,22 @@ type TrophyFormFeedback = {
   message: string;
 } | null;
 type AdminProfileViewSource = 'profiles' | 'history';
+type ProfileAccountTab = 'internal' | 'senior';
+type ProfileStatsTab = 'history' | 'progress';
+type ProfileHistoryStatusFilter = 'all' | 'evaluated' | 'pending';
+type ProfileProgressPeriod = '3m' | '6m' | '12m' | 'all';
+type OperativeBucketId =
+  | 'installation'
+  | 'ouverture'
+  | 'exposition'
+  | 'gestes'
+  | 'hemostase'
+  | 'fermeture'
+  | 'autres';
+type ProfileHistoryCardStatus = Exclude<ProfileHistoryStatusFilter, 'all'>;
+
+const MASKED_PASSWORD = '••••••••';
+const PROFILE_HISTORY_PAGE_SIZE_OPTIONS = [4, 8, 12];
 
 function FeedbackMessage({ feedback }: { feedback: FeedbackState }) {
   if (!feedback) {
@@ -210,14 +225,12 @@ const ADMIN_EVALUATIONS_STORAGE_KEY =
 const TEST_FEEDBACK_STORAGE_KEY = 'journal-bord:test-feedback:v1';
 const ACTIVITY_LOG_STORAGE_KEY = 'journal-bord:activity-log:v1';
 const SENIOR_LAST_LOGIN_STORAGE_KEY = 'journal-bord:senior-last-logins:v1';
-const ADMIN_TROPHIES_STORAGE_KEY = 'journal-bord:admin-trophies:v1';
 
 const ADMIN_ACTIVITY_RANGE_OPTIONS: Array<{
   value: AdminActivityRange;
   label: string;
 }> = [
   { value: 'day', label: 'Jour' },
-  { value: 'week', label: 'Semaine' },
   { value: 'month', label: 'Mois' },
 ];
 
@@ -307,6 +320,14 @@ const TROPHY_VISIBILITY_DESCRIPTIONS: Record<TrophyVisibility, string> = {
   visible: "L’interne voit sa progression côté interne.",
   surprise: "Le trophée reste caché avant son obtention.",
 };
+
+const TROPHY_OPERATIVE_SCOPE_OPTIONS: Array<{
+  value: TrophyOperativeScope;
+  label: string;
+}> = [
+  { value: 'procedure', label: 'Intervention' },
+  { value: 'approach', label: 'Voie d’abord' },
+];
 
 const TROPHY_STATUS_CLASSNAMES: Record<TrophyStatus, string> = {
   draft: 'admin-status-pill admin-status-pill--draft',
@@ -479,7 +500,7 @@ function formatDateTime(value: string | null) {
   return new Date(value).toLocaleString('fr-FR');
 }
 
-function getProfileInitials(profile: InternalProfile) {
+function getProfileInitials(profile: { firstName: string; lastName: string }) {
   return `${profile.firstName.trim().charAt(0)}${profile.lastName.trim().charAt(0)}`
     .trim()
     .toUpperCase();
@@ -694,6 +715,131 @@ function sortEarnedBadges(profile: InternalProfile, savedInterventions: ReturnTy
     });
 }
 
+function averageNumbers(values: number[]) {
+  if (values.length === 0) {
+    return null;
+  }
+
+  return values.reduce((total, value) => total + value, 0) / values.length;
+}
+
+function roundPercentage(value: number | null) {
+  return value == null ? null : Math.round(value);
+}
+
+function generateTemporaryPassword(seed: string) {
+  const normalizedSeed = seed
+    .toLocaleLowerCase('fr-FR')
+    .replace(/[^a-z0-9]/g, '')
+    .slice(0, 6) || 'bloclog';
+  const dayLabel = new Date().getDate().toString().padStart(2, '0');
+
+  return `${normalizedSeed}${dayLabel}!`;
+}
+
+function getProfileHistoryStatus(
+  evaluation: AdminInterventionEvaluation | undefined
+): ProfileHistoryCardStatus {
+  return hasCompleteAdminEvaluation(evaluation) ? 'evaluated' : 'pending';
+}
+
+function getProfileHistoryStatusLabel(status: ProfileHistoryCardStatus) {
+  return status === 'evaluated' ? 'Évaluée' : 'En attente';
+}
+
+function getProfileHistoryStatusClassName(status: ProfileHistoryCardStatus) {
+  return status === 'evaluated'
+    ? 'admin-profile-history-card__status admin-profile-history-card__status--evaluated'
+    : 'admin-profile-history-card__status admin-profile-history-card__status--pending';
+}
+
+function getChecklistLevelNumericValue(level: ChecklistLevel | null | undefined) {
+  if (!level || level === 'NA') {
+    return null;
+  }
+
+  return Number(level);
+}
+
+function getOperativeBucketId(stepLabel: string): OperativeBucketId {
+  const normalizedLabel = stepLabel.toLocaleLowerCase('fr-FR');
+
+  if (
+    normalizedLabel.includes('installation') ||
+    normalizedLabel.includes('matériel') ||
+    normalizedLabel.includes('materiel')
+  ) {
+    return 'installation';
+  }
+
+  if (
+    normalizedLabel.includes('voie d’abord') ||
+    normalizedLabel.includes("voie d'abord") ||
+    normalizedLabel.includes('trocart') ||
+    normalizedLabel.includes('incision')
+  ) {
+    return 'ouverture';
+  }
+
+  if (
+    normalizedLabel.includes('exposition') ||
+    normalizedLabel.includes('exploration') ||
+    normalizedLabel.includes('dissection')
+  ) {
+    return 'exposition';
+  }
+
+  if (
+    normalizedLabel.includes('geste') ||
+    normalizedLabel.includes('section') ||
+    normalizedLabel.includes('coagulation') ||
+    normalizedLabel.includes('suture') ||
+    normalizedLabel.includes('colpectomie') ||
+    normalizedLabel.includes('colporraphie') ||
+    normalizedLabel.includes('extraction')
+  ) {
+    return 'gestes';
+  }
+
+  if (normalizedLabel.includes('hémostase') || normalizedLabel.includes('hemostase')) {
+    return 'hemostase';
+  }
+
+  if (normalizedLabel.includes('fermeture') || normalizedLabel.includes('retrait')) {
+    return 'fermeture';
+  }
+
+  return 'autres';
+}
+
+function getOperativeBucketLabel(bucketId: OperativeBucketId) {
+  const labels: Record<OperativeBucketId, string> = {
+    installation: 'Installation',
+    ouverture: 'Ouverture',
+    exposition: 'Exposition',
+    gestes: 'Gestes principaux',
+    hemostase: 'Hémostase',
+    fermeture: 'Fermeture',
+    autres: 'Autres étapes',
+  };
+
+  return labels[bucketId];
+}
+
+function getOperativeBucketOrder(bucketId: OperativeBucketId) {
+  const order: Record<OperativeBucketId, number> = {
+    installation: 1,
+    ouverture: 2,
+    exposition: 3,
+    gestes: 4,
+    hemostase: 5,
+    fermeture: 6,
+    autres: 7,
+  };
+
+  return order[bucketId];
+}
+
 function parseIsoDateValue(value: string) {
   const [year, month, day] = value.split('-').map(Number);
 
@@ -784,28 +930,6 @@ function loadSeniorLastLoginMap() {
       : ({} as Record<string, string>);
   } catch {
     return {} as Record<string, string>;
-  }
-}
-
-function loadStoredAdminTrophies() {
-  if (typeof window === 'undefined') {
-    return [] as AdminTrophyDefinition[];
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(ADMIN_TROPHIES_STORAGE_KEY);
-
-    if (!rawValue) {
-      return [] as AdminTrophyDefinition[];
-    }
-
-    const parsedValue = JSON.parse(rawValue);
-
-    return Array.isArray(parsedValue)
-      ? parsedValue.map((item) => ensureTrophyDefinitionShape(item))
-      : ([] as AdminTrophyDefinition[]);
-  } catch {
-    return [] as AdminTrophyDefinition[];
   }
 }
 
@@ -1081,6 +1205,24 @@ const SENIOR_FALLBACK_STEP_STATS: SeniorStepStat[] = [
   },
 ];
 
+const SENIOR_CHECKLIST_LEVELS = new Set<ChecklistLevel>(['0', '1', '2', '3', '4']);
+
+const SENIOR_CHECKLIST_STEP_META = new Map(
+  allChecklistSteps.map((step, index) => [
+    step.id,
+    {
+      label: step.label,
+      order: index,
+    },
+  ])
+);
+
+function formatSeniorStepFallbackLabel(stepId: string) {
+  return stepId
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
 function formatLongFrenchDate(value: string) {
   if (!value) {
     return 'Date non renseignée';
@@ -1304,38 +1446,74 @@ function buildSeniorStepStats(
       label: string;
       total: number;
       count: number;
+      order: number;
     }
   >();
 
   interventions.forEach((intervention) => {
-    const steps = getChecklistStepsForIntervention(
-      intervention.procedure,
-      intervention.indication,
-      intervention.approach,
-      intervention.entryTechnique,
-      customSurgicalInterventions
+    const definedStepMeta = new Map(
+      getChecklistStepsForIntervention(
+        intervention.procedure,
+        intervention.indication,
+        intervention.approach,
+        intervention.entryTechnique,
+        customSurgicalInterventions
+      ).map((step, index) => {
+        const fallbackMeta = SENIOR_CHECKLIST_STEP_META.get(step.id);
+
+        return [
+          step.id,
+          {
+            label: step.label,
+            order: fallbackMeta?.order ?? index,
+          },
+        ];
+      })
     );
 
-    steps.forEach((step) => {
-      const level = intervention.checklist[step.id];
-
-      if (!['0', '1', '2', '3', '4'].includes(level ?? '')) {
+    Object.entries(intervention.checklist).forEach(([stepId, level]) => {
+      if (!level || !SENIOR_CHECKLIST_LEVELS.has(level)) {
         return;
       }
 
-      const current = aggregates.get(step.id) ?? {
-        label: step.label,
+      const stepMeta =
+        definedStepMeta.get(stepId) ??
+        SENIOR_CHECKLIST_STEP_META.get(stepId) ?? {
+          label: formatSeniorStepFallbackLabel(stepId),
+          order: Number.MAX_SAFE_INTEGER,
+        };
+
+      const current = aggregates.get(stepId) ?? {
+        label: stepMeta.label,
         total: 0,
         count: 0,
+        order: stepMeta.order,
       };
 
       current.total += (Number(level) / 4) * 100;
       current.count += 1;
-      aggregates.set(step.id, current);
+      current.order = Math.min(current.order, stepMeta.order);
+
+      if (!current.label && stepMeta.label) {
+        current.label = stepMeta.label;
+      }
+
+      aggregates.set(stepId, current);
     });
   });
 
   const rows = Array.from(aggregates.entries())
+    .sort((left, right) => {
+      const orderDifference = left[1].order - right[1].order;
+
+      if (orderDifference !== 0) {
+        return orderDifference;
+      }
+
+      return left[1].label.localeCompare(right[1].label, 'fr-FR', {
+        sensitivity: 'base',
+      });
+    })
     .map(([id, aggregate]) => {
       const score = Math.round(aggregate.total / aggregate.count);
 
@@ -1402,15 +1580,21 @@ export function AdminScreen() {
     deleteInternalProfile,
     deleteSeniorProfile,
     deleteSavedInterventions,
+    adminTrophies,
+    adminTrophyStorageWarning: trophyStorageWarning,
     internalProfiles,
     isAdmin,
     isSenior,
     logout,
     savedInterventions,
+    setAdminTrophies,
     selectableSeniors,
     selectedSenior,
     surgicalProcedureOptions,
+    updateInternalProfile,
     updateInternalCredentials,
+    updateSeniorProfile,
+    updateSeniorManagedInternals,
     updateSeniorCredentials,
     updateSurgicalIntervention,
     updateSavedInterventionAutonomyScore,
@@ -1421,12 +1605,30 @@ export function AdminScreen() {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [selectedProfileViewSource, setSelectedProfileViewSource] =
     useState<AdminProfileViewSource>('profiles');
+  const [profilesTab, setProfilesTab] = useState<ProfileAccountTab>('internal');
+  const [profileEditorType, setProfileEditorType] =
+    useState<ProfileAccountTab>('internal');
+  const [profileSearch, setProfileSearch] = useState('');
+  const [editingInternalProfileId, setEditingInternalProfileId] =
+    useState<string | null>(null);
+  const [profileStatsTab, setProfileStatsTab] = useState<ProfileStatsTab>('history');
+  const [profileHistorySearch, setProfileHistorySearch] = useState('');
+  const [profileHistorySeniorFilter, setProfileHistorySeniorFilter] = useState('all');
+  const [profileHistoryStatusFilter, setProfileHistoryStatusFilter] =
+    useState<ProfileHistoryStatusFilter>('all');
+  const [profileHistoryDateFrom, setProfileHistoryDateFrom] = useState('');
+  const [profileHistoryDateTo, setProfileHistoryDateTo] = useState('');
+  const [profileHistoryPage, setProfileHistoryPage] = useState(1);
+  const [profileHistoryPageSize, setProfileHistoryPageSize] = useState(
+    PROFILE_HISTORY_PAGE_SIZE_OPTIONS[0]
+  );
+  const [profileProgressKey, setProfileProgressKey] = useState('');
+  const [profileProgressPeriod, setProfileProgressPeriod] =
+    useState<ProfileProgressPeriod>('12m');
   const [expandedHistoryInterventionId, setExpandedHistoryInterventionId] =
     useState<string | null>(null);
   const [seniorLastLoginMap, setSeniorLastLoginMap] =
     useState<Record<string, string>>(loadSeniorLastLoginMap);
-  const [adminTrophies, setAdminTrophies] =
-    useState<AdminTrophyDefinition[]>(loadStoredAdminTrophies);
   const [trophyFilter, setTrophyFilter] = useState<AdminTrophyFilter>('all');
   const [trophySearch, setTrophySearch] = useState('');
   const [selectedTrophyId, setSelectedTrophyId] = useState<string | null>(null);
@@ -1462,6 +1664,7 @@ export function AdminScreen() {
   const [surgicalInterventionFeedback, setSurgicalInterventionFeedback] =
     useState<FeedbackState>(null);
   const [profileToDelete, setProfileToDelete] = useState<InternalProfile | null>(null);
+  useScrollResetOnChange([view]);
   const [showSurgicalInterventionList, setShowSurgicalInterventionList] =
     useState(false);
   const [editingSurgicalInterventionId, setEditingSurgicalInterventionId] =
@@ -1500,7 +1703,6 @@ export function AdminScreen() {
     seniorComment: '',
   });
   const [isAutoEvaluationOpen, setIsAutoEvaluationOpen] = useState(false);
-  const adminHistoryInternalStripRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let isCancelled = false;
@@ -1634,17 +1836,6 @@ export function AdminScreen() {
   useEffect(() => {
     setSeniorLastLoginMap(loadSeniorLastLoginMap());
   }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(
-      ADMIN_TROPHIES_STORAGE_KEY,
-      JSON.stringify(adminTrophies)
-    );
-  }, [adminTrophies]);
 
   const sortedInterventions = useMemo(
     () =>
@@ -1794,6 +1985,12 @@ export function AdminScreen() {
     () => buildAdminActivityBuckets(sortedInterventions, adminEvaluations, activityRange),
     [activityRange, adminEvaluations, sortedInterventions]
   );
+  useEffect(() => {
+    if (activityRange === 'week') {
+      setActivityRange('day');
+    }
+  }, [activityRange]);
+
   const activityTotals = useMemo(() => {
     const totalRecorded = activityBuckets.reduce(
       (total, bucket) => total + bucket.recordedCount,
@@ -1846,7 +2043,16 @@ export function AdminScreen() {
       right.lastLoginAt.localeCompare(left.lastLoginAt)
     );
   }, [internalProfiles, selectableSeniors, seniorLastLoginMap]);
-  const recentUserConnections = userConnections.slice(0, 3);
+  const recentUserConnections = useMemo(() => {
+    const now = Date.now();
+    const fortyEightHoursInMs = 48 * 60 * 60 * 1000;
+
+    return userConnections.filter((connection) => {
+      const timestamp = new Date(connection.lastLoginAt).getTime();
+
+      return !Number.isNaN(timestamp) && now - timestamp <= fortyEightHoursInMs;
+    });
+  }, [userConnections]);
   const customSeniorAccounts = useMemo(
     () => customSeniors.filter((senior) => senior.isCustom),
     [customSeniors]
@@ -1896,6 +2102,60 @@ export function AdminScreen() {
       ),
     [internalProfiles]
   );
+  const seniorProfilesForAdminList = useMemo(
+    () =>
+      [...customSeniorAccounts].sort((left, right) =>
+        (right.createdAt ?? '').localeCompare(left.createdAt ?? '')
+      ),
+    [customSeniorAccounts]
+  );
+  const allSeniorProfilesForAdminList = useMemo(
+    () =>
+      selectableSeniors
+        .filter((senior) => senior.id !== 'sen-other')
+        .sort((left, right) =>
+          (right.createdAt ?? '').localeCompare(left.createdAt ?? '')
+        ),
+    [selectableSeniors]
+  );
+  const activeProfilesSearch = profileSearch.trim().toLocaleLowerCase('fr-FR');
+  const filteredInternalProfiles = useMemo(
+    () =>
+      profilesForAdminList.filter((profile) => {
+        if (!activeProfilesSearch) {
+          return true;
+        }
+
+        return [
+          formatDisplayName(profile.firstName, profile.lastName),
+          profile.loginId,
+          profile.promotion,
+          profile.currentRotation,
+          profile.semester,
+        ]
+          .join(' ')
+          .toLocaleLowerCase('fr-FR')
+          .includes(activeProfilesSearch);
+      }),
+    [activeProfilesSearch, profilesForAdminList]
+  );
+  const filteredSeniorProfiles = useMemo(
+    () =>
+      allSeniorProfilesForAdminList.filter((senior) => {
+        if (!activeProfilesSearch) {
+          return true;
+        }
+
+        return [
+          formatSeniorDisplayName(senior),
+          senior.loginId ?? '',
+        ]
+          .join(' ')
+          .toLocaleLowerCase('fr-FR')
+          .includes(activeProfilesSearch);
+      }),
+    [activeProfilesSearch, allSeniorProfilesForAdminList]
+  );
 
   const surgicalInterventionDefinitions = useMemo(
     () => getSurgicalInterventionDefinitions(customSurgicalInterventions),
@@ -1925,9 +2185,248 @@ export function AdminScreen() {
 
     return {
       recordedInterventionsCount: selectedProfileInterventions.length,
-      earnedBadgesCount: selectedProfileEarnedBadges.length,
+      earnedBadgesCount:
+        selectedProfileEarnedBadges.length ||
+        selectedProfile.achievementBadges?.length ||
+        0,
     };
   }, [selectedProfile, selectedProfileEarnedBadges.length, selectedProfileInterventions]);
+  const selectedProfileDisplayName = selectedProfile
+    ? formatDisplayName(selectedProfile.firstName, selectedProfile.lastName)
+    : '';
+  const selectedProfileHistoryRows = useMemo(() => {
+    if (!selectedProfile) {
+      return [];
+    }
+
+    const searchValue = profileHistorySearch.trim().toLocaleLowerCase('fr-FR');
+
+    return selectedProfileInterventions.filter((intervention) => {
+      const evaluation = adminEvaluations[intervention.id];
+      const status = getProfileHistoryStatus(evaluation);
+      const senior = selectableSeniors.find(
+        (seniorItem) => seniorItem.id === intervention.seniorId
+      );
+      const searchHaystack = [
+        getChoiceLabel(surgicalProcedureOptions, intervention.procedure),
+        getInterventionApproachLabel(intervention),
+        getInterventionIndicationLabel(intervention),
+        senior ? formatSeniorDisplayName(senior) : '',
+      ]
+        .join(' ')
+        .toLocaleLowerCase('fr-FR');
+
+      if (searchValue && !searchHaystack.includes(searchValue)) {
+        return false;
+      }
+
+      if (
+        profileHistorySeniorFilter !== 'all' &&
+        intervention.seniorId !== profileHistorySeniorFilter
+      ) {
+        return false;
+      }
+
+      if (
+        profileHistoryStatusFilter !== 'all' &&
+        status !== profileHistoryStatusFilter
+      ) {
+        return false;
+      }
+
+      if (profileHistoryDateFrom && intervention.date < profileHistoryDateFrom) {
+        return false;
+      }
+
+      if (profileHistoryDateTo && intervention.date > profileHistoryDateTo) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [
+    adminEvaluations,
+    profileHistoryDateFrom,
+    profileHistoryDateTo,
+    profileHistorySearch,
+    profileHistorySeniorFilter,
+    profileHistoryStatusFilter,
+    selectableSeniors,
+    selectedProfile,
+    selectedProfileInterventions,
+    surgicalProcedureOptions,
+  ]);
+  const selectedProfileEvaluatedInterventions = useMemo(
+    () =>
+      selectedProfileInterventions.filter(
+        (intervention) =>
+          getProfileHistoryStatus(adminEvaluations[intervention.id]) === 'evaluated' &&
+          intervention.autonomyScore != null
+      ),
+    [adminEvaluations, selectedProfileInterventions]
+  );
+  const selectedProfileEvaluationRate = useMemo(() => {
+    if (!selectedProfileInterventions.length) {
+      return 0;
+    }
+
+    return Math.round(
+      (selectedProfileEvaluatedInterventions.length /
+        selectedProfileInterventions.length) *
+        100
+    );
+  }, [selectedProfileEvaluatedInterventions.length, selectedProfileInterventions.length]);
+  const paginatedProfileHistoryRows = useMemo(() => {
+    const pageStart = (profileHistoryPage - 1) * profileHistoryPageSize;
+
+    return selectedProfileHistoryRows.slice(
+      pageStart,
+      pageStart + profileHistoryPageSize
+    );
+  }, [profileHistoryPage, profileHistoryPageSize, selectedProfileHistoryRows]);
+  const profileHistoryPageCount = Math.max(
+    1,
+    Math.ceil(selectedProfileHistoryRows.length / profileHistoryPageSize)
+  );
+  const selectedProfileProgressOptions = useMemo(() => {
+    const groupedOptions = selectedProfileInterventions.reduce<
+      Array<{
+        key: string;
+        label: string;
+      }>
+    >((options, intervention) => {
+      const key = `${intervention.procedure}::${intervention.approach ?? 'all'}`;
+
+      if (options.some((option) => option.key === key)) {
+        return options;
+      }
+
+      const procedureLabel = getChoiceLabel(
+        surgicalProcedureOptions,
+        intervention.procedure
+      );
+      const approachLabel = getInterventionApproachLabel(intervention);
+
+      options.push({
+        key,
+        label: `${procedureLabel} · ${approachLabel}`,
+      });
+
+      return options;
+    }, []);
+
+    return groupedOptions;
+  }, [selectedProfileInterventions, surgicalProcedureOptions]);
+  const selectedProfileProgressInterventions = useMemo(() => {
+    const now = new Date();
+    const periodStart =
+      profileProgressPeriod === 'all'
+        ? null
+        : addMonths(
+            new Date(now.getFullYear(), now.getMonth(), 1, 12, 0, 0, 0),
+            profileProgressPeriod === '3m'
+              ? -2
+              : profileProgressPeriod === '6m'
+                ? -5
+                : -11
+          );
+
+    return selectedProfileInterventions
+      .filter((intervention) => {
+        if (profileProgressKey) {
+          const interventionKey = `${intervention.procedure}::${intervention.approach ?? 'all'}`;
+
+          if (interventionKey !== profileProgressKey) {
+            return false;
+          }
+        }
+
+        if (!periodStart) {
+          return true;
+        }
+
+        return parseIsoDateValue(intervention.date) >= periodStart;
+      })
+      .sort((left, right) => left.date.localeCompare(right.date));
+  }, [profileProgressKey, profileProgressPeriod, selectedProfileInterventions]);
+  const selectedProfileProgressSeries = useMemo(
+    () =>
+      selectedProfileProgressInterventions
+        .filter(
+          (intervention) =>
+            getProfileHistoryStatus(adminEvaluations[intervention.id]) === 'evaluated' &&
+            intervention.autonomyScore != null
+        )
+        .map((intervention, index) => ({
+          id: intervention.id,
+          date: intervention.date,
+          index: index + 1,
+          score: Math.round(intervention.autonomyScore ?? 0),
+        })),
+    [adminEvaluations, selectedProfileProgressInterventions]
+  );
+  const selectedProfileLastRecordedAt = useMemo(() => {
+    const latestIntervention = [...selectedProfileProgressInterventions].sort((left, right) =>
+      (right.savedAt ?? '').localeCompare(left.savedAt ?? '')
+    )[0];
+
+    return latestIntervention?.savedAt ?? null;
+  }, [selectedProfileProgressInterventions]);
+  const selectedProfileStepRows = useMemo(() => {
+    const bucketStats = selectedProfileProgressInterventions.reduce<
+      Record<OperativeBucketId, { label: string; values: number[] }>
+    >(
+      (accumulator, intervention) => {
+        const checklistSteps = getChecklistStepsForIntervention(
+          intervention.procedure,
+          intervention.indication,
+          intervention.approach,
+          intervention.entryTechnique,
+          customSurgicalInterventions
+        );
+
+        checklistSteps.forEach((step) => {
+          const numericValue = getChecklistLevelNumericValue(
+            intervention.checklist[step.id]
+          );
+
+          if (numericValue == null) {
+            return;
+          }
+
+          const bucketId = getOperativeBucketId(step.label);
+
+          accumulator[bucketId].values.push(Math.round((numericValue / 4) * 100));
+        });
+
+        return accumulator;
+      },
+      {
+        installation: { label: getOperativeBucketLabel('installation'), values: [] },
+        ouverture: { label: getOperativeBucketLabel('ouverture'), values: [] },
+        exposition: { label: getOperativeBucketLabel('exposition'), values: [] },
+        gestes: { label: getOperativeBucketLabel('gestes'), values: [] },
+        hemostase: { label: getOperativeBucketLabel('hemostase'), values: [] },
+        fermeture: { label: getOperativeBucketLabel('fermeture'), values: [] },
+        autres: { label: getOperativeBucketLabel('autres'), values: [] },
+      }
+    );
+
+    return (Object.entries(bucketStats) as Array<
+      [OperativeBucketId, { label: string; values: number[] }]
+    >)
+      .filter(([, value]) => value.values.length > 0)
+      .map(([bucketId, value]) => ({
+        id: bucketId,
+        label: value.label,
+        score: Math.round(averageNumbers(value.values) ?? 0),
+        sampleSize: value.values.length,
+      }))
+      .sort(
+        (left, right) =>
+          getOperativeBucketOrder(left.id) - getOperativeBucketOrder(right.id)
+      );
+  }, [customSurgicalInterventions, selectedProfileProgressInterventions]);
   const customInterventionNeedsEntryTechnique =
     surgicalInterventionForm.allowedApproaches.includes('coelioscopie') ||
     surgicalInterventionForm.allowedApproaches.includes('robot');
@@ -2005,6 +2504,41 @@ export function AdminScreen() {
     selectedEvaluation?.seniorComment,
     selectedEvaluationInterventionId,
   ]);
+
+  useEffect(() => {
+    setProfileHistoryPage(1);
+  }, [
+    profileHistoryDateFrom,
+    profileHistoryDateTo,
+    profileHistorySearch,
+    profileHistorySeniorFilter,
+    profileHistoryStatusFilter,
+    selectedProfileId,
+  ]);
+
+  useEffect(() => {
+    if (profileHistoryPage > profileHistoryPageCount) {
+      setProfileHistoryPage(profileHistoryPageCount);
+    }
+  }, [profileHistoryPage, profileHistoryPageCount]);
+
+  useEffect(() => {
+    setExpandedHistoryInterventionId(null);
+  }, [profileHistoryPage, selectedProfileId, profileStatsTab]);
+
+  useEffect(() => {
+    if (
+      profileProgressKey &&
+      !selectedProfileProgressOptions.some((option) => option.key === profileProgressKey)
+    ) {
+      setProfileProgressKey(selectedProfileProgressOptions[0]?.key ?? '');
+      return;
+    }
+
+    if (!profileProgressKey && selectedProfileProgressOptions.length > 0) {
+      setProfileProgressKey(selectedProfileProgressOptions[0].key);
+    }
+  }, [profileProgressKey, selectedProfileProgressOptions]);
 
   const getCurrentActor = () => {
     if (isSenior && selectedSenior) {
@@ -2212,12 +2746,70 @@ export function AdminScreen() {
     setSeniorFeedback(null);
   };
 
-  const startSeniorCredentialsEdition = (senior: Senior) => {
-    setEditingSeniorId(senior.id);
-    setEditSeniorCredentialsForm({
+  const resetInternalEditor = () => {
+    setEditingInternalProfileId(null);
+    setCreateForm(EMPTY_CREATE_FORM);
+    setFeedback(null);
+  };
+
+  const resetSeniorEditor = () => {
+    setEditingSeniorId(null);
+    setCreateSeniorForm(EMPTY_CREATE_SENIOR_FORM);
+    setSeniorFeedback(null);
+  };
+
+  const openProfileEditor = (type: ProfileAccountTab) => {
+    setProfileEditorType(type);
+    setProfilesTab(type);
+
+    if (type === 'internal') {
+      resetSeniorEditor();
+      resetInternalEditor();
+      return;
+    }
+
+    resetInternalEditor();
+    resetSeniorEditor();
+  };
+
+  const startInternalEdition = (profile: InternalProfile) => {
+    setProfilesTab('internal');
+    setProfileEditorType('internal');
+    setEditingSeniorId(null);
+    setCreateForm({
+      firstName: profile.firstName,
+      lastName: profile.lastName,
+      loginId: profile.loginId,
+      password: profile.password,
+      promotion: profile.promotion,
+      semester: profile.semester,
+      currentRotation: profile.currentRotation,
+    });
+    setEditingInternalProfileId(profile.id);
+    setFeedback(null);
+  };
+
+  const startSeniorEdition = (senior: Senior) => {
+    setProfilesTab('senior');
+    setProfileEditorType('senior');
+    setEditingInternalProfileId(null);
+    setCreateSeniorForm({
+      firstName: senior.firstName,
+      lastName: senior.lastName,
       loginId: senior.loginId ?? '',
       password: senior.password ?? '',
     });
+    setEditingSeniorId(senior.id);
+    setSeniorFeedback(null);
+    setSeniorAccountFeedback(null);
+  };
+
+  const startSeniorCredentialsEdition = (senior: Senior) => {
+    startSeniorEdition(senior);
+    setCreateSeniorForm((current) => ({
+      ...current,
+      password: '',
+    }));
     setSeniorAccountFeedback(null);
   };
 
@@ -2486,7 +3078,10 @@ export function AdminScreen() {
   const handleCreateProfile = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    const result = createInternalProfile(createForm);
+    const result =
+      editingInternalProfileId != null
+        ? updateInternalProfile(editingInternalProfileId, createForm)
+        : createInternalProfile(createForm);
 
     setFeedback({
       kind: result.success ? 'success' : 'error',
@@ -2499,6 +3094,7 @@ export function AdminScreen() {
       return;
     }
 
+    setEditingInternalProfileId(null);
     setCreateForm(EMPTY_CREATE_FORM);
   };
 
@@ -2506,7 +3102,10 @@ export function AdminScreen() {
     event.preventDefault();
     setSeniorAccountFeedback(null);
 
-    const result = createSeniorProfile(createSeniorForm);
+    const result =
+      editingSeniorId != null
+        ? updateSeniorProfile(editingSeniorId, createSeniorForm)
+        : createSeniorProfile(createSeniorForm);
 
     setSeniorFeedback({
       kind: result.success ? 'success' : 'error',
@@ -2519,7 +3118,34 @@ export function AdminScreen() {
       return;
     }
 
+    setEditingSeniorId(null);
     setCreateSeniorForm(EMPTY_CREATE_SENIOR_FORM);
+  };
+
+  const handlePrepareInternalPasswordReset = (profile: InternalProfile) => {
+    startInternalEdition(profile);
+    setCreateForm((current) => ({
+      ...current,
+      password: '',
+    }));
+    setFeedback({
+      kind: 'success',
+      message:
+        'Saisissez un nouveau mot de passe temporaire dans le panneau de droite puis enregistrez la modification.',
+    });
+  };
+
+  const handlePrepareSeniorPasswordReset = (senior: Senior) => {
+    startSeniorEdition(senior);
+    setCreateSeniorForm((current) => ({
+      ...current,
+      password: '',
+    }));
+    setSeniorFeedback({
+      kind: 'success',
+      message:
+        'Saisissez un nouveau mot de passe temporaire dans le panneau de droite puis enregistrez la modification.',
+    });
   };
 
   const handleUpdateSeniorCredentials = (
@@ -2531,7 +3157,10 @@ export function AdminScreen() {
 
     const result = updateSeniorCredentials(
       seniorId,
-      editSeniorCredentialsForm
+      {
+        ...editSeniorCredentialsForm,
+        mustChangePassword: true,
+      }
     );
 
     setSeniorAccountFeedback({
@@ -2620,13 +3249,6 @@ export function AdminScreen() {
     }
   };
 
-  const scrollAdminHistoryInternalStrip = (direction: 'left' | 'right') => {
-    adminHistoryInternalStripRef.current?.scrollBy({
-      left: direction === 'left' ? -280 : 280,
-      behavior: 'smooth',
-    });
-  };
-
   const handleCreateTrophy = () => {
     setTrophyDraft(null);
     setTrophyFormFeedback(null);
@@ -2683,7 +3305,7 @@ export function AdminScreen() {
     setSelectedTrophyId((current) => (current === trophyId ? null : current));
     if (trophyDraft?.id === trophyId) {
       setTrophyDraft(null);
-      setView('badges');
+      setView('trophies');
     }
   };
 
@@ -2754,8 +3376,20 @@ export function AdminScreen() {
         nextDraft.visibility = value as TrophyVisibility;
       }
 
+      if (field === 'operativeScope') {
+        nextDraft.operativeScope = value as TrophyOperativeScope;
+
+        if (value === 'approach') {
+          nextDraft.associatedProcedure = '';
+        }
+      }
+
       if (field === 'trackedInterventionStatus') {
         nextDraft.trackedInterventionStatus = value as TrophyTrackedStatus;
+        nextDraft.levels = nextDraft.levels.map((level) => ({
+          ...level,
+          trackedStatus: value as TrophyTrackedStatus,
+        }));
       }
 
       return nextDraft;
@@ -2936,7 +3570,7 @@ export function AdminScreen() {
       kind: 'success',
       message: 'Le trophée a été enregistré.',
     });
-    setView('badges');
+    setView('trophies');
     setTrophyDraft(null);
   };
 
@@ -2944,7 +3578,7 @@ export function AdminScreen() {
     setTrophyDraft(null);
     setTrophyValidationErrors([]);
     setTrophyFormFeedback(null);
-    setView('badges');
+    setView('trophies');
   };
 
   const handleExportFilteredBlocks = () => {
@@ -3611,75 +4245,6 @@ export function AdminScreen() {
       >
         <SectionCard
           className="admin-dashboard-card"
-          description="Sélectionnez un interne pour consulter ses statistiques."
-          title="Internes du centre"
-        >
-          {profilesForAdminList.length ? (
-            <div className="senior-internal-strip-shell admin-history-strip-shell">
-              <button
-                aria-label="Faire défiler la liste des internes vers la gauche"
-                className="senior-strip-arrow"
-                onClick={() => scrollAdminHistoryInternalStrip('left')}
-                type="button"
-              >
-                <ChevronLeft aria-hidden="true" />
-              </button>
-
-              <div className="senior-internal-strip" ref={adminHistoryInternalStripRef}>
-                {profilesForAdminList.map((profile) => {
-                  const isSelected = selectedProfileId === profile.id;
-
-                  return (
-                    <button
-                      className={`senior-internal-card ${
-                        isSelected ? 'senior-internal-card--selected' : ''
-                      }`.trim()}
-                      key={profile.id}
-                      onClick={() => {
-                        setSelectedProfileId(profile.id);
-                        setSelectedProfileViewSource('history');
-                        setView('profile');
-                      }}
-                      type="button"
-                    >
-                      <span
-                        className={`senior-avatar senior-avatar--${getSeniorSemesterTone(
-                          profile.semester
-                        )}`}
-                        aria-hidden="true"
-                      >
-                        {getProfileInitials(profile)}
-                      </span>
-                      <span className="senior-internal-card__copy">
-                        <strong>
-                          {formatDisplayName(profile.firstName, profile.lastName)}
-                        </strong>
-                        <span>{profile.semester}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <button
-                aria-label="Faire défiler la liste des internes vers la droite"
-                className="senior-strip-arrow"
-                onClick={() => scrollAdminHistoryInternalStrip('right')}
-                type="button"
-              >
-                <ChevronRight aria-hidden="true" />
-              </button>
-            </div>
-          ) : (
-            <div className="validation-box">
-              <strong>Aucun interne disponible</strong>
-              <span>Les profils internes apparaîtront ici dès qu’ils seront créés.</span>
-            </div>
-          )}
-        </SectionCard>
-
-        <SectionCard
-          className="admin-dashboard-card"
           description="Exportez les blocs enregistrés avec l’ensemble des données internes et seniors."
           title="Export des blocs"
         >
@@ -3876,17 +4441,15 @@ export function AdminScreen() {
             <div className="admin-connections-list">
               {userConnections.map((connection) => (
                 <article className="admin-connection-row" key={connection.id}>
-                  <span className="admin-connection-row__avatar">
-                    {connection.role === 'Interne' ? <CircleUserRound /> : <UserRound />}
-                  </span>
                   <div className="admin-connection-row__copy">
-                    <strong>{connection.name}</strong>
+                    <div className="admin-connection-row__main">
+                      <strong>{connection.name}</strong>
+                      <span className="admin-connection-row__time">
+                        {formatAdminConnectionTimestamp(connection.lastLoginAt)}
+                      </span>
+                    </div>
                     <span>{connection.role}</span>
                   </div>
-                  <span className="admin-connection-row__time">
-                    {formatAdminConnectionTimestamp(connection.lastLoginAt)}
-                  </span>
-                  <Clock3 aria-hidden="true" className="admin-connection-row__icon" />
                 </article>
               ))}
             </div>
@@ -3951,546 +4514,989 @@ export function AdminScreen() {
     selectedProfile &&
     selectedProfileStats
   ) {
-    const isAdminHistoryProfileView =
-      isAdmin && selectedProfileViewSource === 'history';
-    const profileTitle = isAdminHistoryProfileView
-      ? `Statistiques de ${formatDisplayName(
-          selectedProfile.firstName,
-          selectedProfile.lastName
-        )}`
-      : formatDisplayName(selectedProfile.firstName, selectedProfile.lastName);
-    const profileSubtitle = isAdminHistoryProfileView
-      ? "Aperçu de l’activité opératoire et de la progression de l’interne."
-      : `${selectedProfile.promotion} · ${selectedProfile.semester} · ${selectedProfile.currentRotation}`;
+    const historyStart =
+      selectedProfileHistoryRows.length === 0
+        ? 0
+        : (profileHistoryPage - 1) * profileHistoryPageSize + 1;
+    const historyEnd = Math.min(
+      profileHistoryPage * profileHistoryPageSize,
+      selectedProfileHistoryRows.length
+    );
+    const progressChartPoints = selectedProfileProgressSeries.map((point, index, points) => {
+      const usableWidth = 320;
+      const usableHeight = 150;
+      const x =
+        points.length <= 1 ? 0 : (index / Math.max(points.length - 1, 1)) * usableWidth;
+      const y = usableHeight - (point.score / 100) * usableHeight;
+
+      return {
+        ...point,
+        x,
+        y,
+      };
+    });
+    const progressChartPath = progressChartPoints
+      .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`)
+      .join(' ');
 
     return (
-      <ScreenContainer
-        eyebrow={isSenior ? 'Senior' : 'Administration'}
-        bodyClassName={isAdmin ? 'admin-workspace__body' : undefined}
-        frameClassName={isAdmin ? 'admin-workspace__frame' : undefined}
-        title={profileTitle}
-        hideBrandmark={isAdmin}
-        heroClassName={isAdmin ? 'admin-workspace__hero' : undefined}
-        shellClassName={isAdmin ? 'admin-workspace' : undefined}
-        subtitle={profileSubtitle}
-        frameWidth="wide"
+      <AdminPageShell
+        backLabel="Retour à l’administration des profils"
+        onBack={() => {
+          setSelectedProfileId(null);
+          setView('profiles');
+        }}
+        subtitle={`Consultez l’historique opératoire et la progression pédagogique de ${selectedProfileDisplayName}.`}
+        title="Statistiques de l’interne"
       >
-        {isAdminHistoryProfileView ? null : (
-          <SectionCard title="Informations du profil">
-            <div className="admin-profile-detail__credentials">
-              <div className="info-block">
-                <span className="info-block__label">Identifiant</span>
-                <strong className="info-block__value">{selectedProfile.loginId}</strong>
-              </div>
-              <div className="info-block">
-                <span className="info-block__label">Mot de passe</span>
-                <strong className="info-block__value">{selectedProfile.password}</strong>
-              </div>
-              <div className="info-block">
-                <span className="info-block__label">Créé le</span>
-                <strong className="info-block__value">
-                  {formatDateTime(selectedProfile.createdAt)}
-                </strong>
-              </div>
-              <div className="info-block">
-                <span className="info-block__label">Dernière connexion</span>
-                <strong className="info-block__value">
-                  {formatDateTime(selectedProfile.lastLoginAt)}
-                </strong>
+        <div className="admin-profile-stats-hero">
+          <SectionCard className="admin-dashboard-card admin-profile-summary-card">
+            <div className="admin-profile-summary-card__body">
+              <InternalAvatar
+                className="admin-profile-summary-card__avatar"
+                firstName={selectedProfile.firstName}
+                imageSrc={selectedProfile.avatarImageSrc}
+                lastName={selectedProfile.lastName}
+              />
+              <div className="admin-profile-summary-card__copy">
+                <div className="admin-profile-summary-card__header">
+                  <strong>{selectedProfileDisplayName}</strong>
+                  <span className="profile-card__badge">{selectedProfile.semester}</span>
+                </div>
+                <div className="admin-profile-summary-card__meta">
+                  <span>{selectedProfile.promotion}</span>
+                  <span>Stage actuel : {selectedProfile.currentRotation}</span>
+                  <span>Identifiant : {selectedProfile.loginId}</span>
+                </div>
               </div>
             </div>
           </SectionCard>
-        )}
 
-        <SectionCard title={isAdminHistoryProfileView ? "Aperçu de l'activité" : 'Vue d’ensemble'}>
-          <div className="info-grid">
-            <div className="info-block">
-              <span className="info-block__label">Trophées acquis</span>
-              <strong className="info-block__value">
-                {selectedProfileStats.earnedBadgesCount}
-              </strong>
-            </div>
-            <div className="info-block">
-              <span className="info-block__label">Interventions enregistrées</span>
-              <strong className="info-block__value">
-                {selectedProfileStats.recordedInterventionsCount}
-              </strong>
-            </div>
+          <div className="admin-profile-kpi-grid">
+            <article className="admin-profile-kpi-card">
+              <span className="admin-profile-kpi-card__icon">
+                <Pencil aria-hidden="true" />
+              </span>
+              <strong>{selectedProfileStats.recordedInterventionsCount}</strong>
+              <span>interventions</span>
+            </article>
+            <article className="admin-profile-kpi-card admin-profile-kpi-card--success">
+              <span className="admin-profile-kpi-card__icon">
+                <Check aria-hidden="true" />
+              </span>
+              <strong>{selectedProfileEvaluationRate}%</strong>
+              <span>évaluées</span>
+            </article>
+            <article className="admin-profile-kpi-card admin-profile-kpi-card--amber">
+              <span className="admin-profile-kpi-card__icon">
+                <Trophy aria-hidden="true" />
+              </span>
+              <strong>{selectedProfileStats.earnedBadgesCount}</strong>
+              <span>trophées</span>
+            </article>
           </div>
-        </SectionCard>
-
-        <SectionCard
-          description={
-            isAdminHistoryProfileView
-              ? 'Lecture seule des blocs enregistrés pour cet interne.'
-              : undefined
-          }
-          title="Interventions enregistrées"
-        >
-          {isAdminHistoryProfileView ? null : (
-            <div className="admin-toolbar">
-              <div className="admin-toolbar__actions">
-                <button
-                  className="mini-button mini-button--secondary"
-                  disabled={selectedProfileInterventions.length === 0}
-                  onClick={handleSelectedProfileExport}
-                  type="button"
-                >
-                  Exporter en Excel
-                </button>
-              </div>
-            </div>
-          )}
-          {selectedProfileInterventions.length ? (
-            <div className="admin-list admin-list--scroll">
-              {selectedProfileInterventions.map((intervention) => {
-                const senior =
-                  selectableSeniors.find((item) => item.id === intervention.seniorId) ??
-                  null;
-                const evaluation = adminEvaluations[intervention.id];
-
-                return (
-                  <article key={intervention.id} className="admin-item">
-                    <div className="admin-item__header">
-                      <strong>
-                        {getChoiceLabel(
-                          surgicalProcedureOptions,
-                          intervention.procedure
-                        )}
-                      </strong>
-                      {hasCompleteAdminEvaluation(evaluation) ? (
-                        <span className="admin-status-pill">Évaluée</span>
-                      ) : null}
-                    </div>
-                    <span>Date du bloc : {formatIsoDate(intervention.date)}</span>
-                    <span>
-                      Enregistrée le : {new Date(intervention.savedAt).toLocaleString('fr-FR')}
-                    </span>
-                    <span>
-                      Senior :{' '}
-                      {senior
-                        ? formatSeniorDisplayName(senior)
-                        : 'Non renseigné'}
-                    </span>
-                    <span>
-                      Rôle : {getChoiceLabel(roleOptions, intervention.role)}
-                    </span>
-                  </article>
-                );
-              })}
-            </div>
-          ) : (
-            <div className="validation-box">
-              <strong>Aucune intervention enregistrée dans l’application</strong>
-              <span>Les futures saisies de cet interne apparaîtront ici.</span>
-            </div>
-          )}
-        </SectionCard>
-
-        <SectionCard
-          title="Trophées acquis"
-          description={`${selectedProfileEarnedBadges.length} trophée(s) obtenu(s).`}
-        >
-          {selectedProfileEarnedBadges.length ? (
-            <div className="badge-grid">
-              {selectedProfileEarnedBadges.map((badge) => (
-                <ProgressBadgeCard key={badge.id} badge={badge} />
-              ))}
-            </div>
-          ) : (
-            <div className="validation-box">
-              <strong>Aucun trophée acquis pour l’instant</strong>
-              <span>Les futurs trophées obtenus par cet interne apparaîtront ici.</span>
-            </div>
-          )}
-        </SectionCard>
-
-        <div className="action-stack">
-          <PrimaryButton
-            label={
-              isAdminHistoryProfileView
-                ? "Retour à l’historique des blocs"
-                : 'Retour à la liste des profils'
-            }
-            onPress={() => {
-              setSelectedProfileId(null);
-              setView(isAdminHistoryProfileView ? 'history' : 'profiles');
-            }}
-            variant="secondary"
-          />
         </div>
-      </ScreenContainer>
+
+        <SectionCard
+          className="admin-dashboard-card admin-profile-stats-card"
+          title={profileStatsTab === 'history' ? 'Historique opératoire' : 'Progression pédagogique'}
+        >
+          <div className="admin-profile-stats-tabs" aria-label="Onglets statistiques">
+            <button
+              className={`admin-profile-stats-tab ${
+                profileStatsTab === 'history' ? 'admin-profile-stats-tab--active' : ''
+              }`}
+              onClick={() => setProfileStatsTab('history')}
+              type="button"
+            >
+              <FolderOpen aria-hidden="true" />
+              <span>Historique</span>
+            </button>
+            <button
+              className={`admin-profile-stats-tab ${
+                profileStatsTab === 'progress' ? 'admin-profile-stats-tab--active' : ''
+              }`}
+              onClick={() => setProfileStatsTab('progress')}
+              type="button"
+            >
+              <BarChart3 aria-hidden="true" />
+              <span>Progression</span>
+            </button>
+          </div>
+
+          {profileStatsTab === 'history' ? (
+            <>
+              <div className="admin-profile-filters">
+                <label className="field-stack">
+                  <span className="field-stack__label">Intervention</span>
+                  <input
+                    className="field-input"
+                    onChange={(event) => setProfileHistorySearch(event.target.value)}
+                    placeholder="Rechercher une intervention..."
+                    type="search"
+                    value={profileHistorySearch}
+                  />
+                </label>
+
+                <label className="field-stack">
+                  <span className="field-stack__label">Senior</span>
+                  <select
+                    className="field-input"
+                    onChange={(event) => setProfileHistorySeniorFilter(event.target.value)}
+                    value={profileHistorySeniorFilter}
+                  >
+                    <option value="all">Tous les seniors</option>
+                    {selectableSeniors
+                      .filter((senior) => senior.id !== 'sen-other')
+                      .map((senior) => (
+                        <option key={senior.id} value={senior.id}>
+                          {formatSeniorDisplayName(senior)}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+
+                <label className="field-stack">
+                  <span className="field-stack__label">Statut</span>
+                  <select
+                    className="field-input"
+                    onChange={(event) =>
+                      setProfileHistoryStatusFilter(
+                        event.target.value as ProfileHistoryStatusFilter
+                      )
+                    }
+                    value={profileHistoryStatusFilter}
+                  >
+                    <option value="all">Tous les statuts</option>
+                    <option value="evaluated">Évaluée</option>
+                    <option value="pending">En attente</option>
+                  </select>
+                </label>
+
+                <label className="field-stack">
+                  <span className="field-stack__label">Du</span>
+                  <input
+                    className="field-input"
+                    onChange={(event) => setProfileHistoryDateFrom(event.target.value)}
+                    type="date"
+                    value={profileHistoryDateFrom}
+                  />
+                </label>
+
+                <label className="field-stack">
+                  <span className="field-stack__label">Au</span>
+                  <input
+                    className="field-input"
+                    onChange={(event) => setProfileHistoryDateTo(event.target.value)}
+                    type="date"
+                    value={profileHistoryDateTo}
+                  />
+                </label>
+              </div>
+
+              {paginatedProfileHistoryRows.length ? (
+                <div className="admin-profile-history-list">
+                  {paginatedProfileHistoryRows.map((intervention) => {
+                    const evaluation = adminEvaluations[intervention.id];
+                    const status = getProfileHistoryStatus(evaluation);
+                    const senior =
+                      selectableSeniors.find(
+                        (seniorItem) => seniorItem.id === intervention.seniorId
+                      ) ?? null;
+                    const checklistSteps = getChecklistStepsForIntervention(
+                      intervention.procedure,
+                      intervention.indication,
+                      intervention.approach,
+                      intervention.entryTechnique,
+                      customSurgicalInterventions
+                    );
+                    const isExpanded =
+                      expandedHistoryInterventionId === intervention.id;
+
+                    return (
+                      <article
+                        className="admin-profile-history-card"
+                        key={intervention.id}
+                      >
+                        <div className="admin-profile-history-card__main">
+                          <div className="admin-profile-history-card__copy">
+                            <strong>
+                              {getChoiceLabel(
+                                surgicalProcedureOptions,
+                                intervention.procedure
+                              )}
+                            </strong>
+                            <span>
+                              {formatIsoDate(intervention.date)} · Senior :{' '}
+                              {senior
+                                ? formatSeniorDisplayName(senior)
+                                : 'Non renseigné'}
+                            </span>
+                            <span>
+                              Voie d’abord : {getInterventionApproachLabel(intervention)}
+                            </span>
+                            {getInterventionIndicationLabel(intervention) ? (
+                              <span>
+                                Indication : {getInterventionIndicationLabel(intervention)}
+                              </span>
+                            ) : null}
+                          </div>
+
+                          <div className="admin-profile-history-card__aside">
+                            <span className={getProfileHistoryStatusClassName(status)}>
+                              {getProfileHistoryStatusLabel(status)}
+                            </span>
+                            <button
+                              className="mini-button mini-button--secondary"
+                              onClick={() =>
+                                setExpandedHistoryInterventionId((current) =>
+                                  current === intervention.id ? null : intervention.id
+                                )
+                              }
+                              type="button"
+                            >
+                              {isExpanded ? 'Masquer le détail' : 'Voir le détail'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {isExpanded ? (
+                          <div className="admin-profile-history-card__detail">
+                            <div className="admin-profile-history-card__detail-grid">
+                              <div className="info-block">
+                                <span className="info-block__label">Enregistrée le</span>
+                                <strong className="info-block__value">
+                                  {formatDateTime(intervention.savedAt)}
+                                </strong>
+                              </div>
+                              <div className="info-block">
+                                <span className="info-block__label">Rôle</span>
+                                <strong className="info-block__value">
+                                  {getChoiceLabel(roleOptions, intervention.role)}
+                                </strong>
+                              </div>
+                              <div className="info-block">
+                                <span className="info-block__label">Statut</span>
+                                <strong className="info-block__value">
+                                  {getProfileHistoryStatusLabel(status)}
+                                </strong>
+                              </div>
+                              <div className="info-block">
+                                <span className="info-block__label">Score d'autonomie</span>
+                                <strong className="info-block__value">
+                                  {intervention.autonomyScore != null
+                                    ? `${Math.round(intervention.autonomyScore)}%`
+                                    : 'Non calculable'}
+                                </strong>
+                              </div>
+                            </div>
+
+                            <div className="admin-profile-history-card__steps">
+                              {checklistSteps.map((step) => (
+                                <div
+                                  className="admin-profile-history-card__step"
+                                  key={step.id}
+                                >
+                                  <span>{step.label}</span>
+                                  <strong>
+                                    {getChecklistLevelBadgeLabel(
+                                      intervention.checklist[step.id]
+                                    )}
+                                  </strong>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="validation-box">
+                  <strong>Aucune intervention ne correspond aux filtres</strong>
+                  <span>
+                    Ajustez la recherche ou les dates pour retrouver les blocs de cet
+                    interne.
+                  </span>
+                </div>
+              )}
+
+              <div className="admin-profile-pagination">
+                <span>
+                  {historyStart} - {historyEnd} sur {selectedProfileHistoryRows.length}{' '}
+                  intervention{selectedProfileHistoryRows.length > 1 ? 's' : ''}
+                </span>
+                <div className="admin-profile-pagination__controls">
+                  <button
+                    className="mini-button"
+                    disabled={profileHistoryPage === 1}
+                    onClick={() => setProfileHistoryPage((current) => current - 1)}
+                    type="button"
+                  >
+                    <ChevronLeft aria-hidden="true" />
+                  </button>
+                  <span>
+                    {profileHistoryPage} / {profileHistoryPageCount}
+                  </span>
+                  <button
+                    className="mini-button"
+                    disabled={profileHistoryPage === profileHistoryPageCount}
+                    onClick={() => setProfileHistoryPage((current) => current + 1)}
+                    type="button"
+                  >
+                    <ChevronRight aria-hidden="true" />
+                  </button>
+                  <select
+                    className="field-input admin-profile-pagination__select"
+                    onChange={(event) =>
+                      setProfileHistoryPageSize(Number(event.target.value))
+                    }
+                    value={profileHistoryPageSize}
+                  >
+                    {PROFILE_HISTORY_PAGE_SIZE_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option} par page
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="admin-profile-filters admin-profile-filters--progress">
+                <label className="field-stack">
+                  <span className="field-stack__label">Intervention</span>
+                  <select
+                    className="field-input"
+                    onChange={(event) => setProfileProgressKey(event.target.value)}
+                    value={profileProgressKey}
+                  >
+                    {selectedProfileProgressOptions.map((option) => (
+                      <option key={option.key} value={option.key}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="field-stack">
+                  <span className="field-stack__label">Période</span>
+                  <select
+                    className="field-input"
+                    onChange={(event) =>
+                      setProfileProgressPeriod(
+                        event.target.value as ProfileProgressPeriod
+                      )
+                    }
+                    value={profileProgressPeriod}
+                  >
+                    <option value="3m">3 derniers mois</option>
+                    <option value="6m">6 derniers mois</option>
+                    <option value="12m">12 derniers mois</option>
+                    <option value="all">Toutes les données</option>
+                  </select>
+                </label>
+
+              </div>
+
+              {selectedProfileProgressSeries.length ? (
+                <>
+                  <div className="admin-profile-progress-kpis">
+                    <div className="info-block">
+                      <span className="info-block__label">Dernier enregistrement</span>
+                      <strong className="info-block__value">
+                        {selectedProfileLastRecordedAt
+                          ? formatDateTime(selectedProfileLastRecordedAt)
+                          : 'Non renseignée'}
+                      </strong>
+                    </div>
+                  </div>
+
+                  <div className="admin-profile-progress-layout">
+                    <SectionCard
+                      className="admin-profile-progress-panel"
+                      title="Évolution de l’autonomie"
+                    >
+                      <div className="admin-profile-progress-chart">
+                        <svg
+                          aria-hidden="true"
+                          viewBox="0 0 360 190"
+                          xmlns="http://www.w3.org/2000/svg"
+                        >
+                          <line x1="16" x2="336" y1="160" y2="160" />
+                          <line x1="16" x2="16" y1="10" y2="160" />
+                          <line x1="16" x2="336" y1="122.5" y2="122.5" />
+                          <line x1="16" x2="336" y1="85" y2="85" />
+                          <line x1="16" x2="336" y1="47.5" y2="47.5" />
+                          {progressChartPath ? (
+                            <path
+                              d={progressChartPath}
+                              fill="none"
+                              stroke="currentColor"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="3"
+                              transform="translate(16 10)"
+                            />
+                          ) : null}
+                          {progressChartPoints.map((point) => (
+                            <g key={point.id} transform={`translate(${point.x + 16} ${point.y + 10})`}>
+                              <circle cx="0" cy="0" fill="white" r="5" stroke="currentColor" strokeWidth="3" />
+                              <text x="0" y="-12">
+                                {point.score}%
+                              </text>
+                            </g>
+                          ))}
+                        </svg>
+                        <div className="admin-profile-progress-chart__labels">
+                          {selectedProfileProgressSeries.map((point) => (
+                            <span key={point.id}>{formatIsoDate(point.date)}</span>
+                          ))}
+                        </div>
+                      </div>
+                    </SectionCard>
+
+                    <SectionCard
+                      className="admin-profile-progress-panel"
+                      title="Temps opératoires clés"
+                    >
+                      {selectedProfileStepRows.length ? (
+                        <div className="admin-profile-step-list">
+                          {selectedProfileStepRows.map((step) => (
+                            <div className="admin-profile-step-row" key={step.id}>
+                              <span>{step.label}</span>
+                              <div className="admin-profile-step-row__bar">
+                                <div
+                                  className="admin-profile-step-row__fill"
+                                  style={{ width: `${step.score}%` }}
+                                />
+                              </div>
+                              <strong>{step.score}%</strong>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="validation-box">
+                          <strong>Aucune donnée de progression disponible</strong>
+                          <span>Les prochaines évaluations alimenteront cette vue.</span>
+                        </div>
+                      )}
+                    </SectionCard>
+                  </div>
+
+                  <div className="admin-profile-progress-footer">
+                    <SectionCard
+                      className="admin-profile-progress-panel"
+                      title="Trophées obtenus"
+                    >
+                      {selectedProfileEarnedBadges.length ? (
+                        <div className="badge-grid">
+                          {selectedProfileEarnedBadges.map((badge) => (
+                            <ProgressBadgeCard key={badge.id} badge={badge} />
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="validation-box">
+                          <strong>Aucun trophée acquis pour l’instant</strong>
+                          <span>Les futurs trophées validés apparaîtront ici.</span>
+                        </div>
+                      )}
+                    </SectionCard>
+                  </div>
+                </>
+              ) : (
+                <div className="validation-box">
+                  <strong>Aucune donnée de progression disponible pour cet interne</strong>
+                  <span>
+                    Les évaluations senior et les scores d’autonomie apparaîtront ici dès
+                    qu’ils seront disponibles.
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+        </SectionCard>
+      </AdminPageShell>
     );
   }
 
   if ((isAdmin || isSenior) && view === 'profiles') {
     return (
-      <ScreenContainer
-        eyebrow={isSenior ? 'Senior' : 'Administration'}
-        bodyClassName={isAdmin ? 'admin-workspace__body' : undefined}
-        frameClassName={isAdmin ? 'admin-workspace__frame' : undefined}
-        hideBrandmark={isAdmin}
-        heroClassName={isAdmin ? 'admin-workspace__hero' : undefined}
-        shellClassName={isAdmin ? 'admin-workspace' : undefined}
-        title="Administration des profils"
-        subtitle="Créer et gérer les comptes internes, seniors et administrateurs."
-        frameWidth="wide"
+      <AdminPageShell
+        backLabel={isSenior ? 'Retour à l’espace senior' : 'Retour à l’espace administrateur'}
+        onBack={() => setView('home')}
+        subtitle="Créez, modifiez ou désactivez les comptes internes et seniors de BlocLog."
+        title="Gestion des profils"
       >
-        <SectionCard
-          title="Créer un nouvel interne"
-        >
-          <form className="admin-create-form" onSubmit={handleCreateProfile}>
-            <div className="admin-create-form__grid">
-              <label className="field-stack">
-                <span className="field-stack__label">Prénom</span>
-                <input
-                  className="field-input"
-                  onChange={(event) =>
-                    handleCreateFieldChange('firstName', event.target.value)
-                  }
-                  type="text"
-                  value={createForm.firstName}
-                />
-              </label>
-
-              <label className="field-stack">
-                <span className="field-stack__label">Nom</span>
-                <input
-                  className="field-input"
-                  onChange={(event) =>
-                    handleCreateFieldChange('lastName', event.target.value)
-                  }
-                  type="text"
-                  value={createForm.lastName}
-                />
-              </label>
-
-              <label className="field-stack">
-                <span className="field-stack__label">Identifiant</span>
-                <input
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  className="field-input"
-                  onChange={(event) =>
-                    handleCreateFieldChange('loginId', event.target.value)
-                  }
-                  type="text"
-                  value={createForm.loginId}
-                />
-              </label>
-
-              <label className="field-stack">
-                <span className="field-stack__label">Mot de passe</span>
-                <input
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  className="field-input"
-                  onChange={(event) =>
-                    handleCreateFieldChange('password', event.target.value)
-                  }
-                  type="text"
-                  value={createForm.password}
-                />
-              </label>
-
-              <label className="field-stack">
-                <span className="field-stack__label">Promotion</span>
-                <select
-                  className="field-input"
-                  onChange={(event) =>
-                    handleCreateFieldChange('promotion', event.target.value)
-                  }
-                  value={createForm.promotion}
-                >
-                  <option value="">Sélectionner une promotion</option>
-                  {PROMOTION_OPTIONS.map((promotion) => (
-                    <option key={promotion} value={promotion}>
-                      {promotion}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="field-stack">
-                <span className="field-stack__label">Semestre</span>
-                <select
-                  className="field-input"
-                  onChange={(event) =>
-                    handleCreateFieldChange('semester', event.target.value)
-                  }
-                  value={createForm.semester}
-                >
-                  <option value="">Sélectionner un semestre</option>
-                  {SEMESTER_OPTIONS.map((semester) => (
-                    <option key={semester} value={semester}>
-                      {semester}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="field-stack admin-create-form__field--full">
-                <span className="field-stack__label">Stage actuel</span>
-                <input
-                  className="field-input"
-                  list="rotation-suggestions"
-                  onChange={(event) =>
-                    handleCreateFieldChange('currentRotation', event.target.value)
-                  }
-                  type="text"
-                  value={createForm.currentRotation}
-                />
-                <datalist id="rotation-suggestions">
-                  {ROTATION_SUGGESTIONS.map((rotation) => (
-                    <option key={rotation} value={rotation} />
-                  ))}
-                </datalist>
-              </label>
+        <div className="admin-profile-overview">
+          <article className="admin-profile-overview-card admin-profile-overview-card--violet">
+            <span className="admin-profile-overview-card__icon">
+              <Users aria-hidden="true" />
+            </span>
+            <div>
+              <strong>{profilesForAdminList.length + allSeniorProfilesForAdminList.length}</strong>
+              <span>Comptes actifs</span>
             </div>
+          </article>
+        </div>
 
-            {feedback ? (
-              <p className={feedback.kind === 'success' ? 'auth-success' : 'auth-error'}>
-                {feedback.message}
-              </p>
-            ) : null}
-
-            <button className="app-button app-button--primary" type="submit">
-              Créer le profil
-            </button>
-          </form>
-        </SectionCard>
-
-        {isAdmin ? (
-          <SectionCard title="Créer un compte senior">
-            <form className="admin-create-form" onSubmit={handleCreateSeniorProfile}>
-              <div className="admin-create-form__grid">
-                <label className="field-stack">
-                  <span className="field-stack__label">Prénom</span>
-                  <input
-                    className="field-input"
-                    onChange={(event) =>
-                      handleCreateSeniorFieldChange('firstName', event.target.value)
-                    }
-                    type="text"
-                    value={createSeniorForm.firstName}
-                  />
-                </label>
-
-                <label className="field-stack">
-                  <span className="field-stack__label">Nom</span>
-                  <input
-                    className="field-input"
-                    onChange={(event) =>
-                      handleCreateSeniorFieldChange('lastName', event.target.value)
-                    }
-                    type="text"
-                    value={createSeniorForm.lastName}
-                  />
-                </label>
-
-                <label className="field-stack">
-                  <span className="field-stack__label">Identifiant</span>
-                  <input
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    className="field-input"
-                    onChange={(event) =>
-                      handleCreateSeniorFieldChange('loginId', event.target.value)
-                    }
-                    type="text"
-                    value={createSeniorForm.loginId}
-                  />
-                </label>
-
-                <label className="field-stack">
-                  <span className="field-stack__label">Mot de passe</span>
-                  <input
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    className="field-input"
-                    onChange={(event) =>
-                      handleCreateSeniorFieldChange('password', event.target.value)
-                    }
-                    type="text"
-                    value={createSeniorForm.password}
-                  />
-                </label>
+        <SectionCard className="admin-dashboard-card admin-profile-management-card">
+          <div className="admin-profiles-layout">
+            <div className="admin-profiles-panel">
+              <div className="admin-profiles-tabs">
+                <button
+                  className={`admin-profiles-tab ${
+                    profilesTab === 'internal' ? 'admin-profiles-tab--active' : ''
+                  }`}
+                  onClick={() => setProfilesTab('internal')}
+                  type="button"
+                >
+                  <span>Internes</span>
+                </button>
+                <button
+                  className={`admin-profiles-tab ${
+                    profilesTab === 'senior' ? 'admin-profiles-tab--active' : ''
+                  }`}
+                  onClick={() => setProfilesTab('senior')}
+                  type="button"
+                >
+                  <span>Seniors</span>
+                </button>
               </div>
 
-              <FeedbackMessage feedback={seniorFeedback} />
-
-              <button className="app-button app-button--primary" type="submit">
-                Créer le compte senior
-              </button>
-            </form>
-          </SectionCard>
-        ) : null}
-
-        {isAdmin && customSeniorAccounts.length ? (
-          <SectionCard title="Comptes seniors créés">
-            <FeedbackMessage feedback={seniorAccountFeedback} />
-
-            <div className="admin-profile-list">
-              {customSeniorAccounts.map((senior) => (
-                <article
-                  key={senior.id}
-                  className="profile-card profile-card--static"
+              <div className="admin-profiles-toolbar">
+                <label className="admin-profiles-search">
+                  <Search aria-hidden="true" />
+                  <input
+                    onChange={(event) => setProfileSearch(event.target.value)}
+                    placeholder="Rechercher un profil..."
+                    type="search"
+                    value={profileSearch}
+                  />
+                </label>
+                <button
+                  className="app-button app-button--primary admin-profiles-toolbar__button"
+                  onClick={() => openProfileEditor(profilesTab)}
+                  type="button"
                 >
-                  <div className="profile-card__header">
-                    <strong className="profile-card__name-tag">
-                      {formatSeniorDisplayName(senior)}
-                    </strong>
-                  </div>
-                  <div className="profile-card__meta">
-                    <span>Identifiant : {senior.loginId}</span>
-                    <span>Mot de passe : {senior.password}</span>
-                  </div>
-                  {editingSeniorId === senior.id ? (
-                    <form
-                      className="admin-create-form"
-                      onSubmit={(event) =>
-                        handleUpdateSeniorCredentials(event, senior.id)
-                      }
-                    >
-                      <div className="admin-create-form__grid">
-                        <label className="field-stack">
-                          <span className="field-stack__label">Identifiant</span>
-                          <input
-                            autoCapitalize="none"
-                            autoCorrect="off"
-                            className="field-input"
-                            onChange={(event) =>
-                              handleEditSeniorCredentialsFieldChange(
-                                'loginId',
-                                event.target.value
-                              )
-                            }
-                            type="text"
-                            value={editSeniorCredentialsForm.loginId}
-                          />
-                        </label>
+                  + Nouveau profil
+                </button>
+              </div>
 
-                        <label className="field-stack">
-                          <span className="field-stack__label">Mot de passe</span>
-                          <input
-                            autoCapitalize="none"
-                            autoCorrect="off"
-                            className="field-input"
-                            onChange={(event) =>
-                              handleEditSeniorCredentialsFieldChange(
-                                'password',
-                                event.target.value
-                              )
-                            }
-                            type="text"
-                            value={editSeniorCredentialsForm.password}
-                          />
-                        </label>
-                      </div>
+              {profilesTab === 'internal' ? <FeedbackMessage feedback={feedback} /> : null}
+              {profilesTab === 'senior' ? <FeedbackMessage feedback={seniorFeedback} /> : null}
+              {profilesTab === 'senior' ? (
+                <FeedbackMessage feedback={seniorAccountFeedback} />
+              ) : null}
 
-                      <div className="admin-profile-card__actions">
-                        <button
-                          className="mini-button mini-button--secondary"
-                          type="submit"
-                        >
-                          Enregistrer les identifiants
-                        </button>
-                        <button
-                          className="mini-button"
-                          onClick={() => {
-                            setEditingSeniorId(null);
-                            setEditSeniorCredentialsForm(
-                              EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM
-                            );
-                          }}
-                          type="button"
-                        >
-                          Annuler
-                        </button>
-                      </div>
-                    </form>
+              <div className="admin-profile-list admin-profile-list--tall">
+                {profilesTab === 'internal' ? (
+                  filteredInternalProfiles.length ? (
+                    filteredInternalProfiles.map((profile) => (
+                      <article
+                        key={profile.id}
+                        className={`profile-card profile-card--${getSemesterTone(
+                          profile.semester
+                        )} profile-card--static admin-profile-card`}
+                      >
+                        <div className="admin-profile-card__identity">
+                          <span className="admin-profile-card__avatar admin-profile-card__avatar--senior">
+                            <span className="admin-profile-card__initials">
+                              {getProfileInitials(profile)}
+                            </span>
+                          </span>
+                          <div className="admin-profile-card__copy">
+                            <div className="profile-card__header">
+                              <strong>{formatDisplayName(profile.firstName, profile.lastName)}</strong>
+                              <span className="profile-card__badge">{profile.semester}</span>
+                            </div>
+                            <div className="profile-card__meta">
+                              <span>{profile.promotion}</span>
+                              <span>Stage actuel : {profile.currentRotation}</span>
+                              <span>Identifiant : {profile.loginId}</span>
+                              <span>Mot de passe : {MASKED_PASSWORD}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="admin-profile-card__actions admin-profile-card__actions--grid">
+                          <button
+                            className="mini-button mini-button--secondary"
+                            onClick={() => {
+                              setSelectedProfileId(profile.id);
+                              setSelectedProfileViewSource('profiles');
+                              setView('profile');
+                            }}
+                            type="button"
+                          >
+                            Voir les statistiques
+                          </button>
+                          <button
+                            className="mini-button"
+                            onClick={() => startInternalEdition(profile)}
+                            type="button"
+                          >
+                            Modifier
+                          </button>
+                          <button
+                            className="mini-button"
+                            onClick={() => handlePrepareInternalPasswordReset(profile)}
+                            type="button"
+                          >
+                            Réinitialiser le mot de passe
+                          </button>
+                          <button
+                            className="mini-button mini-button--danger"
+                            onClick={() => setProfileToDelete(profile)}
+                            type="button"
+                          >
+                            Désactiver le profil
+                          </button>
+                        </div>
+                      </article>
+                    ))
                   ) : (
-                    <div className="admin-profile-card__actions">
-                      <button
-                        className="mini-button mini-button--secondary"
-                        onClick={() => startSeniorCredentialsEdition(senior)}
-                        type="button"
-                      >
-                        Modifier identifiant / mot de passe
-                      </button>
-                      <button
-                        className="mini-button mini-button--danger"
-                        onClick={() => handleDeleteSeniorProfile(senior)}
-                        type="button"
-                      >
-                        Supprimer le compte senior
-                      </button>
+                    <div className="validation-box">
+                      <strong>Aucun profil interne trouvé</strong>
+                      <span>Essayez un autre terme ou créez un nouveau profil.</span>
                     </div>
-                  )}
-                </article>
-              ))}
-            </div>
-          </SectionCard>
-        ) : null}
+                  )
+                ) : filteredSeniorProfiles.length ? (
+                  filteredSeniorProfiles.map((senior) => (
+                    <article
+                      key={senior.id}
+                      className="profile-card profile-card--static admin-profile-card"
+                    >
+                      <div className="admin-profile-card__identity">
+                        <span className="admin-profile-card__avatar admin-profile-card__avatar--senior">
+                          <span className="admin-profile-card__initials">
+                            {getProfileInitials(senior)}
+                          </span>
+                        </span>
+                        <div className="admin-profile-card__copy">
+                          <div className="profile-card__header">
+                            <strong>{formatSeniorDisplayName(senior)}</strong>
+                          </div>
+                          <div className="profile-card__meta">
+                            <span>Identifiant : {senior.loginId}</span>
+                            <span>Mot de passe : {MASKED_PASSWORD}</span>
+                            {!senior.isCustom ? (
+                              <span>Compte système : modification désactivée</span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
 
-        <SectionCard title="Profils internes">
-          <div className="admin-profile-list">
-            {profilesForAdminList.map((profile) => (
-              <article
-                key={profile.id}
-                className={`profile-card profile-card--${getSemesterTone(profile.semester)} profile-card--static`}
-              >
-                <div className="profile-card__header">
-                  <strong
-                    className={`profile-card__name-tag profile-card__name-tag--${getSemesterTone(
-                      profile.semester
-                    )}`}
-                  >
-                    {formatDisplayName(profile.firstName, profile.lastName)}
+                      {senior.isCustom ? (
+                        <div className="admin-profile-card__actions admin-profile-card__actions--grid">
+                          <button
+                            className="mini-button"
+                            onClick={() => startSeniorEdition(senior)}
+                            type="button"
+                          >
+                            Modifier
+                          </button>
+                          <button
+                            className="mini-button"
+                            onClick={() => handlePrepareSeniorPasswordReset(senior)}
+                            type="button"
+                          >
+                            Réinitialiser le mot de passe
+                          </button>
+                          <button
+                            className="mini-button mini-button--danger"
+                            onClick={() => handleDeleteSeniorProfile(senior)}
+                            type="button"
+                          >
+                            Désactiver le compte
+                          </button>
+                        </div>
+                      ) : null}
+                    </article>
+                  ))
+                ) : (
+                  <div className="validation-box">
+                    <strong>Aucun compte senior créé</strong>
+                    <span>Créez un senior depuis le panneau de droite.</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <aside className="admin-profile-editor">
+              <div className="admin-profile-editor__header">
+                <div>
+                  <strong>
+                    {profileEditorType === 'internal'
+                      ? editingInternalProfileId
+                        ? 'Modifier le profil'
+                        : 'Nouveau profil'
+                      : editingSeniorId
+                        ? 'Modifier le compte senior'
+                        : 'Nouveau profil'}
                   </strong>
-                  <span className="profile-card__badge">{profile.semester}</span>
+                  <span>Type de compte</span>
                 </div>
-                <div className="profile-card__meta">
-                  <span>{profile.promotion}</span>
-                  <span>{profile.currentRotation}</span>
-                  <span>Identifiant : {profile.loginId}</span>
-                  <span>Mot de passe : {profile.password}</span>
-                </div>
-                <div className="admin-profile-card__actions">
+                {(editingInternalProfileId || editingSeniorId) ? (
                   <button
-                    className="mini-button mini-button--secondary"
-                    onClick={() => {
-                      setSelectedProfileId(profile.id);
-                      setSelectedProfileViewSource('profiles');
-                      setView('profile');
-                    }}
+                    className="mini-button"
+                    onClick={() => openProfileEditor(profileEditorType)}
                     type="button"
                   >
-                    Voir les statistiques
+                    <X aria-hidden="true" />
                   </button>
-                  {isAdmin ? (
-                    <button
-                      className="mini-button mini-button--danger"
-                      onClick={() => setProfileToDelete(profile)}
-                      type="button"
-                    >
-                      Supprimer le profil
+                ) : null}
+              </div>
+
+              <div className="admin-profile-editor__switch">
+                <button
+                  className={
+                    profileEditorType === 'internal'
+                      ? 'admin-profile-editor__switch-button admin-profile-editor__switch-button--active'
+                      : 'admin-profile-editor__switch-button'
+                  }
+                  onClick={() => {
+                    setProfileEditorType('internal');
+                    resetSeniorEditor();
+                  }}
+                  type="button"
+                >
+                  Interne
+                </button>
+                <button
+                  className={
+                    profileEditorType === 'senior'
+                      ? 'admin-profile-editor__switch-button admin-profile-editor__switch-button--active'
+                      : 'admin-profile-editor__switch-button'
+                  }
+                  onClick={() => {
+                    setProfileEditorType('senior');
+                    resetInternalEditor();
+                  }}
+                  type="button"
+                >
+                  Senior
+                </button>
+              </div>
+
+              {profileEditorType === 'internal' ? (
+                <form className="admin-create-form" onSubmit={handleCreateProfile}>
+                  <div className="admin-create-form__grid">
+                    <label className="field-stack">
+                      <span className="field-stack__label">Prénom</span>
+                      <input
+                        className="field-input"
+                        onChange={(event) =>
+                          handleCreateFieldChange('firstName', event.target.value)
+                        }
+                        placeholder="Prénom"
+                        type="text"
+                        value={createForm.firstName}
+                      />
+                    </label>
+
+                    <label className="field-stack">
+                      <span className="field-stack__label">Nom</span>
+                      <input
+                        className="field-input"
+                        onChange={(event) =>
+                          handleCreateFieldChange('lastName', event.target.value)
+                        }
+                        placeholder="Nom"
+                        type="text"
+                        value={createForm.lastName}
+                      />
+                    </label>
+
+                    <label className="field-stack">
+                      <span className="field-stack__label">Identifiant</span>
+                      <input
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        className="field-input"
+                        onChange={(event) =>
+                          handleCreateFieldChange('loginId', event.target.value)
+                        }
+                        placeholder="Identifiant"
+                        type="text"
+                        value={createForm.loginId}
+                      />
+                    </label>
+
+                    <label className="field-stack">
+                      <span className="field-stack__label">Mot de passe temporaire</span>
+                      <input
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        className="field-input"
+                        onChange={(event) =>
+                          handleCreateFieldChange('password', event.target.value)
+                        }
+                        placeholder="Mot de passe temporaire"
+                        type="text"
+                        value={createForm.password}
+                      />
+                      <span className="field-helper">
+                        L’utilisateur devra le changer lors de sa première connexion.
+                      </span>
+                    </label>
+
+                    <label className="field-stack">
+                      <span className="field-stack__label">Promotion</span>
+                      <select
+                        className="field-input"
+                        onChange={(event) =>
+                          handleCreateFieldChange('promotion', event.target.value)
+                        }
+                        value={createForm.promotion}
+                      >
+                        <option value="">Sélectionner une promotion</option>
+                        {PROMOTION_OPTIONS.map((promotion) => (
+                          <option key={promotion} value={promotion}>
+                            {promotion}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="field-stack">
+                      <span className="field-stack__label">Semestre</span>
+                      <select
+                        className="field-input"
+                        onChange={(event) =>
+                          handleCreateFieldChange('semester', event.target.value)
+                        }
+                        value={createForm.semester}
+                      >
+                        <option value="">Sélectionner un semestre</option>
+                        {SEMESTER_OPTIONS.map((semester) => (
+                          <option key={semester} value={semester}>
+                            {semester}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="field-stack admin-create-form__field--full">
+                      <span className="field-stack__label">Stage actuel</span>
+                      <input
+                        className="field-input"
+                        list="rotation-suggestions"
+                        onChange={(event) =>
+                          handleCreateFieldChange('currentRotation', event.target.value)
+                        }
+                        placeholder="Ex : Chirurgie digestive"
+                        type="text"
+                        value={createForm.currentRotation}
+                      />
+                      <datalist id="rotation-suggestions">
+                        {ROTATION_SUGGESTIONS.map((rotation) => (
+                          <option key={rotation} value={rotation} />
+                        ))}
+                      </datalist>
+                    </label>
+                  </div>
+
+                  <div className="admin-profile-editor__actions">
+                    {(editingInternalProfileId || createForm.firstName || createForm.lastName) ? (
+                      <button
+                        className="app-button app-button--secondary"
+                        onClick={resetInternalEditor}
+                        type="button"
+                      >
+                        Annuler
+                      </button>
+                    ) : null}
+                    <button className="app-button app-button--primary" type="submit">
+                      {editingInternalProfileId ? 'Enregistrer le profil' : 'Créer le profil'}
                     </button>
-                  ) : null}
-                </div>
-              </article>
-            ))}
+                  </div>
+                </form>
+              ) : (
+                <form className="admin-create-form" onSubmit={handleCreateSeniorProfile}>
+                  <div className="admin-create-form__grid">
+                    <label className="field-stack">
+                      <span className="field-stack__label">Prénom</span>
+                      <input
+                        className="field-input"
+                        onChange={(event) =>
+                          handleCreateSeniorFieldChange('firstName', event.target.value)
+                        }
+                        placeholder="Prénom"
+                        type="text"
+                        value={createSeniorForm.firstName}
+                      />
+                    </label>
+
+                    <label className="field-stack">
+                      <span className="field-stack__label">Nom</span>
+                      <input
+                        className="field-input"
+                        onChange={(event) =>
+                          handleCreateSeniorFieldChange('lastName', event.target.value)
+                        }
+                        placeholder="Nom"
+                        type="text"
+                        value={createSeniorForm.lastName}
+                      />
+                    </label>
+
+                    <label className="field-stack">
+                      <span className="field-stack__label">Identifiant</span>
+                      <input
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        className="field-input"
+                        onChange={(event) =>
+                          handleCreateSeniorFieldChange('loginId', event.target.value)
+                        }
+                        placeholder="Identifiant"
+                        type="text"
+                        value={createSeniorForm.loginId}
+                      />
+                    </label>
+
+                    <label className="field-stack">
+                      <span className="field-stack__label">Mot de passe temporaire</span>
+                      <input
+                        autoCapitalize="none"
+                        autoCorrect="off"
+                        className="field-input"
+                        onChange={(event) =>
+                          handleCreateSeniorFieldChange('password', event.target.value)
+                        }
+                        placeholder="Mot de passe temporaire"
+                        type="text"
+                        value={createSeniorForm.password}
+                      />
+                      <span className="field-helper">
+                        L’utilisateur devra le changer lors de sa première connexion.
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="admin-profile-editor__actions">
+                    {(editingSeniorId || createSeniorForm.firstName || createSeniorForm.lastName) ? (
+                      <button
+                        className="app-button app-button--secondary"
+                        onClick={resetSeniorEditor}
+                        type="button"
+                      >
+                        Annuler
+                      </button>
+                    ) : null}
+                    <button className="app-button app-button--primary" type="submit">
+                      {editingSeniorId ? 'Enregistrer le compte' : 'Créer le profil'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </aside>
           </div>
         </SectionCard>
-
-        <div className="action-stack">
-          <PrimaryButton
-            label={isSenior ? 'Retour à l’espace senior' : 'Retour à l’espace administrateur'}
-            onPress={() => setView('home')}
-            variant="secondary"
-          />
-        </div>
-      </ScreenContainer>
+      </AdminPageShell>
     );
   }
 
@@ -4516,7 +5522,7 @@ export function AdminScreen() {
     );
   }
 
-  if (isAdmin && view === 'badges') {
+  if (isAdmin && view === 'trophies') {
     return (
       <AdminPageShell
         backLabel="Retour à l’espace administrateur"
@@ -4543,6 +5549,10 @@ export function AdminScreen() {
           >
             {trophyFormFeedback.message}
           </div>
+        ) : null}
+
+        {trophyStorageWarning ? (
+          <div className="auth-error">{trophyStorageWarning}</div>
         ) : null}
 
         <SectionCard className="admin-dashboard-card">
@@ -4623,12 +5633,22 @@ export function AdminScreen() {
                   <div className="admin-trophy-card__footer">
                     <span>{formatObtainedCountLabel(trophy.obtainedCount)}</span>
                     <span>
-                      {trophy.type === 'operatoire' && trophy.associatedProcedure
-                        ? getChoiceLabel(
-                            surgicalProcedureOptions,
-                            trophy.associatedProcedure,
-                            trophy.associatedProcedure
-                          )
+                      {trophy.type === 'operatoire'
+                        ? trophy.operativeScope === 'approach'
+                          ? trophy.associatedApproach
+                            ? getChoiceLabel(
+                                approachOptions,
+                                trophy.associatedApproach,
+                                trophy.associatedApproach
+                              )
+                            : 'Voie d’abord à définir'
+                          : trophy.associatedProcedure
+                            ? getChoiceLabel(
+                                surgicalProcedureOptions,
+                                trophy.associatedProcedure,
+                                trophy.associatedProcedure
+                              )
+                            : 'Intervention à définir'
                         : TROPHY_VISIBILITY_DESCRIPTIONS[trophy.visibility]}
                     </span>
                   </div>
@@ -4717,7 +5737,7 @@ export function AdminScreen() {
                         <span>{level.label}</span>
                         <small>
                           {level.threshold ?? 0} intervention(s){' '}
-                          {level.trackedStatus === 'evaluated'
+                          {selectedTrophy.trackedInterventionStatus === 'evaluated'
                             ? 'évaluée(s)'
                             : 'enregistrée(s)'}
                         </small>
@@ -4772,7 +5792,7 @@ export function AdminScreen() {
     return (
       <AdminPageShell
         backLabel="Retour au catalogue des trophées"
-        onBack={() => setView('badges')}
+        onBack={() => setView('trophies')}
         subtitle="Choisissez le format de configuration à ouvrir pour créer un nouveau trophée."
         title="Créer un trophée"
       >
@@ -4839,6 +5859,23 @@ export function AdminScreen() {
       savedInterventions,
       adminEvaluations
     );
+    const matchingProfiles = internalProfiles
+      .filter(
+        (profile) =>
+          getUnlockedTrophyTierForProfile(
+            trophyDraft,
+            profile,
+            savedInterventions,
+            adminEvaluations
+          ) != null
+      )
+      .sort((left, right) =>
+        formatDisplayName(left.firstName, left.lastName).localeCompare(
+          formatDisplayName(right.firstName, right.lastName),
+          'fr-FR',
+          { sensitivity: 'base' }
+        )
+      );
 
     return (
       <AdminPageShell
@@ -4878,6 +5915,10 @@ export function AdminScreen() {
           >
             {trophyFormFeedback.message}
           </div>
+        ) : null}
+
+        {trophyStorageWarning ? (
+          <div className="auth-error">{trophyStorageWarning}</div>
         ) : null}
 
         {trophyValidationErrors.length ? (
@@ -4925,37 +5966,6 @@ export function AdminScreen() {
 
                 <div className="admin-create-form__grid">
                   <label className="field-stack">
-                    <span className="field-stack__label">Type de trophée</span>
-                    <select
-                      className="field-input"
-                      onChange={(event) =>
-                        handleTrophyDraftFieldChange('type', event.target.value)
-                      }
-                      value={trophyDraft.type}
-                    >
-                      <option value="operatoire">Trophée opératoire</option>
-                      <option value="special">Trophée spécial</option>
-                    </select>
-                  </label>
-
-                  <label className="field-stack">
-                    <span className="field-stack__label">Format</span>
-                    <select
-                      className="field-input"
-                      onChange={(event) =>
-                        handleTrophyDraftFieldChange('format', event.target.value)
-                      }
-                      value={trophyDraft.format}
-                    >
-                      {trophyDraft.type === 'operatoire' ? (
-                        <option value="levels">À niveaux</option>
-                      ) : (
-                        <option value="unique">Unique</option>
-                      )}
-                    </select>
-                  </label>
-
-                  <label className="field-stack">
                     <span className="field-stack__label">Statut</span>
                     <select
                       className="field-input"
@@ -4971,52 +5981,21 @@ export function AdminScreen() {
                   </label>
                 </div>
 
-                <div className="field-stack admin-create-form__field--full">
-                  <span className="field-stack__label">Visibilité côté interne</span>
-                  <div className="admin-visibility-choice-grid">
-                    {TROPHY_VISIBILITY_OPTIONS.map((option) => (
-                      <button
-                        className={`admin-visibility-choice ${
-                          trophyDraft.visibility === option.value
-                            ? 'admin-visibility-choice--active'
-                            : ''
-                        }`}
-                        key={option.value}
-                        onClick={() =>
-                          handleTrophyDraftFieldChange('visibility', option.value)
-                        }
-                        type="button"
-                      >
-                        <span className="admin-visibility-choice__icon">
-                          {option.value === 'visible' ? (
-                            <BarChart3 aria-hidden="true" />
-                          ) : (
-                            <Star aria-hidden="true" />
-                          )}
-                        </span>
-                        <strong>{option.label}</strong>
-                        <small>{option.description}</small>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
                 {trophyDraft.type === 'operatoire' ? (
                   <div className="admin-create-form__grid">
                     <label className="field-stack">
-                      <span className="field-stack__label">Intervention associée</span>
+                      <span className="field-stack__label">Progression suivie</span>
                       <select
                         className="field-input"
                         onChange={(event) =>
                           handleTrophyDraftFieldChange(
-                            'associatedProcedure',
+                            'operativeScope',
                             event.target.value
                           )
                         }
-                        value={trophyDraft.associatedProcedure}
+                        value={trophyDraft.operativeScope}
                       >
-                        <option value="">Sélectionner</option>
-                        {surgicalProcedureOptions.map((option) => (
+                        {TROPHY_OPERATIVE_SCOPE_OPTIONS.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
@@ -5024,20 +6003,87 @@ export function AdminScreen() {
                       </select>
                     </label>
 
+                    {trophyDraft.operativeScope === 'procedure' ? (
+                      <>
+                        <label className="field-stack">
+                          <span className="field-stack__label">Intervention associée</span>
+                          <select
+                            className="field-input"
+                            onChange={(event) =>
+                              handleTrophyDraftFieldChange(
+                                'associatedProcedure',
+                                event.target.value
+                              )
+                            }
+                            value={trophyDraft.associatedProcedure}
+                          >
+                            <option value="">Sélectionner</option>
+                            {surgicalProcedureOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+
+                        <label className="field-stack">
+                          <span className="field-stack__label">Voie d’abord (facultatif)</span>
+                          <select
+                            className="field-input"
+                            onChange={(event) =>
+                              handleTrophyDraftFieldChange(
+                                'associatedApproach',
+                                event.target.value
+                              )
+                            }
+                            value={trophyDraft.associatedApproach}
+                          >
+                            <option value="">Toutes</option>
+                            {approachOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      </>
+                    ) : (
+                      <label className="field-stack">
+                        <span className="field-stack__label">Voie d’abord suivie</span>
+                        <select
+                          className="field-input"
+                          onChange={(event) =>
+                            handleTrophyDraftFieldChange(
+                              'associatedApproach',
+                              event.target.value
+                            )
+                          }
+                          value={trophyDraft.associatedApproach}
+                        >
+                          <option value="">Sélectionner</option>
+                          {approachOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+
                     <label className="field-stack">
-                      <span className="field-stack__label">Voie d’abord (facultatif)</span>
+                      <span className="field-stack__label">Indication (facultatif)</span>
                       <select
                         className="field-input"
                         onChange={(event) =>
                           handleTrophyDraftFieldChange(
-                            'associatedApproach',
+                            'associatedIndication',
                             event.target.value
                           )
                         }
-                        value={trophyDraft.associatedApproach}
+                        value={trophyDraft.associatedIndication}
                       >
                         <option value="">Toutes</option>
-                        {approachOptions.map((option) => (
+                        {indicationOptions.map((option) => (
                           <option key={option.value} value={option.value}>
                             {option.label}
                           </option>
@@ -5435,34 +6481,72 @@ export function AdminScreen() {
             ) : (
               <SectionCard
                 className="admin-dashboard-card"
-                description="Ce trophée suit automatiquement la progression sur l’intervention sélectionnée."
+                description={
+                  trophyDraft.operativeScope === 'approach'
+                    ? 'Ce trophée suit automatiquement la progression sur la voie d’abord sélectionnée.'
+                    : 'Ce trophée suit automatiquement la progression sur l’intervention sélectionnée.'
+                }
                 title="Conditions d’obtention"
               >
                 <div className="admin-trophy-helper-grid">
                   <div className="admin-helper-card">
-                    <strong>Intervention suivie</strong>
+                    <strong>Progression suivie</strong>
                     <span>
-                      {trophyDraft.associatedProcedure
-                        ? getChoiceLabel(
-                            surgicalProcedureOptions,
-                            trophyDraft.associatedProcedure,
-                            trophyDraft.associatedProcedure
-                          )
-                        : 'À définir'}
+                      {trophyDraft.operativeScope === 'approach'
+                        ? 'Voie d’abord'
+                        : 'Intervention'}
                     </span>
                   </div>
                   <div className="admin-helper-card">
-                    <strong>Voie d’abord</strong>
+                    <strong>
+                      {trophyDraft.operativeScope === 'approach'
+                        ? 'Voie d’abord suivie'
+                        : 'Intervention suivie'}
+                    </strong>
                     <span>
-                      {trophyDraft.associatedApproach
+                      {trophyDraft.operativeScope === 'approach'
+                        ? trophyDraft.associatedApproach
+                          ? getChoiceLabel(
+                              approachOptions,
+                              trophyDraft.associatedApproach,
+                              trophyDraft.associatedApproach
+                            )
+                          : 'À définir'
+                        : trophyDraft.associatedProcedure
+                          ? getChoiceLabel(
+                              surgicalProcedureOptions,
+                              trophyDraft.associatedProcedure,
+                              trophyDraft.associatedProcedure
+                            )
+                          : 'À définir'}
+                    </span>
+                  </div>
+                  <div className="admin-helper-card">
+                    <strong>Indication</strong>
+                    <span>
+                      {trophyDraft.associatedIndication
                         ? getChoiceLabel(
-                            approachOptions,
-                            trophyDraft.associatedApproach,
-                            trophyDraft.associatedApproach
+                            indicationOptions,
+                            trophyDraft.associatedIndication,
+                            trophyDraft.associatedIndication
                           )
                         : 'Toutes'}
                     </span>
                   </div>
+                  {trophyDraft.operativeScope === 'procedure' ? (
+                    <div className="admin-helper-card">
+                      <strong>Voie d’abord</strong>
+                      <span>
+                        {trophyDraft.associatedApproach
+                          ? getChoiceLabel(
+                              approachOptions,
+                              trophyDraft.associatedApproach,
+                              trophyDraft.associatedApproach
+                            )
+                          : 'Toutes'}
+                      </span>
+                    </div>
+                  ) : null}
                   <div className="admin-helper-card">
                     <strong>Rôle pris en compte</strong>
                     <span>
@@ -5501,24 +6585,6 @@ export function AdminScreen() {
                         </span>
                       </div>
                       <div className="admin-create-form__grid">
-                        <label className="field-stack">
-                          <span className="field-stack__label">Statut suivi</span>
-                          <select
-                            className="field-input"
-                            onChange={(event) =>
-                              handleTrophyLevelChange(
-                                level.tier,
-                                'trackedStatus',
-                                event.target.value
-                              )
-                            }
-                            value={level.trackedStatus}
-                          >
-                            <option value="evaluated">Évaluées</option>
-                            <option value="recorded">Enregistrées</option>
-                          </select>
-                        </label>
-
                         <label className="field-stack">
                           <span className="field-stack__label">Seuil</span>
                           <input
@@ -5666,7 +6732,7 @@ export function AdminScreen() {
                               <span>{level.label}</span>
                               <small>
                                 {level.threshold ?? 0} /{' '}
-                                {level.trackedStatus === 'evaluated'
+                                {trophyDraft.trackedInterventionStatus === 'evaluated'
                                   ? 'évaluées'
                                   : 'enregistrées'}
                               </small>
@@ -5689,11 +6755,28 @@ export function AdminScreen() {
                 </div>
                 <div className="admin-preview-stat">
                   <strong>
-                    {previewProfile
-                      ? formatDisplayName(previewProfile.firstName, previewProfile.lastName)
-                      : 'Aucun interne'}
+                    {matchingProfiles.length
+                      ? `${matchingProfiles.length} profil${
+                          matchingProfiles.length > 1 ? 's' : ''
+                        } identifié${matchingProfiles.length > 1 ? 's' : ''}`
+                      : 'Aucun interne correspondant'}
                   </strong>
-                  <span>profil utilisé pour l’aperçu</span>
+                  {matchingProfiles.length ? (
+                    <div className="admin-preview-stat__profile-list">
+                      {matchingProfiles.map((profile) => (
+                        <span
+                          className="admin-preview-stat__profile-chip"
+                          key={profile.id}
+                        >
+                          {formatDisplayName(profile.firstName, profile.lastName)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span>
+                      La liste des internes déjà éligibles au trophée apparaîtra ici.
+                    </span>
+                  )}
                 </div>
                 <div className="admin-preview-stat">
                   <strong>{TROPHY_STATUS_LABELS[trophyDraft.status]}</strong>
@@ -5718,6 +6801,8 @@ export function AdminScreen() {
         savedInterventions={savedInterventions}
         selectedSenior={selectedSenior}
         surgicalProcedureOptions={surgicalProcedureOptions}
+        updateSeniorCredentials={updateSeniorCredentials}
+        updateSeniorManagedInternals={updateSeniorManagedInternals}
       />
     );
   }
@@ -5753,7 +6838,13 @@ export function AdminScreen() {
           </div>
 
           <div className="admin-activity-chart-scroll">
-            <div className="admin-activity-chart">
+            <div
+              className="admin-activity-chart"
+              style={{
+                gridTemplateColumns: `repeat(${activityBuckets.length}, minmax(88px, 1fr))`,
+                minWidth: `${activityBuckets.length * 98}px`,
+              }}
+            >
               {activityBuckets.map((bucket) => (
                 <div className="admin-activity-chart__group" key={bucket.id}>
                   <div className="admin-activity-chart__bars">
@@ -5794,7 +6885,10 @@ export function AdminScreen() {
           <div className="admin-metric-grid">
             <article className="admin-metric-card">
               <span className="admin-metric-card__icon">
-                <BarChart3 aria-hidden="true" />
+                <FolderOpen
+                  aria-hidden="true"
+                  className="admin-metric-card__glyph admin-metric-card__glyph--folder"
+                />
               </span>
               <div>
                 <strong>{activityTotals.totalRecorded}</strong>
@@ -5804,7 +6898,10 @@ export function AdminScreen() {
             </article>
             <article className="admin-metric-card">
               <span className="admin-metric-card__icon admin-metric-card__icon--navy">
-                <Check aria-hidden="true" />
+                <Check
+                  aria-hidden="true"
+                  className="admin-metric-card__glyph admin-metric-card__glyph--check"
+                />
               </span>
               <div>
                 <strong>{activityTotals.totalEvaluated}</strong>
@@ -5816,37 +6913,29 @@ export function AdminScreen() {
         </SectionCard>
 
         <SectionCard className="admin-dashboard-card" title="Dernières connexions utilisateurs">
-          <div className="admin-section-heading">
-            <button
-              className="mini-button mini-button--secondary"
-              onClick={() => setView('connections')}
-              type="button"
-            >
-              Voir toutes
-            </button>
-          </div>
           {recentUserConnections.length ? (
             <div className="admin-connections-list">
               {recentUserConnections.map((connection) => (
                 <article className="admin-connection-row" key={connection.id}>
-                  <span className="admin-connection-row__avatar">
-                    {connection.role === 'Interne' ? <CircleUserRound /> : <UserRound />}
-                  </span>
                   <div className="admin-connection-row__copy">
-                    <strong>{connection.name}</strong>
+                    <div className="admin-connection-row__main">
+                      <strong>{connection.name}</strong>
+                      <small className="admin-connection-row__time">
+                        {formatAdminConnectionTimestamp(connection.lastLoginAt)}
+                      </small>
+                    </div>
                     <span>{connection.role}</span>
                   </div>
-                  <span className="admin-connection-row__time">
-                    {formatAdminConnectionTimestamp(connection.lastLoginAt)}
-                  </span>
-                  <Clock3 aria-hidden="true" className="admin-connection-row__icon" />
                 </article>
               ))}
             </div>
           ) : (
             <div className="validation-box">
-              <strong>Aucune connexion récente</strong>
-              <span>Les prochaines connexions internes et seniors apparaîtront ici.</span>
+              <strong>Aucune connexion sur les 48 dernières heures</strong>
+              <span>
+                Les connexions internes et seniors récentes apparaîtront ici
+                automatiquement.
+              </span>
             </div>
           )}
         </SectionCard>
@@ -5854,7 +6943,7 @@ export function AdminScreen() {
         <div className="admin-shortcut-grid">
           <button
             className="admin-shortcut-card"
-            onClick={() => setView('badges')}
+            onClick={() => setView('trophies')}
             type="button"
           >
             <span className="admin-shortcut-card__icon">
@@ -5916,32 +7005,6 @@ export function AdminScreen() {
           </button>
         </div>
 
-        <div className="admin-footer-grid">
-          <button
-            className="admin-footer-action"
-            onClick={() => setView('account')}
-            type="button"
-          >
-            <span className="admin-footer-action__icon">
-              <Shield aria-hidden="true" />
-            </span>
-            <span className="admin-footer-action__label">Mon profil administrateur</span>
-            <ChevronRight aria-hidden="true" />
-          </button>
-
-          <button
-            className="admin-footer-action"
-            onClick={handleAdminSupportClick}
-            type="button"
-          >
-            <span className="admin-footer-action__icon">
-              <LifeBuoy aria-hidden="true" />
-            </span>
-            <span className="admin-footer-action__label">Contacter le support</span>
-            <ChevronRight aria-hidden="true" />
-          </button>
-        </div>
-
         <button className="admin-logout-button" onClick={logout} type="button">
           <LogOut aria-hidden="true" />
           <span>Se déconnecter</span>
@@ -5976,11 +7039,6 @@ export function AdminScreen() {
           label="Ouvrir outil de création des interventions"
           onPress={() => setView('interventions')}
           variant="secondary"
-        />
-        <PrimaryButton
-          label="Se déconnecter"
-          onPress={logout}
-          variant="danger"
         />
       </SectionCard>
 
@@ -6624,9 +7682,6 @@ export function AdminScreen() {
                             {getChoiceLabel(approachOptions, intervention.approach)}
                           </span>
                           <span>
-                            Contexte : {getChoiceLabel(contextOptions, intervention.context)}
-                          </span>
-                          <span>
                             Rôle : {getChoiceLabel(roleOptions, intervention.role)}
                           </span>
                         </article>
@@ -6690,6 +7745,8 @@ function SeniorDashboard({
   savedInterventions,
   selectedSenior,
   surgicalProcedureOptions,
+  updateSeniorCredentials,
+  updateSeniorManagedInternals,
 }: {
   adminEvaluations: Record<string, AdminInterventionEvaluation>;
   customSurgicalInterventions: SurgicalInterventionDefinition[];
@@ -6699,47 +7756,85 @@ function SeniorDashboard({
   savedInterventions: SavedIntervention[];
   selectedSenior: Senior;
   surgicalProcedureOptions: ReturnType<typeof useAppContext>['surgicalProcedureOptions'];
+  updateSeniorCredentials: (
+    seniorId: string,
+    input: UpdateSeniorCredentialsInput
+  ) => ReturnType<typeof useAppContext>['updateSeniorCredentials'];
+  updateSeniorManagedInternals: (seniorId: string, internalIds: string[]) => void;
 }) {
   const seniorName = formatDisplayName(
     selectedSenior.firstName,
     selectedSenior.lastName
   );
+  const pendingEvaluationsPreviewLimit = 5;
   const [populationFilter, setPopulationFilter] =
     useState<SeniorPopulationFilter>('recent');
-  const [showAllEvaluations, setShowAllEvaluations] = useState(false);
-  const [isAccountSheetOpen, setIsAccountSheetOpen] = useState(false);
+  const [isInternalSettingsSheetOpen, setIsInternalSettingsSheetOpen] =
+    useState(false);
+  const [isPasswordSheetOpen, setIsPasswordSheetOpen] = useState(false);
+  const [isPendingEvaluationsSheetOpen, setIsPendingEvaluationsSheetOpen] =
+    useState(false);
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
+  const [managedInternalIdsDraft, setManagedInternalIdsDraft] = useState<string[]>(
+    selectedSenior.managedInternalIds ?? []
+  );
+  const [passwordForm, setPasswordForm] = useState({
+    currentPassword: '',
+    nextPassword: '',
+    confirmPassword: '',
+  });
+  const [passwordFeedback, setPasswordFeedback] = useState<FeedbackState>(null);
   const [selectedInterventionKey, setSelectedInterventionKey] = useState(
     SENIOR_FALLBACK_INTERVENTION_OPTION.key
   );
   const [selectedInternalId, setSelectedInternalId] = useState<string | null>(null);
   const internalStripRef = useRef<HTMLDivElement | null>(null);
 
+  const alphabeticalProfiles = useMemo(
+    () =>
+      [...internalProfiles].sort((left, right) =>
+        formatDisplayName(left.firstName, left.lastName).localeCompare(
+          formatDisplayName(right.firstName, right.lastName),
+          'fr-FR',
+          { sensitivity: 'base' }
+        )
+      ),
+    [internalProfiles]
+  );
+
+  const seniorSavedInterventions = useMemo(
+    () =>
+      savedInterventions.filter(
+        (intervention) => intervention.seniorId === selectedSenior.id
+      ),
+    [savedInterventions, selectedSenior.id]
+  );
+
   const interventionOptions = useMemo(
-    () => buildSeniorInterventionOptions(savedInterventions, surgicalProcedureOptions),
-    [savedInterventions, surgicalProcedureOptions]
+    () =>
+      buildSeniorInterventionOptions(
+        seniorSavedInterventions,
+        surgicalProcedureOptions
+      ),
+    [seniorSavedInterventions, surgicalProcedureOptions]
   );
 
   const pendingEvaluations = useMemo(
     () =>
-      [...savedInterventions]
+      [...seniorSavedInterventions]
         .filter(
           (intervention) =>
-            intervention.seniorId === selectedSenior.id &&
             !hasCompleteAdminEvaluation(adminEvaluations[intervention.id])
         )
         .sort((left, right) => right.savedAt.localeCompare(left.savedAt)),
-    [adminEvaluations, savedInterventions, selectedSenior.id]
+    [adminEvaluations, seniorSavedInterventions]
   );
 
   const relatedProfilesByRecency = useMemo(() => {
     const latestByInternal = new Map<string, string>();
 
-    savedInterventions.forEach((intervention) => {
-      if (
-        intervention.seniorId !== selectedSenior.id ||
-        !intervention.internalId
-      ) {
+    seniorSavedInterventions.forEach((intervention) => {
+      if (!intervention.internalId) {
         return;
       }
 
@@ -6756,25 +7851,31 @@ function SeniorDashboard({
         internalProfiles.find((profile) => profile.id === internalId) ?? null
       )
       .filter((profile): profile is InternalProfile => profile != null);
-  }, [internalProfiles, savedInterventions, selectedSenior.id]);
+  }, [internalProfiles, seniorSavedInterventions]);
+
+  const managedProfiles = useMemo(
+    () =>
+      alphabeticalProfiles.filter((profile) =>
+        (selectedSenior.managedInternalIds ?? []).includes(profile.id)
+      ),
+    [alphabeticalProfiles, selectedSenior.managedInternalIds]
+  );
 
   const visibleProfiles = useMemo(() => {
-    const alphabeticalProfiles = [...internalProfiles].sort((left, right) =>
-      formatDisplayName(left.firstName, left.lastName).localeCompare(
-        formatDisplayName(right.firstName, right.lastName),
-        'fr-FR',
-        { sensitivity: 'base' }
-      )
-    );
-
     if (populationFilter === 'all') {
       return alphabeticalProfiles;
     }
 
-    return relatedProfilesByRecency.length
-      ? relatedProfilesByRecency
-      : alphabeticalProfiles;
-  }, [internalProfiles, populationFilter, relatedProfilesByRecency]);
+    if (populationFilter === 'mine') {
+      return managedProfiles;
+    }
+
+    return relatedProfilesByRecency;
+  }, [
+    managedProfiles,
+    populationFilter,
+    relatedProfilesByRecency,
+  ]);
 
   const selectedInterventionOption =
     interventionOptions.find((option) => option.key === selectedInterventionKey) ??
@@ -6791,14 +7892,18 @@ function SeniorDashboard({
       return [];
     }
 
-    return [...savedInterventions]
+    return [...seniorSavedInterventions]
       .filter(
         (intervention) =>
           intervention.internalId === selectedInternal.id &&
           matchesSeniorInterventionOption(intervention, selectedInterventionOption)
       )
       .sort((left, right) => left.savedAt.localeCompare(right.savedAt));
-  }, [savedInterventions, selectedInternal, selectedInterventionOption]);
+  }, [
+    selectedInternal,
+    selectedInterventionOption,
+    seniorSavedInterventions,
+  ]);
 
   const autonomySeries = useMemo(
     () =>
@@ -6836,6 +7941,27 @@ function SeniorDashboard({
   }, [interventionOptions, selectedInterventionKey]);
 
   useEffect(() => {
+    if (!isInternalSettingsSheetOpen) {
+      return;
+    }
+
+    setManagedInternalIdsDraft(selectedSenior.managedInternalIds ?? []);
+  }, [isInternalSettingsSheetOpen, selectedSenior.managedInternalIds]);
+
+  useEffect(() => {
+    if (!isPasswordSheetOpen) {
+      return;
+    }
+
+    setPasswordForm({
+      currentPassword: '',
+      nextPassword: '',
+      confirmPassword: '',
+    });
+    setPasswordFeedback(null);
+  }, [isPasswordSheetOpen]);
+
+  useEffect(() => {
     if (
       selectedInternalId &&
       visibleProfiles.some((profile) => profile.id === selectedInternalId)
@@ -6855,15 +7981,140 @@ function SeniorDashboard({
     }
   };
 
-  const seniorCreatedAtLabel = selectedSenior.createdAt
-    ? formatDateTime(selectedSenior.createdAt)
-    : 'Non renseignée';
+  const toggleManagedInternal = (internalId: string) => {
+    setManagedInternalIdsDraft((current) =>
+      current.includes(internalId)
+        ? current.filter((id) => id !== internalId)
+        : [...current, internalId]
+    );
+  };
+
+  const handleSaveManagedInternals = () => {
+    updateSeniorManagedInternals(selectedSenior.id, managedInternalIdsDraft);
+    setPopulationFilter('mine');
+    setIsInternalSettingsSheetOpen(false);
+  };
+
+  const handlePasswordFieldChange = (
+    field: 'currentPassword' | 'nextPassword' | 'confirmPassword',
+    value: string
+  ) => {
+    setPasswordForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+    setPasswordFeedback(null);
+  };
+
+  const handleSaveSeniorPassword = () => {
+    const currentPassword = passwordForm.currentPassword.trim();
+    const nextPassword = passwordForm.nextPassword.trim();
+    const confirmPassword = passwordForm.confirmPassword.trim();
+
+    if (currentPassword !== (selectedSenior.password ?? '')) {
+      setPasswordFeedback({
+        kind: 'error',
+        message: 'Le mot de passe actuel est incorrect.',
+      });
+      return;
+    }
+
+    if (!nextPassword || !confirmPassword) {
+      setPasswordFeedback({
+        kind: 'error',
+        message: 'Renseigne le nouveau mot de passe et sa confirmation.',
+      });
+      return;
+    }
+
+    if (nextPassword !== confirmPassword) {
+      setPasswordFeedback({
+        kind: 'error',
+        message: 'La confirmation du nouveau mot de passe ne correspond pas.',
+      });
+      return;
+    }
+
+    const result = updateSeniorCredentials(selectedSenior.id, {
+      loginId: selectedSenior.loginId ?? '',
+      mustChangePassword: false,
+      password: nextPassword,
+    });
+
+    setPasswordFeedback({
+      kind: result.success ? 'success' : 'error',
+      message: result.success
+        ? 'Le mot de passe a bien été mis à jour.'
+        : result.message,
+    });
+
+    if (!result.success) {
+      return;
+    }
+
+    setPasswordForm({
+      currentPassword: '',
+      nextPassword: '',
+      confirmPassword: '',
+    });
+  };
+
+  const handleEvaluateIntervention = (interventionId: string) => {
+    setIsPendingEvaluationsSheetOpen(false);
+    onEvaluate(interventionId);
+  };
 
   const scrollInternalStrip = (direction: 'left' | 'right') => {
     internalStripRef.current?.scrollBy({
       left: direction === 'left' ? -280 : 280,
       behavior: 'smooth',
     });
+  };
+
+  const renderPendingEvaluationCard = (intervention: SavedIntervention) => {
+    const internal = getInternalById(intervention.internalId, internalProfiles) ?? null;
+    const procedureLabel = getChoiceLabel(
+      surgicalProcedureOptions,
+      intervention.procedure
+    );
+
+    return (
+      <button
+        className="senior-evaluation-card senior-evaluation-card--clickable"
+        key={intervention.id}
+        onClick={() => handleEvaluateIntervention(intervention.id)}
+        type="button"
+      >
+        <ApproachIcon intervention={intervention} />
+        <div className="senior-evaluation-card__content">
+          <div className="senior-evaluation-card__headline">
+            <span className="senior-evaluation-card__date">
+              {formatLongFrenchDate(intervention.date)}
+            </span>
+            <span className="senior-evaluation-card__separator" aria-hidden="true">
+              |
+            </span>
+            <strong>
+              {formatSeniorInterventionLabel(
+                procedureLabel,
+                intervention.procedure,
+                intervention.approach
+              )}
+            </strong>
+          </div>
+          <span className="senior-evaluation-card__internal">
+            Interne :{' '}
+            {internal
+              ? formatDisplayName(internal.firstName, internal.lastName)
+              : 'Interne non retrouvé'}
+          </span>
+        </div>
+        <span className="senior-evaluation-card__action">
+          <span>Évaluer</span>
+          <ChevronRight aria-hidden="true" />
+        </span>
+      </button>
+    );
   };
 
   return (
@@ -6892,36 +8143,26 @@ function SeniorDashboard({
                 className="senior-settings__menu-item"
                 onClick={() => {
                   setIsSettingsMenuOpen(false);
-                  setIsAccountSheetOpen(true);
+                  setIsPasswordSheetOpen(true);
                 }}
                 role="menuitem"
                 type="button"
               >
-                <UserRound aria-hidden="true" />
-                <span>Mon compte</span>
+                <Pencil aria-hidden="true" />
+                <span>Modifier mot de passe</span>
               </button>
 
               <button
                 className="senior-settings__menu-item"
-                onClick={handleSupportClick}
-                role="menuitem"
-                type="button"
-              >
-                <LifeBuoy aria-hidden="true" />
-                <span>Contacter le support</span>
-              </button>
-
-              <button
-                className="senior-settings__menu-item senior-settings__menu-item--danger"
                 onClick={() => {
                   setIsSettingsMenuOpen(false);
-                  onLogout();
+                  setIsInternalSettingsSheetOpen(true);
                 }}
                 role="menuitem"
                 type="button"
               >
-                <LogOut aria-hidden="true" />
-                <span>Se déconnecter</span>
+                <Users aria-hidden="true" />
+                <span>Mes paramètres internes</span>
               </button>
             </div>
           ) : null}
@@ -6932,67 +8173,23 @@ function SeniorDashboard({
         {pendingEvaluations.length ? (
           <>
             <div className="senior-evaluation-list">
-              {(showAllEvaluations
-                ? pendingEvaluations
-                : pendingEvaluations.slice(0, 3)
-              ).map((intervention) => {
-                const internal =
-                  getInternalById(intervention.internalId, internalProfiles) ?? null;
-                const procedureLabel = getChoiceLabel(
-                  surgicalProcedureOptions,
-                  intervention.procedure
-                );
-
-                return (
-                  <button
-                    className="senior-evaluation-card senior-evaluation-card--clickable"
-                    key={intervention.id}
-                    onClick={() => onEvaluate(intervention.id)}
-                    type="button"
-                  >
-                    <ApproachIcon intervention={intervention} />
-                    <div className="senior-evaluation-card__content">
-                      <div className="senior-evaluation-card__headline">
-                        <span className="senior-evaluation-card__date">
-                          {formatLongFrenchDate(intervention.date)}
-                        </span>
-                        <span className="senior-evaluation-card__separator" aria-hidden="true">
-                          |
-                        </span>
-                        <strong>
-                          {formatSeniorInterventionLabel(
-                            procedureLabel,
-                            intervention.procedure,
-                            intervention.approach
-                          )}
-                        </strong>
-                      </div>
-                      <span className="senior-evaluation-card__internal">
-                        Interne :{' '}
-                        {internal
-                          ? formatDisplayName(internal.firstName, internal.lastName)
-                          : 'Interne non retrouvé'}
-                      </span>
-                    </div>
-                    <span className="senior-evaluation-card__action">
-                      <span>Évaluer</span>
-                      <ChevronRight aria-hidden="true" />
-                    </span>
-                  </button>
-                );
-              })}
+              {pendingEvaluations
+                .slice(0, pendingEvaluationsPreviewLimit)
+                .map(renderPendingEvaluationCard)}
             </div>
 
-            <button
-              className="senior-section-link"
-              onClick={() => setShowAllEvaluations((current) => !current)}
-              type="button"
-            >
-              <span>
-                Voir toutes les interventions à évaluer ({pendingEvaluations.length})
-              </span>
-              <ChevronRight aria-hidden="true" />
-            </button>
+            {pendingEvaluations.length > pendingEvaluationsPreviewLimit ? (
+              <button
+                className="senior-section-link"
+                onClick={() => setIsPendingEvaluationsSheetOpen(true)}
+                type="button"
+              >
+                <span>
+                  Voir toutes les interventions à évaluer ({pendingEvaluations.length})
+                </span>
+                <ChevronRight aria-hidden="true" />
+              </button>
+            ) : null}
           </>
         ) : (
           <div className="validation-box">
@@ -7008,21 +8205,6 @@ function SeniorDashboard({
         title="Aperçu des statistiques par interne"
       >
         <div className="senior-filter-grid">
-          <label className="field-stack">
-            <span className="field-stack__label">Intervention</span>
-            <select
-              className="field-input"
-              onChange={(event) => setSelectedInterventionKey(event.target.value)}
-              value={selectedInterventionOption.key}
-            >
-              {interventionOptions.map((option) => (
-                <option key={option.key} value={option.key}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-
           <label className="field-stack">
             <span className="field-stack__label">Population</span>
             <select
@@ -7137,7 +8319,6 @@ function SeniorDashboard({
 
                 <div className="senior-profile-detail__count">
                   <div className="senior-profile-detail__count-main">
-                    <CalendarDays aria-hidden="true" />
                     <strong>
                       {selectedInternalInterventions.length} interventions enregistrées
                     </strong>
@@ -7199,16 +8380,39 @@ function SeniorDashboard({
         ) : (
           <div className="validation-box">
             <strong>Aucun interne disponible</strong>
-            <span>Les profils internes apparaîtront ici dès qu’ils seront créés.</span>
+            <span>
+              {populationFilter === 'recent'
+                ? 'Les internes ayant récemment enregistré une intervention avec ce senior référent apparaîtront ici.'
+                : populationFilter === 'mine'
+                  ? 'Les internes ajoutés dans "Mes internes" apparaîtront ici.'
+                  : 'Les profils internes apparaîtront ici dès qu’ils seront créés.'}
+            </span>
           </div>
         )}
       </SectionCard>
 
-      {isAccountSheetOpen ? (
+      <SectionCard
+        className="senior-section-card"
+      >
+        <div className="action-stack">
+          <PrimaryButton
+            label="Contacter le support"
+            onPress={handleSupportClick}
+            variant="secondary"
+          />
+          <PrimaryButton
+            label="Se déconnecter"
+            onPress={onLogout}
+            variant="danger"
+          />
+        </div>
+      </SectionCard>
+
+      {isInternalSettingsSheetOpen ? (
         <div
           aria-hidden="true"
           className="account-sheet-backdrop"
-          onClick={() => setIsAccountSheetOpen(false)}
+          onClick={() => setIsInternalSettingsSheetOpen(false)}
         >
           <div
             aria-modal="true"
@@ -7217,53 +8421,219 @@ function SeniorDashboard({
             role="dialog"
           >
             <div className="account-sheet__header">
-              <div>
-                <h3>Mon compte</h3>
+              <div className="account-sheet__heading">
+                <h3>Mes paramètres internes</h3>
                 <p className="account-sheet__text">
-                  Informations du compte senior actuellement connecté.
+                  Choisissez les internes qui alimentent le filtre “Mes internes”.
                 </p>
               </div>
               <button
-                aria-label="Fermer la fenêtre Mon compte"
+                aria-label="Fermer la fenêtre des paramètres internes"
                 className="account-sheet__close"
-                onClick={() => setIsAccountSheetOpen(false)}
+                onClick={() => setIsInternalSettingsSheetOpen(false)}
                 type="button"
               >
                 <X aria-hidden="true" />
               </button>
             </div>
 
-            <div className="admin-profile-detail__credentials senior-account-sheet__grid">
-              <div className="info-block">
-                <span className="info-block__label">Nom</span>
-                <strong className="info-block__value">{`Dr ${seniorName}`}</strong>
+            <div className="senior-account-sheet__section">
+              <div className="senior-account-sheet__section-header">
+                <strong>Mes internes</strong>
+                <span>
+                  {managedInternalIdsDraft.length} sélectionné
+                  {managedInternalIdsDraft.length > 1 ? 's' : ''}
+                </span>
               </div>
-              <div className="info-block">
-                <span className="info-block__label">Identifiant</span>
-                <strong className="info-block__value">
-                  {selectedSenior.loginId ?? 'Non renseigné'}
-                </strong>
-              </div>
-              <div className="info-block">
-                <span className="info-block__label">Mot de passe</span>
-                <strong className="info-block__value">
-                  {selectedSenior.password ?? 'Non renseigné'}
-                </strong>
-              </div>
-              <div className="info-block">
-                <span className="info-block__label">Créé le</span>
-                <strong className="info-block__value">{seniorCreatedAtLabel}</strong>
+              <div className="senior-account-sheet__list">
+                {alphabeticalProfiles.map((profile) => {
+                  const isSelected = managedInternalIdsDraft.includes(profile.id);
+
+                  return (
+                    <button
+                      className={`senior-account-internal ${
+                        isSelected ? 'senior-account-internal--selected' : ''
+                      }`.trim()}
+                      key={profile.id}
+                      onClick={() => toggleManagedInternal(profile.id)}
+                      type="button"
+                    >
+                      <span className="senior-account-internal__copy">
+                        <strong>
+                          {formatDisplayName(profile.firstName, profile.lastName)}
+                        </strong>
+                        <span>
+                          {profile.semester} · {profile.currentRotation}
+                        </span>
+                      </span>
+                      <span
+                        className={`senior-account-internal__check ${
+                          isSelected ? 'senior-account-internal__check--selected' : ''
+                        }`.trim()}
+                        aria-hidden="true"
+                      >
+                        <Check />
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
-            <div className="account-sheet__actions">
+            <div className="account-sheet__actions account-sheet__actions--split">
               <button
                 className="account-button"
-                onClick={() => setIsAccountSheetOpen(false)}
+                onClick={() => setIsInternalSettingsSheetOpen(false)}
                 type="button"
               >
                 Fermer
               </button>
+              <button
+                className="flow-button flow-button--primary"
+                onClick={handleSaveManagedInternals}
+                type="button"
+              >
+                Enregistrer
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isPasswordSheetOpen ? (
+        <div
+          aria-hidden="true"
+          className="account-sheet-backdrop"
+          onClick={() => setIsPasswordSheetOpen(false)}
+        >
+          <div
+            aria-modal="true"
+            className="account-sheet senior-account-sheet"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="account-sheet__header">
+              <div className="account-sheet__heading">
+                <h3>Modifier mot de passe</h3>
+                <p className="account-sheet__text">
+                  Mettez à jour le mot de passe du compte senior connecté.
+                </p>
+              </div>
+              <button
+                aria-label="Fermer la fenêtre de modification du mot de passe"
+                className="account-sheet__close"
+                onClick={() => setIsPasswordSheetOpen(false)}
+                type="button"
+              >
+                <X aria-hidden="true" />
+              </button>
+            </div>
+
+            {passwordFeedback ? (
+              <div className={passwordFeedback.kind === 'success' ? 'auth-success' : 'auth-error'}>
+                {passwordFeedback.message}
+              </div>
+            ) : null}
+
+            <div className="account-sheet__stack">
+              <label className="account-sheet__field">
+                <span>Mot de passe actuel</span>
+                <input
+                  className="account-sheet__input"
+                  onChange={(event) =>
+                    handlePasswordFieldChange('currentPassword', event.target.value)
+                  }
+                  type="password"
+                  value={passwordForm.currentPassword}
+                />
+              </label>
+
+              <label className="account-sheet__field">
+                <span>Nouveau mot de passe</span>
+                <input
+                  className="account-sheet__input"
+                  onChange={(event) =>
+                    handlePasswordFieldChange('nextPassword', event.target.value)
+                  }
+                  type="password"
+                  value={passwordForm.nextPassword}
+                />
+              </label>
+
+              <label className="account-sheet__field">
+                <span>Confirmer le nouveau mot de passe</span>
+                <input
+                  className="account-sheet__input"
+                  onChange={(event) =>
+                    handlePasswordFieldChange('confirmPassword', event.target.value)
+                  }
+                  type="password"
+                  value={passwordForm.confirmPassword}
+                />
+              </label>
+            </div>
+
+            <div className="account-sheet__actions account-sheet__actions--split">
+              <button
+                className="account-button"
+                onClick={() => setIsPasswordSheetOpen(false)}
+                type="button"
+              >
+                Fermer
+              </button>
+              <button
+                className="flow-button flow-button--primary"
+                onClick={handleSaveSeniorPassword}
+                type="button"
+              >
+                Enregistrer
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isPendingEvaluationsSheetOpen ? (
+        <div
+          aria-hidden="true"
+          className="account-sheet-backdrop"
+          onClick={() => setIsPendingEvaluationsSheetOpen(false)}
+        >
+          <div
+            aria-labelledby="pending-evaluations-sheet-title"
+            aria-modal="true"
+            className="account-sheet senior-evaluations-sheet"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="account-sheet__header">
+              <div className="account-sheet__heading">
+                <h3 id="pending-evaluations-sheet-title">
+                  Interventions à évaluer
+                </h3>
+                <p>
+                  Retrouvez l’ensemble des interventions en attente pour ce
+                  senior.
+                </p>
+              </div>
+              <button
+                aria-label="Fermer la fenêtre des interventions à évaluer"
+                className="account-sheet__close"
+                onClick={() => setIsPendingEvaluationsSheetOpen(false)}
+                type="button"
+              >
+                <X aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="senior-account-sheet__section">
+              <div className="senior-account-sheet__section-header">
+                <strong>{pendingEvaluations.length} intervention(s)</strong>
+                <span>Liste complète</span>
+              </div>
+              <div className="senior-evaluation-list senior-evaluation-list--sheet">
+                {pendingEvaluations.map(renderPendingEvaluationCard)}
+              </div>
             </div>
           </div>
         </div>

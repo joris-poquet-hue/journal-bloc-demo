@@ -1,16 +1,18 @@
 import {
   Bold,
   BriefcaseMedical,
+  CheckCircle2,
   ChevronLeft,
   Highlighter,
   List,
   ListOrdered,
+  LoaderCircle,
   NotebookPen,
   Trash2,
   Underline,
   X,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 
 import { useAppContext } from '../context/AppContext';
 import {
@@ -41,6 +43,25 @@ function formatShortTime(value: string | Date) {
   }).format(typeof value === 'string' ? new Date(value) : value);
 }
 
+function formatSaveTimestamp(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  const today = new Date();
+  const isSameDay = date.toDateString() === today.toDateString();
+
+  return isSameDay
+    ? `aujourd’hui à ${formatShortTime(date)}`
+    : `${formatLongDate(value.slice(0, 10))} à ${formatShortTime(date)}`;
+}
+
 function escapeHtml(value: string) {
   return value
     .replace(/&/g, '&amp;')
@@ -65,6 +86,12 @@ function formatNotebookSenior(senior: Senior | null | undefined) {
   return displayName ? `Dr ${displayName}` : 'Dr non renseigné';
 }
 
+const NOTEBOOK_HIGHLIGHT_COLOR = '#fff0c8';
+
+function normalizeCommandColor(value: string) {
+  return value.replace(/\s+/g, '').toLowerCase();
+}
+
 export function NotebookScreen() {
   const {
     selectedInternal,
@@ -77,8 +104,20 @@ export function NotebookScreen() {
     clearNotebookDocument,
   } = useAppContext();
   const editorRef = useRef<HTMLDivElement | null>(null);
+  const pendingSaveRef = useRef(false);
   const [isInterventionPanelOpen, setIsInterventionPanelOpen] = useState(false);
   const [characterCount, setCharacterCount] = useState(0);
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>(
+    'idle'
+  );
+  const [editorAlert, setEditorAlert] = useState<string | null>(null);
+  const [activeFormats, setActiveFormats] = useState({
+    bold: false,
+    underline: false,
+    highlight: false,
+    unorderedList: false,
+    orderedList: false,
+  });
 
   const notebookDocument = selectedInternal
     ? notebookDocuments.find(
@@ -109,7 +148,97 @@ export function NotebookScreen() {
 
     editor.innerHTML = notebookDocument?.contentHtml ?? '';
     setCharacterCount(editor.innerText.trim().length);
+    setSaveState(notebookDocument?.updatedAt ? 'saved' : 'idle');
+    setEditorAlert(null);
+    pendingSaveRef.current = false;
   }, [selectedInternal?.id]);
+
+  useEffect(() => {
+    if (!pendingSaveRef.current) {
+      return;
+    }
+
+    pendingSaveRef.current = false;
+    setSaveState('saved');
+    setEditorAlert(null);
+  }, [notebookDocument?.updatedAt]);
+
+  const syncActiveFormats = () => {
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+
+    if (!editor || !selection?.rangeCount) {
+      setActiveFormats({
+        bold: false,
+        underline: false,
+        highlight: false,
+        unorderedList: false,
+        orderedList: false,
+      });
+      return;
+    }
+
+    const anchorElement =
+      selection.anchorNode instanceof Element
+        ? selection.anchorNode
+        : selection.anchorNode?.parentElement ?? null;
+
+    if (!anchorElement || !editor.contains(anchorElement)) {
+      setActiveFormats({
+        bold: false,
+        underline: false,
+        highlight: false,
+        unorderedList: false,
+        orderedList: false,
+      });
+      return;
+    }
+
+    const readCommandState = (command: string) => {
+      try {
+        return document.queryCommandState(command);
+      } catch {
+        return false;
+      }
+    };
+
+    let highlightValue = '';
+
+    try {
+      highlightValue = String(
+        document.queryCommandValue('hiliteColor') ||
+          document.queryCommandValue('backColor') ||
+          ''
+      );
+    } catch {
+      highlightValue = '';
+    }
+
+    const normalizedHighlightValue = normalizeCommandColor(highlightValue);
+
+    setActiveFormats({
+      bold: readCommandState('bold'),
+      underline: readCommandState('underline'),
+      highlight:
+        normalizedHighlightValue === normalizeCommandColor(NOTEBOOK_HIGHLIGHT_COLOR) ||
+        normalizedHighlightValue === 'rgb(255,240,200)' ||
+        normalizedHighlightValue === 'rgba(255,240,200,1)',
+      unorderedList: readCommandState('insertUnorderedList'),
+      orderedList: readCommandState('insertOrderedList'),
+    });
+  };
+
+  useEffect(() => {
+    const handleSelectionChange = () => {
+      syncActiveFormats();
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+    };
+  }, []);
 
   if (!selectedInternal) {
     return null;
@@ -122,23 +251,106 @@ export function NotebookScreen() {
       return;
     }
 
-    updateNotebookDocument(editor.innerHTML);
     setCharacterCount(editor.innerText.trim().length);
+
+    if (editor.innerHTML === (notebookDocument?.contentHtml ?? '')) {
+      return;
+    }
+
+    pendingSaveRef.current = true;
+    setSaveState('saving');
+    setEditorAlert(null);
+    updateNotebookDocument(editor.innerHTML);
   };
 
   const focusEditor = () => {
     editorRef.current?.focus();
   };
 
+  const handleToolbarPointerDown = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+  };
+
   const runCommand = (command: string, value?: string) => {
     focusEditor();
-    document.execCommand(command, false, value);
+
+    try {
+      const didRun = document.execCommand(command, false, value);
+
+      if (!didRun) {
+        setSaveState('error');
+        setEditorAlert(
+          'Cette action de mise en forme n’est pas disponible sur ce navigateur.'
+        );
+        return;
+      }
+    } catch {
+      setSaveState('error');
+      setEditorAlert(
+        'Cette action de mise en forme n’est pas disponible sur ce navigateur.'
+      );
+      return;
+    }
+
     persistEditorContent();
+    requestAnimationFrame(syncActiveFormats);
+  };
+
+  const toggleHighlight = () => {
+    focusEditor();
+
+    let didRun = false;
+
+    try {
+      document.execCommand('styleWithCSS', false, 'true');
+      didRun =
+        document.execCommand(
+          'hiliteColor',
+          false,
+          activeFormats.highlight ? 'transparent' : NOTEBOOK_HIGHLIGHT_COLOR
+        ) ||
+        document.execCommand(
+          'backColor',
+          false,
+          activeFormats.highlight ? 'transparent' : NOTEBOOK_HIGHLIGHT_COLOR
+        );
+    } catch {
+      didRun = false;
+    }
+
+    if (!didRun) {
+      setSaveState('error');
+      setEditorAlert(
+        'Cette action de mise en forme n’est pas disponible sur ce navigateur.'
+      );
+      return;
+    }
+
+    persistEditorContent();
+    requestAnimationFrame(syncActiveFormats);
   };
 
   const insertHtml = (html: string) => {
     focusEditor();
-    document.execCommand('insertHTML', false, html);
+
+    try {
+      const didInsert = document.execCommand('insertHTML', false, html);
+
+      if (!didInsert) {
+        setSaveState('error');
+        setEditorAlert(
+          'Impossible d’insérer ce contenu automatiquement sur ce navigateur.'
+        );
+        return;
+      }
+    } catch {
+      setSaveState('error');
+      setEditorAlert(
+        'Impossible d’insérer ce contenu automatiquement sur ce navigateur.'
+      );
+      return;
+    }
+
     persistEditorContent();
   };
 
@@ -186,14 +398,41 @@ export function NotebookScreen() {
 
   const handleClearNotebook = () => {
     const editor = editorRef.current;
+    const hasNotebookContent = Boolean(
+      editor?.innerText.trim() || notebookDocument?.contentHtml.trim()
+    );
+
+    if (
+      hasNotebookContent &&
+      !window.confirm(
+        'Vider définitivement ce bloc-notes ? Cette action sera enregistrée immédiatement.'
+      )
+    ) {
+      return;
+    }
 
     if (editor) {
       editor.innerHTML = '';
     }
 
+    pendingSaveRef.current = true;
+    setSaveState('saving');
+    setEditorAlert(null);
     clearNotebookDocument();
     setCharacterCount(0);
   };
+
+  const lastSavedLabel = formatSaveTimestamp(notebookDocument?.updatedAt);
+  const saveStatusLabel =
+    saveState === 'saving'
+      ? 'Enregistrement...'
+      : saveState === 'saved'
+        ? lastSavedLabel
+          ? `Enregistré ${lastSavedLabel}`
+          : 'Enregistré'
+        : saveState === 'error'
+          ? 'Action non prise en charge'
+          : 'Bloc-notes prêt';
 
   return (
     <main className="screen-shell dashboard-screen notebook-screen">
@@ -216,7 +455,10 @@ export function NotebookScreen() {
             <div className="notebook-toolbar__group">
               <button
                 aria-label="Gras"
-                className="notebook-tool-button"
+                className={`notebook-tool-button ${
+                  activeFormats.bold ? 'notebook-tool-button--active' : ''
+                }`}
+                onMouseDown={handleToolbarPointerDown}
                 onClick={() => runCommand('bold')}
                 type="button"
               >
@@ -224,7 +466,10 @@ export function NotebookScreen() {
               </button>
               <button
                 aria-label="Souligné"
-                className="notebook-tool-button"
+                className={`notebook-tool-button ${
+                  activeFormats.underline ? 'notebook-tool-button--active' : ''
+                }`}
+                onMouseDown={handleToolbarPointerDown}
                 onClick={() => runCommand('underline')}
                 type="button"
               >
@@ -232,15 +477,21 @@ export function NotebookScreen() {
               </button>
               <button
                 aria-label="Surligner"
-                className="notebook-tool-button notebook-tool-button--highlight"
-                onClick={() => runCommand('backColor', '#fff0c8')}
+                className={`notebook-tool-button notebook-tool-button--highlight ${
+                  activeFormats.highlight ? 'notebook-tool-button--active' : ''
+                }`}
+                onMouseDown={handleToolbarPointerDown}
+                onClick={toggleHighlight}
                 type="button"
               >
                 <Highlighter aria-hidden="true" />
               </button>
               <button
                 aria-label="Liste à puces"
-                className="notebook-tool-button"
+                className={`notebook-tool-button ${
+                  activeFormats.unorderedList ? 'notebook-tool-button--active' : ''
+                }`}
+                onMouseDown={handleToolbarPointerDown}
                 onClick={() => runCommand('insertUnorderedList')}
                 type="button"
               >
@@ -248,7 +499,10 @@ export function NotebookScreen() {
               </button>
               <button
                 aria-label="Liste numérotée"
-                className="notebook-tool-button"
+                className={`notebook-tool-button ${
+                  activeFormats.orderedList ? 'notebook-tool-button--active' : ''
+                }`}
+                onMouseDown={handleToolbarPointerDown}
                 onClick={() => runCommand('insertOrderedList')}
                 type="button"
               >
@@ -280,14 +534,34 @@ export function NotebookScreen() {
             aria-label="Zone de texte du bloc-notes"
             className="notebook-editor"
             contentEditable
+            onFocus={syncActiveFormats}
             onInput={persistEditorContent}
+            onKeyUp={syncActiveFormats}
+            onMouseUp={syncActiveFormats}
             ref={editorRef}
             role="textbox"
             suppressContentEditableWarning
           />
 
           <footer className="notebook-editor-footer">
-            <span>{characterCount} caractères</span>
+            <div className="notebook-editor-footer__meta">
+              <span>{characterCount} caractères</span>
+              <span
+                className={`notebook-save-indicator notebook-save-indicator--${saveState}`}
+              >
+                {saveState === 'saving' ? (
+                  <LoaderCircle aria-hidden="true" />
+                ) : saveState === 'saved' ? (
+                  <CheckCircle2 aria-hidden="true" />
+                ) : null}
+                {saveStatusLabel}
+              </span>
+              {editorAlert ? (
+                <span className="notebook-save-indicator notebook-save-indicator--error">
+                  {editorAlert}
+                </span>
+              ) : null}
+            </div>
             <button
               className="notebook-clear-button"
               onClick={handleClearNotebook}

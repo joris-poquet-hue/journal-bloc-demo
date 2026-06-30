@@ -31,6 +31,7 @@ export const internalProfiles: InternalProfile[] = [
     lastName: 'Test',
     loginId: 'internet',
     password: 'internet',
+    mustChangePassword: true,
     promotion: 'Promo 2022',
     semester: 'S8',
     currentRotation: 'Stage de chirurgie',
@@ -56,6 +57,7 @@ export const seniors: Senior[] = [
     lastName: 'Test',
     loginId: 'seniort',
     password: 'seniort',
+    mustChangePassword: true,
     createdAt: '2026-06-26T00:00:00.000Z',
   },
 ];
@@ -70,9 +72,20 @@ export const selectableSeniors: Senior[] = [
 ];
 
 export function getSelectableSeniors(customSeniors: Senior[] = []) {
+  const mergedSeniors = [...customSeniors, ...seniors].reduce<Senior[]>(
+    (accumulator, senior) => {
+      if (accumulator.some((item) => item.id === senior.id)) {
+        return accumulator;
+      }
+
+      accumulator.push(senior);
+      return accumulator;
+    },
+    []
+  );
+
   return [
-    ...seniors,
-    ...customSeniors,
+    ...mergedSeniors,
     {
       id: 'sen-other',
       firstName: 'Autre',
@@ -144,11 +157,6 @@ export const lateralityOptions: ChoiceOption<Laterality>[] = [
   { value: 'droite', label: 'Droite' },
 ];
 
-export const contextOptions: ChoiceOption<SurgeryContext>[] = [
-  { value: 'programme', label: 'Programmé' },
-  { value: 'urgence', label: 'Urgence' },
-];
-
 export function formatDisplayName(firstName: string, lastName: string) {
   return [firstName, lastName].filter((value) => value.trim().length > 0).join(' ');
 }
@@ -169,7 +177,7 @@ export function formatSeniorDisplayName(senior: Senior) {
 }
 
 export function getFixedContextForIntervention(
-  procedure: InterventionType,
+  procedure: InterventionType | null,
   indication: Indication | null
 ): SurgeryContext | null {
   if (procedure === 'colpoclesis') {
@@ -398,21 +406,29 @@ export function getProcedureOptions(
 }
 
 export function getSurgicalInterventionDefinition(
-  procedure: InterventionType,
+  procedure: InterventionType | null,
   customInterventions: SurgicalInterventionDefinition[] = []
 ) {
+  if (!procedure) {
+    return undefined;
+  }
+
   return getSurgicalInterventionDefinitions(customInterventions).find(
     (intervention) => intervention.id === procedure
   );
 }
 
 export function getChecklistStepsForIntervention(
-  procedure: InterventionType,
+  procedure: InterventionType | null,
   indication: Indication | null,
   approach?: SurgicalApproach | null,
   entryTechnique?: EntryTechnique | null,
   customInterventions: SurgicalInterventionDefinition[] = []
 ) {
+  if (!procedure) {
+    return [];
+  }
+
   const customIntervention = customInterventions.find(
     (intervention) => intervention.id === procedure
   );
@@ -1089,7 +1105,7 @@ export const techniqueGuides: TechniqueGuide[] = [
     id: 'guide-geu',
     kind: 'geu',
     title: 'Prise en charge chirurgicale d’une GEU',
-    category: 'Urgence gynécologique',
+    category: 'Chirurgie gynécologique',
     approach: 'Cœlioscopie en première intention',
     intro:
       'Repères pratiques pour préparer un bloc de grossesse extra-utérine tubaire et choisir un geste cohérent avec l’état de la trompe, l’hémostase et le projet reproductif.',

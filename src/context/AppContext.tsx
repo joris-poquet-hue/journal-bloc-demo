@@ -1,4 +1,12 @@
-import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
+import {
+  createContext,
+  type Dispatch,
+  ReactNode,
+  type SetStateAction,
+  useContext,
+  useEffect,
+  useState,
+} from 'react';
 
 import {
   allChecklistSteps,
@@ -21,6 +29,7 @@ import {
   seededSavedInterventions,
 } from '../data/mockData';
 import {
+  AdminTrophyDefinition,
   AppScreen,
   ChecklistLevel,
   CreateInternalProfileInput,
@@ -50,6 +59,7 @@ import {
   UpdateSeniorCredentialsInput,
   UpdateSeniorCredentialsResult,
 } from '../types';
+import { ensureTrophyDefinitionShape } from '../utils/adminTrophies';
 import { getTodayIsoDate } from '../utils/date';
 import {
   buildSurgicalInterventionDefinitionFromInput,
@@ -84,18 +94,39 @@ type AppContextValue = {
   notebookDocuments: NotebookDocument[];
   customSurgicalInterventions: SurgicalInterventionDefinition[];
   customSeniors: Senior[];
+  adminTrophies: AdminTrophyDefinition[];
+  adminTrophyStorageWarning: string | null;
+  passwordChangeChallenge: {
+    loginId: string;
+    role: 'internal' | 'senior';
+    userLabel: string;
+  } | null;
   selectableSeniors: Senior[];
   surgicalProcedureOptions: ReturnType<typeof getProcedureOptions>;
   formMissingFields: string[];
   checklistProgress: ReturnType<typeof getChecklistProgress>;
-  login: (loginId: string, password: string) => Promise<boolean>;
+  login: (
+    loginId: string,
+    password: string
+  ) => Promise<{
+    message?: string;
+    status: 'authenticated' | 'error' | 'password-change-required';
+  }>;
   logout: () => void;
+  cancelPasswordChangeChallenge: () => void;
+  completePasswordChangeChallenge: (
+    nextPassword: string,
+    confirmPassword: string
+  ) => {
+    message: string;
+    success: boolean;
+  };
   goToSurgeryPortal: () => void;
   goToObstetricJournal: () => void;
   historyNavigationDate: string | null;
   clearHistoryNavigationDate: () => void;
   goToSurgeryHistory: (targetDate?: string, targetView?: 'calendar' | 'progress') => void;
-  goToBadges: () => void;
+  goToTrophies: () => void;
   goToProfile: () => void;
   goToNotebook: () => void;
   goToPreBlock: (context?: PreBlockContext) => void;
@@ -111,6 +142,10 @@ type AppContextValue = {
   createInternalProfile: (
     input: CreateInternalProfileInput
   ) => CreateInternalProfileResult;
+  updateInternalProfile: (
+    profileId: string,
+    input: CreateInternalProfileInput
+  ) => CreateInternalProfileResult;
   updateInternalCredentials: (
     profileId: string,
     input: UpdateInternalCredentialsInput
@@ -122,10 +157,18 @@ type AppContextValue = {
   createSeniorProfile: (
     input: CreateSeniorProfileInput
   ) => CreateSeniorProfileResult;
+  updateSeniorProfile: (
+    seniorId: string,
+    input: CreateSeniorProfileInput
+  ) => CreateSeniorProfileResult;
   updateSeniorCredentials: (
     seniorId: string,
     input: UpdateSeniorCredentialsInput
   ) => UpdateSeniorCredentialsResult;
+  updateSeniorManagedInternals: (
+    seniorId: string,
+    internalIds: string[]
+  ) => void;
   deleteSeniorProfile: (seniorId: string) => void;
   createSurgicalIntervention: (
     input: CreateSurgicalInterventionInput
@@ -137,6 +180,7 @@ type AppContextValue = {
   deleteCustomSurgicalIntervention: (interventionId: string) => void;
   deleteInternalProfile: (profileId: string) => void;
   deleteSavedInterventions: (ids: string[]) => void;
+  setAdminTrophies: Dispatch<SetStateAction<AdminTrophyDefinition[]>>;
   updateNotebookDocument: (contentHtml: string) => void;
   clearNotebookDocument: () => void;
   updateSavedInterventionAutonomyScore: (
@@ -166,7 +210,10 @@ const NOTEBOOK_DOCUMENTS_STORAGE_KEY = 'journal-bord:notebook-documents:v1';
 const CUSTOM_SURGICAL_INTERVENTIONS_STORAGE_KEY =
   'journal-bord:custom-surgical-interventions:v1';
 const CUSTOM_SENIORS_STORAGE_KEY = 'journal-bord:custom-seniors:v2';
+const ADMIN_TROPHIES_STORAGE_KEY = 'journal-bord:admin-trophies:v1';
 const SENIOR_LAST_LOGIN_STORAGE_KEY = 'journal-bord:senior-last-logins:v1';
+const SENIOR_MANAGED_INTERNALS_STORAGE_KEY =
+  'journal-bord:senior-managed-internals:v1';
 const ACCOUNT_RESET_CUTOFF = Date.parse('2026-06-26T00:00:00.000Z');
 const REMOVED_DEMO_PROFILE_IDS = new Set([
   'int-1',
@@ -181,6 +228,14 @@ const REMOVED_DEMO_LOGIN_IDS = new Set([
   'jpoquet',
 ]);
 const REMOVED_CUSTOM_SENIOR_NAMES = new Set(['ylan camby', 'dr vigoureux']);
+
+type PasswordChangeChallengeState = {
+  currentPassword: string;
+  loginId: string;
+  role: 'internal' | 'senior';
+  userId: string;
+  userLabel: string;
+};
 
 function isCreatedAfterAccountReset(createdAt: string | undefined) {
   if (!createdAt) {
@@ -197,6 +252,7 @@ function hydrateInternalProfile(profile: InternalProfile) {
     ...profile,
     avatarImageSrc: profile.avatarImageSrc ?? null,
     lastLoginAt: profile.lastLoginAt ?? null,
+    mustChangePassword: profile.mustChangePassword ?? profile.lastLoginAt == null,
     achievementBadges: profile.achievementBadges ?? [],
     badgeMetrics: {
       primarySalpingectomyCount:
@@ -240,12 +296,9 @@ function hydrateInternalProfiles(profiles: InternalProfile[]) {
 }
 
 function hydrateCustomSeniors(customSeniors: Senior[]) {
-  const seededSeniorIds = new Set(getSelectableSeniors().map((senior) => senior.id));
-
   return customSeniors
     .filter(
       (senior) =>
-        !seededSeniorIds.has(senior.id) &&
         !REMOVED_CUSTOM_SENIOR_NAMES.has(
           normalizeCredentialValue(
             `${senior.firstName ?? ''} ${senior.lastName ?? ''}`
@@ -260,9 +313,13 @@ function hydrateCustomSeniors(customSeniors: Senior[]) {
       firstName: senior.firstName.trim(),
       lastName: senior.lastName.trim(),
       loginId: senior.loginId?.trim(),
+      mustChangePassword: senior.mustChangePassword ?? true,
       password: senior.password?.trim(),
       createdAt: senior.createdAt ?? new Date().toISOString(),
       isCustom: true,
+      managedInternalIds: Array.isArray(senior.managedInternalIds)
+        ? senior.managedInternalIds.filter((id) => typeof id === 'string')
+        : [],
     }));
 }
 
@@ -305,6 +362,39 @@ function saveSeniorLastLogin(seniorId: string, lastLoginAt: string) {
     );
   } catch {
     // Ignore storage failures and keep authentication flow uninterrupted.
+  }
+}
+
+function loadSeniorManagedInternalsMap() {
+  if (typeof window === 'undefined') {
+    return {} as Record<string, string[]>;
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(
+      SENIOR_MANAGED_INTERNALS_STORAGE_KEY
+    );
+
+    if (!rawValue) {
+      return {} as Record<string, string[]>;
+    }
+
+    const parsedValue = JSON.parse(rawValue);
+
+    if (!parsedValue || typeof parsedValue !== 'object') {
+      return {} as Record<string, string[]>;
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsedValue).map(([seniorId, internalIds]) => [
+        seniorId,
+        Array.isArray(internalIds)
+          ? internalIds.filter((id): id is string => typeof id === 'string')
+          : [],
+      ])
+    );
+  } catch {
+    return {} as Record<string, string[]>;
   }
 }
 
@@ -402,6 +492,15 @@ function hydrateSurgicalInterventionDefinitions(
   );
 }
 
+function hydrateAdminTrophies(trophies: AdminTrophyDefinition[]) {
+  return trophies.map((trophy) => ensureTrophyDefinitionShape(trophy));
+}
+
+function upsertSeniorRecord(currentSeniors: Senior[], senior: Senior) {
+  const nextSeniors = currentSeniors.filter((item) => item.id !== senior.id);
+  return [senior, ...nextSeniors];
+}
+
 const DEFAULT_CUSTOM_INTERVENTION_STEP_LABELS = [
   'Installation de la patiente',
   'Préparation du matériel et vérification de l’installation',
@@ -486,7 +585,7 @@ function createInitialDraft(internalId: string | null): InterventionDraft {
     date: getTodayIsoDate(),
     internalId,
     seniorId: null,
-    procedure: 'salpingectomie',
+    procedure: null,
     indication: null,
     indicationComment: '',
     customIndication: null,
@@ -574,11 +673,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
       loadStoredArray<Senior>(CUSTOM_SENIORS_STORAGE_KEY, [])
     )
   );
+  const [adminTrophies, setAdminTrophies] = useState<AdminTrophyDefinition[]>(() =>
+    hydrateAdminTrophies(
+      loadStoredArray<AdminTrophyDefinition>(ADMIN_TROPHIES_STORAGE_KEY, [])
+    )
+  );
+  const [adminTrophyStorageWarning, setAdminTrophyStorageWarning] = useState<
+    string | null
+  >(null);
+  const [passwordChangeChallengeState, setPasswordChangeChallengeState] =
+    useState<PasswordChangeChallengeState | null>(null);
+  const [seniorManagedInternalsMap, setSeniorManagedInternalsMap] = useState<
+    Record<string, string[]>
+  >(loadSeniorManagedInternalsMap);
   const [canSavePersistentState, setCanSavePersistentState] = useState(false);
   const selectedInternal =
     internalProfiles.find((profile) => profile.id === selectedInternalId) ?? null;
-  const selectableSeniors = getSelectableSeniors(customSeniors);
-  const selectedSenior = getSeniorById(selectedSeniorId, customSeniors);
+  const selectableSeniors = getSelectableSeniors(customSeniors).map((senior) => ({
+    ...senior,
+    managedInternalIds:
+      seniorManagedInternalsMap[senior.id] ?? senior.managedInternalIds ?? [],
+  }));
+  const selectedSenior =
+    selectableSeniors.find((senior) => senior.id === selectedSeniorId) ?? null;
   const surgicalProcedureOptions = getProcedureOptions(customSurgicalInterventions);
 
   const formMissingFields = getMissingFormFields(
@@ -685,6 +802,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
   }, [customSeniors]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        ADMIN_TROPHIES_STORAGE_KEY,
+        JSON.stringify(adminTrophies)
+      );
+      setAdminTrophyStorageWarning(null);
+    } catch (error) {
+      console.warn('Admin trophies storage failed', error);
+      setAdminTrophyStorageWarning(
+        'Le trophée a bien été enregistré dans la session en cours, mais ses données sont trop volumineuses pour être sauvegardées localement. Réduis la taille des images si tu veux conserver cette configuration après rechargement.'
+      );
+    }
+
+    if (canSavePersistentState) {
+      void savePersistentArray('admin_trophies', adminTrophies);
+    }
+  }, [adminTrophies, canSavePersistentState]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(
+      SENIOR_MANAGED_INTERNALS_STORAGE_KEY,
+      JSON.stringify(seniorManagedInternalsMap)
+    );
+  }, [seniorManagedInternalsMap]);
+
   const loadPersistentState = async () => {
     if (!isPersistentStorageConfigured()) {
       return null;
@@ -696,6 +847,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       persistentSavedObstetricGestures,
       persistentCustomSurgicalInterventions,
       persistentCustomSeniors,
+      persistentAdminTrophies,
     ] = await Promise.all([
       loadPersistentArray<InternalProfile>('internal_profiles'),
       loadPersistentArray<SavedIntervention>('saved_interventions'),
@@ -704,6 +856,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         'custom_surgical_interventions'
       ),
       loadPersistentArray<Senior>('custom_seniors'),
+      loadPersistentArray<AdminTrophyDefinition>('admin_trophies'),
     ]);
 
     if (
@@ -711,7 +864,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       !persistentSavedInterventions &&
       !persistentSavedObstetricGestures &&
       !persistentCustomSurgicalInterventions &&
-      !persistentCustomSeniors
+      !persistentCustomSeniors &&
+      !persistentAdminTrophies
     ) {
       return null;
     }
@@ -733,6 +887,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const nextCustomSeniors = persistentCustomSeniors
       ? hydrateCustomSeniors(persistentCustomSeniors)
       : customSeniors;
+    const nextAdminTrophies = persistentAdminTrophies
+      ? hydrateAdminTrophies(persistentAdminTrophies)
+      : adminTrophies;
 
     if (persistentInternalProfiles) {
       setInternalProfiles(nextInternalProfiles);
@@ -754,6 +911,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setCustomSeniors(nextCustomSeniors);
     }
 
+    if (persistentAdminTrophies) {
+      setAdminTrophies(nextAdminTrophies);
+    }
+
     setCanSavePersistentState(true);
     return {
       internalProfiles: nextInternalProfiles,
@@ -761,12 +922,51 @@ export function AppProvider({ children }: { children: ReactNode }) {
       savedObstetricGestures: nextSavedObstetricGestures,
       customSurgicalInterventions: nextCustomSurgicalInterventions,
       customSeniors: nextCustomSeniors,
+      adminTrophies: nextAdminTrophies,
     };
   };
 
   useEffect(() => {
     void loadPersistentState();
   }, []);
+
+  const authenticateInternal = (profile: InternalProfile, lastLoginAt: string) => {
+    setInternalProfiles((current) =>
+      current.map((existingProfile) =>
+        existingProfile.id === profile.id
+          ? {
+              ...existingProfile,
+              lastLoginAt,
+              mustChangePassword: false,
+            }
+          : existingProfile
+      )
+    );
+    setPasswordChangeChallengeState(null);
+    setSessionRole('internal');
+    setSelectedInternalId(profile.id);
+    setSelectedSeniorId(null);
+    setDraft(createInitialDraft(profile.id));
+    setObstetricDraft(createInitialObstetricDraft(profile.id));
+    setLastSavedIntervention(null);
+    setSummaryMode('review');
+    setPreBlockContext('surgery');
+    setScreen('welcome');
+  };
+
+  const authenticateSenior = (senior: Senior, lastLoginAt: string) => {
+    saveSeniorLastLogin(senior.id, lastLoginAt);
+    setPasswordChangeChallengeState(null);
+    setSessionRole('senior');
+    setSelectedInternalId(null);
+    setSelectedSeniorId(senior.id);
+    setDraft(createInitialDraft(null));
+    setObstetricDraft(createInitialObstetricDraft(null));
+    setLastSavedIntervention(null);
+    setSummaryMode('review');
+    setPreBlockContext('surgery');
+    setScreen('admin');
+  };
 
   const login = async (loginId: string, password: string) => {
     setPersistentStorageCredentials(loginId, password);
@@ -779,6 +979,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       persistentState?.customSeniors ?? customSeniors;
 
     if (isAdminCredentials(loginId, password)) {
+      setPasswordChangeChallengeState(null);
       setSessionRole('admin');
       setSelectedInternalId(null);
       setSelectedSeniorId(null);
@@ -789,24 +990,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setPreBlockContext('surgery');
       setScreen('admin');
 
-      return true;
+      return { status: 'authenticated' } as const;
     }
 
     const senior = getSeniorByCredentials(loginId, password, seniorsForLogin);
 
     if (senior) {
-      saveSeniorLastLogin(senior.id, new Date().toISOString());
-      setSessionRole('senior');
-      setSelectedInternalId(null);
-      setSelectedSeniorId(senior.id);
-      setDraft(createInitialDraft(null));
-      setObstetricDraft(createInitialObstetricDraft(null));
-      setLastSavedIntervention(null);
-      setSummaryMode('review');
-      setPreBlockContext('surgery');
-      setScreen('admin');
+      if (senior.mustChangePassword) {
+        setPasswordChangeChallengeState({
+          currentPassword: senior.password ?? '',
+          loginId: senior.loginId ?? loginId.trim(),
+          role: 'senior',
+          userId: senior.id,
+          userLabel: `${senior.firstName} ${senior.lastName}`.trim(),
+        });
+        setSessionRole(null);
+        setSelectedInternalId(null);
+        setSelectedSeniorId(null);
+        setScreen('welcome');
+        return { status: 'password-change-required' } as const;
+      }
 
-      return true;
+      authenticateSenior(senior, new Date().toISOString());
+      return { status: 'authenticated' } as const;
     }
 
     const profile = getInternalByCredentials(
@@ -816,39 +1022,142 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
 
     if (!profile) {
+      setPasswordChangeChallengeState(null);
       clearPersistentStorageCredentials();
       setCanSavePersistentState(false);
-      return false;
+      return {
+        message: 'Identifiant ou mot de passe incorrect.',
+        status: 'error',
+      } as const;
+    }
+
+    if (profile.mustChangePassword) {
+      setPasswordChangeChallengeState({
+        currentPassword: profile.password,
+        loginId: profile.loginId,
+        role: 'internal',
+        userId: profile.id,
+        userLabel: `${profile.firstName} ${profile.lastName}`.trim(),
+      });
+      setSessionRole(null);
+      setSelectedInternalId(null);
+      setSelectedSeniorId(null);
+      setScreen('welcome');
+      return { status: 'password-change-required' } as const;
+    }
+
+    authenticateInternal(profile, new Date().toISOString());
+    return { status: 'authenticated' } as const;
+  };
+
+  const cancelPasswordChangeChallenge = () => {
+    setPasswordChangeChallengeState(null);
+    clearPersistentStorageCredentials();
+    setCanSavePersistentState(false);
+  };
+
+  const completePasswordChangeChallenge = (
+    nextPassword: string,
+    confirmPassword: string
+  ) => {
+    const challenge = passwordChangeChallengeState;
+
+    if (!challenge) {
+      return {
+        message: 'Aucun changement de mot de passe n’est en attente.',
+        success: false,
+      };
+    }
+
+    const sanitizedPassword = nextPassword.trim();
+    const sanitizedConfirmation = confirmPassword.trim();
+
+    if (sanitizedPassword.length < 4) {
+      return {
+        message: 'Le nouveau mot de passe doit contenir au moins 4 caractères.',
+        success: false,
+      };
+    }
+
+    if (sanitizedPassword !== sanitizedConfirmation) {
+      return {
+        message: 'La confirmation du nouveau mot de passe ne correspond pas.',
+        success: false,
+      };
+    }
+
+    if (sanitizedPassword === challenge.currentPassword.trim()) {
+      return {
+        message: 'Choisis un mot de passe différent du mot de passe temporaire.',
+        success: false,
+      };
     }
 
     const lastLoginAt = new Date().toISOString();
 
-    setInternalProfiles((current) =>
-      current.map((existingProfile) =>
-        existingProfile.id === profile.id
-          ? {
-              ...existingProfile,
-              lastLoginAt,
-            }
-          : existingProfile
-      )
-    );
-    setSessionRole('internal');
-    setSelectedInternalId(profile.id);
-    setSelectedSeniorId(null);
-    setDraft(createInitialDraft(profile.id));
-    setObstetricDraft(createInitialObstetricDraft(profile.id));
-    setLastSavedIntervention(null);
-    setSummaryMode('review');
-    setPreBlockContext('surgery');
-    setScreen('welcome');
+    if (challenge.role === 'internal') {
+      const profile =
+        internalProfiles.find((item) => item.id === challenge.userId) ?? null;
 
-    return true;
+      if (!profile) {
+        return {
+          message: 'Ce profil interne est introuvable.',
+          success: false,
+        };
+      }
+
+      const updatedProfile: InternalProfile = {
+        ...profile,
+        lastLoginAt,
+        mustChangePassword: false,
+        password: sanitizedPassword,
+      };
+
+      setInternalProfiles((current) =>
+        current.map((item) => (item.id === updatedProfile.id ? updatedProfile : item))
+      );
+      setPersistentStorageCredentials(updatedProfile.loginId, sanitizedPassword);
+      setCanSavePersistentState(false);
+      authenticateInternal(updatedProfile, lastLoginAt);
+
+      return {
+        message: 'Mot de passe mis à jour. Connexion en cours...',
+        success: true,
+      };
+    }
+
+    const senior =
+      selectableSeniors.find((item) => item.id === challenge.userId) ?? null;
+
+    if (!senior || !senior.loginId) {
+      return {
+        message: 'Ce compte senior est introuvable.',
+        success: false,
+      };
+    }
+
+    const updatedSenior: Senior = {
+      ...senior,
+      loginId: senior.loginId,
+      mustChangePassword: false,
+      password: sanitizedPassword,
+    };
+
+    setCustomSeniors((current) => upsertSeniorRecord(current, updatedSenior));
+    setPersistentStorageCredentials(updatedSenior.loginId, sanitizedPassword);
+    setCanSavePersistentState(false);
+    authenticateSenior(updatedSenior, lastLoginAt);
+
+    return {
+      message: 'Mot de passe mis à jour. Connexion en cours...',
+      success: true,
+    };
   };
 
   const logout = () => {
     clearPersistentStorageCredentials();
     setCanSavePersistentState(false);
+    setPasswordChangeChallengeState(null);
     setSessionRole(null);
     setSelectedInternalId(null);
     setSelectedSeniorId(null);
@@ -903,12 +1212,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setHistoryNavigationView(null);
   };
 
-  const goToBadges = () => {
+  const goToTrophies = () => {
     if (!selectedInternal) {
       return;
     }
 
-    setScreen('badges');
+    setScreen('trophies');
   };
 
   const goToProfile = () => {
@@ -1113,6 +1422,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       firstName: sanitizedInput.firstName,
       lastName: sanitizedInput.lastName,
       loginId: sanitizedInput.loginId,
+      mustChangePassword: true,
       password: sanitizedInput.password,
       promotion: sanitizedInput.promotion,
       semester: sanitizedInput.semester,
@@ -1138,6 +1448,80 @@ export function AppProvider({ children }: { children: ReactNode }) {
       success: true,
       message: 'Le profil interne a bien été créé.',
       profile,
+    };
+  };
+
+  const updateInternalProfile = (
+    profileId: string,
+    input: CreateInternalProfileInput
+  ): CreateInternalProfileResult => {
+    const existingProfile =
+      internalProfiles.find((profile) => profile.id === profileId) ?? null;
+
+    if (!existingProfile) {
+      return {
+        success: false,
+        message: 'Ce profil interne est introuvable.',
+      };
+    }
+
+    const sanitizedInput = {
+      firstName: input.firstName.trim(),
+      lastName: input.lastName.trim(),
+      loginId: input.loginId.trim(),
+      password: input.password.trim(),
+      promotion: input.promotion.trim(),
+      semester: input.semester.trim().toUpperCase(),
+      currentRotation: input.currentRotation.trim(),
+    };
+
+    if (Object.values(sanitizedInput).some((value) => value.length === 0)) {
+      return {
+        success: false,
+        message: 'Tous les champs du profil doivent être renseignés.',
+      };
+    }
+
+    const normalizedLoginId = normalizeCredentialValue(sanitizedInput.loginId);
+    const seniorLoginExists = getSelectableSeniors(customSeniors).some(
+      (senior) =>
+        senior.loginId &&
+        normalizeCredentialValue(senior.loginId) === normalizedLoginId
+    );
+
+    if (
+      seniorLoginExists ||
+      internalProfiles.some(
+        (profile) =>
+          profile.id !== profileId &&
+          normalizeCredentialValue(profile.loginId) === normalizedLoginId
+      )
+    ) {
+      return {
+        success: false,
+        message: 'Cet identifiant existe déjà. Choisis-en un autre.',
+      };
+    }
+
+    const updatedProfile: InternalProfile = {
+      ...existingProfile,
+      ...sanitizedInput,
+      mustChangePassword:
+        existingProfile.password !== sanitizedInput.password
+          ? true
+          : existingProfile.mustChangePassword ?? false,
+    };
+
+    setInternalProfiles((current) =>
+      current.map((profile) =>
+        profile.id === profileId ? updatedProfile : profile
+      )
+    );
+
+    return {
+      success: true,
+      message: 'Le profil interne a bien été mis à jour.',
+      profile: updatedProfile,
     };
   };
 
@@ -1191,6 +1575,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const updatedProfile: InternalProfile = {
       ...existingProfile,
       loginId: sanitizedInput.loginId,
+      mustChangePassword:
+        input.mustChangePassword ?? existingProfile.mustChangePassword ?? false,
       password: sanitizedInput.password,
     };
 
@@ -1316,6 +1702,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       firstName: sanitizedInput.firstName,
       lastName: sanitizedInput.lastName,
       loginId: sanitizedInput.loginId,
+      mustChangePassword: true,
       password: sanitizedInput.password,
       createdAt: new Date().toISOString(),
       isCustom: true,
@@ -1330,12 +1717,79 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   };
 
+  const updateSeniorProfile = (
+    seniorId: string,
+    input: CreateSeniorProfileInput
+  ): CreateSeniorProfileResult => {
+    const existingSenior =
+      selectableSeniors.find((senior) => senior.id === seniorId) ?? null;
+
+    if (!existingSenior) {
+      return {
+        success: false,
+        message: 'Ce compte senior est introuvable.',
+      };
+    }
+
+    const sanitizedInput = {
+      firstName: input.firstName.trim(),
+      lastName: input.lastName.trim(),
+      loginId: input.loginId.trim(),
+      password: input.password.trim(),
+    };
+
+    if (Object.values(sanitizedInput).some((value) => value.length === 0)) {
+      return {
+        success: false,
+        message: 'Tous les champs du compte senior doivent être renseignés.',
+      };
+    }
+
+    const normalizedLoginId = normalizeCredentialValue(sanitizedInput.loginId);
+    const loginAlreadyExists =
+      normalizedLoginId === 'admin' ||
+      internalProfiles.some(
+        (profile) =>
+          normalizeCredentialValue(profile.loginId) === normalizedLoginId
+      ) ||
+      getSelectableSeniors(customSeniors).some(
+        (senior) =>
+          senior.id !== seniorId &&
+          senior.loginId &&
+          normalizeCredentialValue(senior.loginId) === normalizedLoginId
+      );
+
+    if (loginAlreadyExists) {
+      return {
+        success: false,
+        message: 'Cet identifiant existe déjà. Choisis-en un autre.',
+      };
+    }
+
+    const updatedSenior: Senior = {
+      ...existingSenior,
+      ...sanitizedInput,
+      mustChangePassword:
+        existingSenior.password !== sanitizedInput.password
+          ? true
+          : existingSenior.mustChangePassword ?? false,
+    };
+
+    setCustomSeniors((current) => upsertSeniorRecord(current, updatedSenior));
+
+    return {
+      success: true,
+      message: 'Le compte senior a bien été mis à jour.',
+      senior: updatedSenior,
+    };
+  };
+
   const updateSeniorCredentials = (
     seniorId: string,
     input: UpdateSeniorCredentialsInput
   ): UpdateSeniorCredentialsResult => {
     const existingSenior =
-      customSeniors.find((senior) => senior.id === seniorId) ?? null;
+      selectableSeniors.find((senior) => senior.id === seniorId) ?? null;
 
     if (!existingSenior) {
       return {
@@ -1380,14 +1834,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const updatedSenior: Senior = {
       ...existingSenior,
       loginId: sanitizedInput.loginId,
+      mustChangePassword:
+        input.mustChangePassword ?? existingSenior.mustChangePassword ?? false,
       password: sanitizedInput.password,
     };
 
-    setCustomSeniors((current) =>
-      current.map((senior) =>
-        senior.id === seniorId ? updatedSenior : senior
-      )
-    );
+    setCustomSeniors((current) => upsertSeniorRecord(current, updatedSenior));
 
     return {
       success: true,
@@ -1396,10 +1848,34 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   };
 
+  const updateSeniorManagedInternals = (seniorId: string, internalIds: string[]) => {
+    const sanitizedInternalIds = Array.from(
+      new Set(
+        internalIds.filter((internalId) =>
+          internalProfiles.some((profile) => profile.id === internalId)
+        )
+      )
+    );
+
+    setSeniorManagedInternalsMap((current) => ({
+      ...current,
+      [seniorId]: sanitizedInternalIds,
+    }));
+  };
+
   const deleteSeniorProfile = (seniorId: string) => {
     setCustomSeniors((current) =>
       current.filter((senior) => senior.id !== seniorId)
     );
+    setSeniorManagedInternalsMap((current) => {
+      if (!(seniorId in current)) {
+        return current;
+      }
+
+      const nextMap = { ...current };
+      delete nextMap[seniorId];
+      return nextMap;
+    });
     setSelectedSeniorId((current) => (current === seniorId ? null : current));
   };
 
@@ -1824,6 +2300,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         notebookDocuments,
         customSurgicalInterventions,
         customSeniors,
+        adminTrophies,
+        adminTrophyStorageWarning,
+        passwordChangeChallenge: passwordChangeChallengeState
+          ? {
+              loginId: passwordChangeChallengeState.loginId,
+              role: passwordChangeChallengeState.role,
+              userLabel: passwordChangeChallengeState.userLabel,
+            }
+          : null,
         selectableSeniors,
         surgicalProcedureOptions,
         formMissingFields,
@@ -1832,11 +2317,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         historyNavigationView,
         login,
         logout,
+        cancelPasswordChangeChallenge,
+        completePasswordChangeChallenge,
         goToSurgeryPortal,
         goToObstetricJournal,
         goToSurgeryHistory,
         clearHistoryNavigationDate,
-        goToBadges,
+        goToTrophies,
         goToProfile,
         goToNotebook,
         goToPreBlock,
@@ -1850,16 +2337,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
         saveIntervention,
         saveObstetricGesture,
         createInternalProfile,
+        updateInternalProfile,
         updateInternalCredentials,
         updateInternalProfileSettings,
         createSeniorProfile,
+        updateSeniorProfile,
         updateSeniorCredentials,
+        updateSeniorManagedInternals,
         deleteSeniorProfile,
         createSurgicalIntervention,
         updateSurgicalIntervention,
         deleteCustomSurgicalIntervention,
         deleteInternalProfile,
         deleteSavedInterventions,
+        setAdminTrophies,
         updateNotebookDocument,
         clearNotebookDocument,
         updateSavedInterventionAutonomyScore,

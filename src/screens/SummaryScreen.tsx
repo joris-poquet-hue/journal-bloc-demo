@@ -1,6 +1,5 @@
-import {
-  CheckCircle2,
-} from 'lucide-react';
+import { CheckCircle2 } from 'lucide-react';
+import { useMemo } from 'react';
 
 import { InterventionFlowCard } from '../components/InterventionFlowCard';
 import { InterventionFlowLayout } from '../components/InterventionFlowLayout';
@@ -12,13 +11,18 @@ import {
   formatComplexityRating,
   formatSeniorDisplayName,
   getChoiceLabel,
+  getChecklistStepsForIntervention,
   indicationOptions,
+  lateralityOptions,
+  roleOptions,
 } from '../data/mockData';
 import { formatIsoDate } from '../utils/date';
 
 export function SummaryScreen() {
   const {
     selectedInternal,
+    checklistProgress,
+    customSurgicalInterventions,
     draft,
     selectableSeniors,
     surgicalProcedureOptions,
@@ -46,6 +50,23 @@ export function SummaryScreen() {
 
   const senior = selectableSeniors.find((item) => item.id === draft.seniorId) ?? null;
   const procedureLabel = getChoiceLabel(surgicalProcedureOptions, draft.procedure);
+  const checklistSteps = useMemo(
+    () =>
+      getChecklistStepsForIntervention(
+        draft.procedure,
+        draft.indication,
+        draft.approach,
+        draft.entryTechnique,
+        customSurgicalInterventions
+      ),
+    [
+      customSurgicalInterventions,
+      draft.approach,
+      draft.entryTechnique,
+      draft.indication,
+      draft.procedure,
+    ]
+  );
   const indicationLabel =
     draft.procedure === 'salpingectomie'
       ? draft.indication === 'autre' && draft.indicationComment.trim()
@@ -54,10 +75,16 @@ export function SummaryScreen() {
       : draft.customIndication?.trim() ?? 'Non renseigné';
   const approachLabel = getChoiceLabel(approachOptions, draft.approach);
   const entryTechniqueLabel = getChoiceLabel(entryTechniqueOptions, draft.entryTechnique);
+  const roleLabel = getChoiceLabel(roleOptions, draft.role, 'Non renseigné');
+  const lateralityLabel = draft.laterality
+    ? getChoiceLabel(lateralityOptions, draft.laterality, 'Non renseignée')
+    : 'Non applicable';
   const approachSummary =
     draft.approach && draft.entryTechnique
       ? `${approachLabel} – ${entryTechniqueLabel}`
       : approachLabel;
+  const isReadyToValidate = checklistProgress.isComplete;
+
   return (
     <InterventionFlowLayout
       onBack={backToChecklist}
@@ -78,6 +105,8 @@ export function SummaryScreen() {
             value={indicationLabel}
           />
           <SummaryInfoRow label="Voie d’abord" value={approachSummary} />
+          <SummaryInfoRow label="Rôle global" value={roleLabel} />
+          <SummaryInfoRow label="Latéralité" value={lateralityLabel} />
           <SummaryInfoRow
             label="Difficulté ressentie"
             value={formatComplexityRating(draft.complexity)}
@@ -91,8 +120,7 @@ export function SummaryScreen() {
             <CheckCircle2 strokeWidth={2.4} />
           </span>
           <div>
-            <strong>Tout semble complet !</strong>
-            <p>Tu peux enregistrer ton intervention.</p>
+            <strong>{isReadyToValidate ? 'Prêt à valider' : 'Récapitulatif incomplet'}</strong>
           </div>
         </div>
       </InterventionFlowCard>

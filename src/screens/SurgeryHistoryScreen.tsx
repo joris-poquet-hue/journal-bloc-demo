@@ -7,6 +7,7 @@ import {
   Clock3,
   Info,
   LockKeyhole,
+  Star,
   Trophy,
 } from 'lucide-react';
 import { CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -16,6 +17,7 @@ import {
   getInterventionApproachLabel,
 } from '../components/ApproachIcon';
 import { PrimaryButton } from '../components/PrimaryButton';
+import { ProgressBadgeCard } from '../components/ProgressBadgeCard';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionCard } from '../components/SectionCard';
 import {
@@ -28,6 +30,7 @@ import {
   allChecklistSteps,
   formatDisplayName,
   formatSeniorDisplayName,
+  getProgressBadgesForInternal,
   getChecklistStepsForIntervention,
   getChoiceLabel,
   hydrateAdminInterventionEvaluations,
@@ -88,6 +91,26 @@ function getProgressStepTone(score: number) {
   return 'success';
 }
 
+function getTierRank(tier: 'bronze' | 'silver' | 'gold' | 'diamond') {
+  if (tier === 'diamond') {
+    return 4;
+  }
+
+  if (tier === 'gold') {
+    return 3;
+  }
+
+  if (tier === 'silver') {
+    return 2;
+  }
+
+  return 1;
+}
+
+function getProgressRatio(target: number, current: number) {
+  return target > 0 ? current / target : 0;
+}
+
 const ADMIN_EVALUATIONS_STORAGE_KEY =
   'journal-bord:admin-intervention-evaluations:v1';
 const WEEKDAY_LABELS = ['LUN', 'MAR', 'MER', 'JEU', 'VEN', 'SAM', 'DIM'];
@@ -96,6 +119,64 @@ const difficultyLabels = {
   '2': 'Standard',
   '3': 'Difficile',
 } as const;
+const performanceLabels = {
+  '1': 'Interne non préparé',
+  '2': 'Connaissance insuffisante',
+  '3': 'Performance intermédiaire',
+  '4': 'Compatible autonomie supervisée',
+  '5': 'Performance exceptionnelle',
+} as const;
+
+function renderHistoryDifficultyBadge(
+  difficulty: AdminInterventionEvaluation['categoryDifficulty']
+) {
+  if (!difficulty) {
+    return <strong className="history-info-badge">Non renseignée</strong>;
+  }
+
+  const activeStars = Number(difficulty);
+
+  return (
+    <strong
+      className={`history-difficulty-badge history-difficulty-badge--level-${difficulty}`}
+    >
+      <span className="history-difficulty-badge__label">
+        {difficultyLabels[difficulty]}
+      </span>
+      <span className="history-difficulty-badge__stars" aria-hidden="true">
+        {Array.from({ length: 3 }, (_, index) => (
+          <Star
+            className={
+              index < activeStars
+                ? 'history-difficulty-badge__star history-difficulty-badge__star--active'
+                : 'history-difficulty-badge__star'
+            }
+            key={index}
+          />
+        ))}
+      </span>
+    </strong>
+  );
+}
+
+function renderHistoryPerformanceBadge(
+  performance: AdminInterventionEvaluation['globalPerformance']
+) {
+  if (!performance) {
+    return <strong className="history-info-badge">Non renseignée</strong>;
+  }
+
+  return (
+    <strong
+      className={`history-info-badge history-info-badge--performance history-info-badge--level-${performance}`}
+    >
+      <span className="history-info-badge__chevrons" aria-hidden="true">
+        {'>'.repeat(Number(performance))}
+      </span>
+      <span>{performanceLabels[performance]}</span>
+    </strong>
+  );
+}
 
 function loadStoredAdminEvaluations() {
   if (typeof window === 'undefined') {
@@ -405,6 +486,14 @@ function getChecklistLevelScore(level: ChecklistLevel | null | undefined) {
   return (Number(level) / 4) * 100;
 }
 
+function getChecklistLevelTone(level: ChecklistLevel) {
+  if (level === 'NA') {
+    return 'na';
+  }
+
+  return `level-${level}`;
+}
+
 function buildStepRows(
   group: ProgressInterventionGroup | null,
   customSurgicalInterventions: SurgicalInterventionDefinition[]
@@ -646,6 +735,8 @@ export function SurgeryHistoryScreen() {
   const selectedDetailEvaluation = selectedDetail
     ? adminEvaluations[selectedDetail.intervention.id]
     : undefined;
+  const selectedDetailSeniorComment =
+    selectedDetailEvaluation?.seniorComment.trim() ?? '';
   const selectedDetailSenior = selectedDetail
     ? selectableSeniors.find(
         (senior) => senior.id === selectedDetail.intervention.seniorId
@@ -666,6 +757,51 @@ export function SurgeryHistoryScreen() {
   const progressGroups = useMemo(
     () => buildProgressGroups(scoredInterventions, surgicalProcedureOptions),
     [scoredInterventions, surgicalProcedureOptions]
+  );
+  const progressBadges = useMemo(
+    () =>
+      selectedInternal
+        ? getProgressBadgesForInternal(selectedInternal, savedInterventions)
+        : [],
+    [savedInterventions, selectedInternal]
+  );
+  const earnedProgressBadges = useMemo(
+    () =>
+      progressBadges
+        .filter((badge) => badge.isEarned)
+        .sort((left, right) => {
+          const tierDelta = getTierRank(right.tier) - getTierRank(left.tier);
+
+          if (tierDelta !== 0) {
+            return tierDelta;
+          }
+
+          return (right.awardedAt ?? '').localeCompare(left.awardedAt ?? '');
+        }),
+    [progressBadges]
+  );
+  const pendingProgressBadges = useMemo(
+    () =>
+      progressBadges
+        .filter(
+          (badge) =>
+            !badge.isEarned &&
+            !badge.isLocked &&
+            !badge.isBinary &&
+            badge.current > 0
+        )
+        .sort((left, right) => {
+          const progressDelta =
+            getProgressRatio(right.target, right.current) -
+            getProgressRatio(left.target, left.current);
+
+          if (progressDelta !== 0) {
+            return progressDelta;
+          }
+
+          return getTierRank(right.tier) - getTierRank(left.tier);
+        }),
+    [progressBadges]
   );
   const selectedProgressGroup =
     progressGroups.find((group) => group.key === selectedProgressKey) ??
@@ -839,7 +975,13 @@ export function SurgeryHistoryScreen() {
               return (
                 <div className="history-step-row" key={step.id}>
                   <span>{step.label}</span>
-                  <strong>{step.level === 'NA' ? 'NA' : `${step.level} / 4`}</strong>
+                  <strong
+                    className={`history-step-pill history-step-pill--${getChecklistLevelTone(
+                      step.level
+                    )}`}
+                  >
+                    {step.level}
+                  </strong>
                 </div>
               );
             })}
@@ -850,18 +992,22 @@ export function SurgeryHistoryScreen() {
           <div className="history-senior-evaluation">
             <div className="history-senior-evaluation__row">
               <span>Difficulté de l’intervention</span>
-              <strong className="history-info-badge">
-                {selectedDetailEvaluation?.categoryDifficulty
-                  ? difficultyLabels[selectedDetailEvaluation.categoryDifficulty]
-                  : 'Non renseignée'}
-              </strong>
+              {renderHistoryDifficultyBadge(
+                selectedDetailEvaluation?.categoryDifficulty ?? null
+              )}
             </div>
             <div className="history-senior-evaluation__row">
               <span>Performance globale de l’interne</span>
-              <strong className="history-info-badge">
-                {selectedDetailEvaluation?.globalPerformance ?? 'NA'} / 5
-              </strong>
+              {renderHistoryPerformanceBadge(
+                selectedDetailEvaluation?.globalPerformance ?? null
+              )}
             </div>
+            {selectedDetailSeniorComment ? (
+              <div className="history-senior-evaluation__comment">
+                <span>Commentaire du senior</span>
+                <p>{selectedDetailSeniorComment}</p>
+              </div>
+            ) : null}
           </div>
         </SectionCard>
       </ScreenContainer>
@@ -1099,12 +1245,45 @@ export function SurgeryHistoryScreen() {
               ) : null}
 
               {progressSubTab === 'trophies' ? (
-                <SectionCard className="progress-trophies-card" title="Trophées">
-                  <p className="field-helper">
-                    Aucun trophée n’est encore configuré. Nous les ajouterons dans une
-                    prochaine étape.
-                  </p>
-                </SectionCard>
+                <div className="progress-dashboard__stack">
+                  {earnedProgressBadges.length ? (
+                    <SectionCard
+                      className="progress-trophies-card"
+                      title="Trophées obtenus"
+                    >
+                      <div className="badge-grid">
+                        {earnedProgressBadges.map((badge) => (
+                          <ProgressBadgeCard key={badge.id} badge={badge} />
+                        ))}
+                      </div>
+                    </SectionCard>
+                  ) : null}
+
+                  {pendingProgressBadges.length ? (
+                    <SectionCard
+                      className="progress-trophies-card"
+                      title="En cours de déblocage"
+                    >
+                      <div className="badge-row">
+                        {pendingProgressBadges.map((badge) => (
+                          <ProgressBadgeCard
+                            key={badge.id}
+                            badge={badge}
+                            compact
+                          />
+                        ))}
+                      </div>
+                    </SectionCard>
+                  ) : null}
+
+                  {!earnedProgressBadges.length && !pendingProgressBadges.length ? (
+                    <SectionCard className="progress-trophies-card" title="Trophées">
+                      <p className="field-helper">
+                        Aucun trophée n’est encore débloqué ou en cours pour le moment.
+                      </p>
+                    </SectionCard>
+                  ) : null}
+                </div>
               ) : null}
             </>
           ) : (

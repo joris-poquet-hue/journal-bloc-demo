@@ -111,12 +111,7 @@ export function createEmptySurgicalInterventionDefinition(): SurgicalInterventio
     keyStepIds: [],
     status: 'inactive',
     lateralityMode: 'right_left_bilateral',
-    indicationOptions: [
-      createInterventionIndicationOption('Autre', {
-        isOther: true,
-        isDefault: true,
-      }),
-    ],
+    indicationOptions: [],
     approachConfigs: [],
     isCustom: true,
     createdAt: now,
@@ -306,8 +301,7 @@ export function ensureSurgicalInterventionDefinitionShape(
   definition: SurgicalInterventionDefinition
 ): SurgicalInterventionDefinition {
   const indicationOptions =
-    definition.indicationOptions?.length != null &&
-    definition.indicationOptions.length > 0
+    definition.indicationOptions != null
       ? sortIndicationOptions(
           definition.indicationOptions.map((indicationOption) => ({
             ...createInterventionIndicationOption(indicationOption.label),
@@ -319,7 +313,12 @@ export function ensureSurgicalInterventionDefinitionShape(
   const approachConfigs =
     definition.approachConfigs?.length != null &&
     definition.approachConfigs.length > 0
-      ? allowedApproaches
+      ? [
+          ...new Set([
+            ...definition.approachConfigs.map((config) => config.approach),
+            ...allowedApproaches,
+          ]),
+        ]
           .map((approach) =>
             definition.approachConfigs?.find((config) => config.approach === approach) ??
             createApproachConfig(approach, { active: true })
@@ -327,6 +326,9 @@ export function ensureSurgicalInterventionDefinitionShape(
           .map((config) => ({
             ...createApproachConfig(config.approach),
             ...config,
+            active:
+              config.active ??
+              allowedApproaches.includes(config.approach),
             entryTechniques: (config.entryTechniques ?? []).map((entryTechnique) => ({
               ...createEntryTechniqueOptions([entryTechnique.label])[0],
               ...entryTechnique,
@@ -486,17 +488,6 @@ export function validateSurgicalInterventionForPublish(
 
   if (!normalizedDefinition.name.trim()) {
     errors.push('Impossible de publier cette intervention : le nom est obligatoire.');
-  }
-
-  const activeIndications =
-    normalizedDefinition.indicationOptions?.filter(
-      (indicationOption) => indicationOption.active && indicationOption.label.trim()
-    ) ?? [];
-
-  if (activeIndications.length === 0) {
-    errors.push(
-      'Impossible de publier cette intervention : au moins une indication active est nécessaire.'
-    );
   }
 
   const activeApproachConfigs =

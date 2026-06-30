@@ -68,7 +68,7 @@ export function WelcomeScreen() {
     savedInterventions,
     selectableSeniors,
     surgicalProcedureOptions,
-    goToBadges,
+    goToTrophies,
     goToNotebook,
     goToSurgeryHistory,
   } = useAppContext();
@@ -82,7 +82,7 @@ export function WelcomeScreen() {
   const latestInterventions = savedInterventions
     .filter((intervention) => intervention.internalId === selectedInternal.id)
     .sort((left, right) => right.date.localeCompare(left.date))
-    .slice(0, 3);
+    .slice(0, 5);
   const fullName = formatDisplayName(
     selectedInternal.firstName,
     selectedInternal.lastName
@@ -140,8 +140,8 @@ export function WelcomeScreen() {
         <section className="dashboard-card">
           <header className="dashboard-card__header">
             <h2>Mes derniers trophées</h2>
-            <button className="dashboard-card__link" onClick={goToBadges} type="button">
-              Voir tout
+            <button className="dashboard-card__link" onClick={goToTrophies} type="button">
+              Accéder à la vitrine
               <ChevronRight aria-hidden="true" />
             </button>
           </header>

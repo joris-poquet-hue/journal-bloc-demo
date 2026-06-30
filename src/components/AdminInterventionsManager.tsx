@@ -4,16 +4,13 @@ import {
   Check,
   ChevronDown,
   ChevronLeft,
-  Copy,
-  Eye,
   ListOrdered,
   MoreHorizontal,
-  Pencil,
   Plus,
   Search,
   Trash2,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import {
   approachOptions,
@@ -40,6 +37,7 @@ import {
   surgicalInterventionDefinitionToInput,
   validateSurgicalInterventionForPublish,
 } from '../utils/surgicalInterventions';
+import { useScrollResetOnChange } from '../utils/useScrollResetOnChange';
 import { SectionCard } from './SectionCard';
 
 type InterventionEditorMode = 'create' | 'edit' | 'view' | 'duplicate';
@@ -163,6 +161,7 @@ export function AdminInterventionsManager({
   ) => void;
 }) {
   const [view, setView] = useState<InterventionManagerView>('list');
+  useScrollResetOnChange([view]);
   const [editorMode, setEditorMode] = useState<InterventionEditorMode>('create');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<InterventionListFilter>('all');
@@ -260,10 +259,12 @@ export function AdminInterventionsManager({
     mode: InterventionEditorMode
   ) => {
     const normalizedDraft = ensureSurgicalInterventionDefinitionShape(nextDraft);
+    const firstActiveApproach =
+      normalizedDraft.approachConfigs?.find((config) => config.active)?.approach ?? '';
 
     setDraft(normalizedDraft);
     setEditorMode(mode);
-    setPreviewApproach(normalizedDraft.allowedApproaches[0] ?? '');
+    setPreviewApproach(firstActiveApproach);
     setStepsApproach(null);
     setFeedback(null);
     setValidationErrors([]);
@@ -373,6 +374,24 @@ export function AdminInterventionsManager({
       ],
     }));
   };
+
+  useEffect(() => {
+    if (!draft) {
+      if (previewApproach !== '') {
+        setPreviewApproach('');
+      }
+      return;
+    }
+
+    if (
+      previewApproach &&
+      previewApproachOptions.includes(previewApproach)
+    ) {
+      return;
+    }
+
+    setPreviewApproach(previewApproachOptions[0] ?? '');
+  }, [draft, previewApproach, previewApproachOptions]);
 
   const handleSave = (nextStatus: InterventionStatus) => {
     if (!draft) {
@@ -552,37 +571,6 @@ export function AdminInterventionsManager({
                 </div>
                 <div className="admin-step-management-card__actions">
                   <button
-                    className="mini-button mini-button--secondary"
-                    onClick={() =>
-                      updateDraft((current) =>
-                        updateApproachSteps(current, stepsApproach, (steps) => {
-                          const orderedSteps = [...steps].sort(
-                            (left, right) => left.order - right.order
-                          );
-                          const sourceIndex = orderedSteps.findIndex(
-                            (currentStep) => currentStep.id === step.id
-                          );
-                          const duplicatedStep = createOperativeStep(
-                            `${step.label} (copie)`,
-                            sourceIndex + 2,
-                            step.scored
-                          );
-                          const nextSteps = [...orderedSteps];
-
-                          nextSteps.splice(sourceIndex + 1, 0, duplicatedStep);
-
-                          return nextSteps.map((currentStep, currentIndex) => ({
-                            ...currentStep,
-                            order: currentIndex + 1,
-                          }));
-                        })
-                      )
-                    }
-                    type="button"
-                  >
-                    Dupliquer l’étape
-                  </button>
-                  <button
                     className="mini-button mini-button--danger"
                     disabled={sortedSteps.length === 1}
                     onClick={() =>
@@ -761,7 +749,7 @@ export function AdminInterventionsManager({
 
             <SectionCard className="admin-dashboard-card" title="2. Indications disponibles">
               <div className="admin-list-header-row">
-                <span>Indications (affichées par ordre alphabétique)</span>
+                <span>Indications</span>
                 {!isReadOnly ? (
                   <button
                     className="mini-button mini-button--secondary"
@@ -1127,16 +1115,18 @@ export function AdminInterventionsManager({
                     </div>
                   ) : null}
 
-                  <div className="admin-intervention-preview__block">
-                    <span className="admin-intervention-preview__label">
-                      Indications possibles
-                    </span>
-                    <ul className="admin-preview-bullet-list">
-                      {sortedPreviewIndications.map((indicationOption) => (
-                        <li key={indicationOption.id}>{indicationOption.label}</li>
-                      ))}
-                    </ul>
-                  </div>
+                  {sortedPreviewIndications.length ? (
+                    <div className="admin-intervention-preview__block">
+                      <span className="admin-intervention-preview__label">
+                        Indications possibles
+                      </span>
+                      <ul className="admin-preview-bullet-list">
+                        {sortedPreviewIndications.map((indicationOption) => (
+                          <li key={indicationOption.id}>{indicationOption.label}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
 
                   {draft.lateralityMode !== 'none' ? (
                     <div className="admin-intervention-preview__block">
@@ -1284,7 +1274,6 @@ export function AdminInterventionsManager({
                   onClick={() => handleView(definition)}
                   type="button"
                 >
-                  <Eye aria-hidden="true" />
                   <span>Voir</span>
                 </button>
                 <button
@@ -1292,7 +1281,6 @@ export function AdminInterventionsManager({
                   onClick={() => handleEdit(definition)}
                   type="button"
                 >
-                  <Pencil aria-hidden="true" />
                   <span>Modifier</span>
                 </button>
                 <button
@@ -1300,7 +1288,6 @@ export function AdminInterventionsManager({
                   onClick={() => handleDuplicate(definition)}
                   type="button"
                 >
-                  <Copy aria-hidden="true" />
                   <span>Dupliquer</span>
                 </button>
                 <button
@@ -1352,20 +1339,6 @@ export function AdminInterventionsManager({
           );
         })}
       </div>
-
-      <SectionCard className="admin-dashboard-card admin-info-card">
-        <div className="admin-info-card__body">
-          <div className="admin-info-card__icon">
-            <Archive aria-hidden="true" />
-          </div>
-          <div className="admin-info-card__copy">
-            <strong>
-              La suppression définitive n’est possible que si l’intervention n’a jamais
-              été utilisée dans un journal opératoire.
-            </strong>
-          </div>
-        </div>
-      </SectionCard>
     </>
   );
 }

@@ -1,12 +1,10 @@
 import {
   approachOptions,
   checklistLevelOptions,
-  contextOptions,
   entryTechniqueOptions,
   formatComplexityRating,
   formatDisplayName,
   formatSeniorDisplayName,
-  getFixedContextForIntervention,
   getChecklistStepsForIntervention,
   getChoiceLabel,
   getInternalById,
@@ -41,7 +39,6 @@ type InterventionExportContext = {
   entryTechniqueLabel: string;
   lateralityLabel: string;
   roleLabel: string;
-  contextLabel: string;
   internalDifficultyLabel: string;
   seniorDifficultyLabel: string;
   seniorPerformanceLabel: string;
@@ -278,15 +275,6 @@ function buildInterventionContext(
     ),
     lateralityLabel: getChoiceLabel(lateralityOptions, intervention.laterality, ''),
     roleLabel: getChoiceLabel(roleOptions, intervention.role, ''),
-    contextLabel: getChoiceLabel(
-      contextOptions,
-      intervention.context ??
-        getFixedContextForIntervention(
-          intervention.procedure,
-          intervention.indication
-        ),
-      ''
-    ),
     internalDifficultyLabel: formatComplexityRating(intervention.complexity, ''),
     seniorDifficultyLabel: adminEvaluation?.categoryDifficulty
       ? adminCategoryDifficultyExportLabels[adminEvaluation.categoryDifficulty] ??
@@ -347,7 +335,6 @@ function createSummaryWorksheet(
       'Difficulté ressentie interne',
       'Difficulté senior',
       'Performance senior',
-      'Contexte',
     ],
     rows: interventions.map((intervention) => {
       const context = buildInterventionContext(
@@ -380,7 +367,6 @@ function createSummaryWorksheet(
         context.internalDifficultyLabel,
         context.seniorDifficultyLabel,
         context.seniorPerformanceLabel,
-        context.contextLabel,
       ];
     }),
   };
@@ -584,7 +570,7 @@ export function downloadInterventionsExcel(
   const dateStamp = new Date().toISOString().slice(0, 10);
 
   link.href = url;
-  link.download = `journal-de-bord-interventions-${dateStamp}.xml`;
+  link.download = `journal-de-bord-interventions-${dateStamp}.xls`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

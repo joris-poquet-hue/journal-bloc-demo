@@ -28,8 +28,8 @@ export function BottomNavigation() {
     {
       label: 'Progression',
       isActive: (currentScreen) =>
-        currentScreen === 'surgery-history' || currentScreen === 'badges',
-      onPress: () => goToSurgeryHistory(undefined, 'progress'),
+        currentScreen === 'surgery-history' || currentScreen === 'trophies',
+      onPress: () => goToSurgeryHistory(),
     },
     {
       label: 'Fiches',

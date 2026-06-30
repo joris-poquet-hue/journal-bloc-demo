@@ -101,25 +101,64 @@ function InfoIcon() {
 }
 
 export function LoginScreen() {
-  const { login } = useAppContext();
+  const {
+    cancelPasswordChangeChallenge,
+    completePasswordChangeChallenge,
+    login,
+    passwordChangeChallenge,
+  } = useAppContext();
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
+  const [nextPassword, setNextPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const isPasswordChangeMode = passwordChangeChallenge != null;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoggingIn(true);
 
-    const didAuthenticate = await login(loginId, password);
+    if (isPasswordChangeMode) {
+      const result = completePasswordChangeChallenge(nextPassword, confirmPassword);
+      setIsLoggingIn(false);
+
+      if (result.success) {
+        setErrorMessage('');
+        setPassword('');
+        setNextPassword('');
+        setConfirmPassword('');
+        return;
+      }
+
+      setErrorMessage(result.message);
+      return;
+    }
+
+    const result = await login(loginId, password);
     setIsLoggingIn(false);
 
-    if (didAuthenticate) {
+    if (result.status === 'authenticated') {
       setErrorMessage('');
       return;
     }
 
-    setErrorMessage('Identifiant ou mot de passe incorrect.');
+    if (result.status === 'password-change-required') {
+      setErrorMessage('');
+      setNextPassword('');
+      setConfirmPassword('');
+      return;
+    }
+
+    setErrorMessage(result.message ?? 'Identifiant ou mot de passe incorrect.');
+  };
+
+  const handleCancelPasswordChange = () => {
+    cancelPasswordChangeChallenge();
+    setPassword('');
+    setNextPassword('');
+    setConfirmPassword('');
+    setErrorMessage('');
   };
 
   return (
@@ -149,50 +188,104 @@ export function LoginScreen() {
 
         <section aria-labelledby="login-title" className="login-card">
           <div className="login-card__header">
-            <h1 id="login-title">Connexion</h1>
-            <p>Accédez à votre espace interne, senior ou administrateur.</p>
+            <h1 id="login-title">
+              {isPasswordChangeMode ? 'Créer votre mot de passe' : 'Connexion'}
+            </h1>
+            {!isPasswordChangeMode ? (
+              <p>Accédez à votre espace interne, senior ou administrateur.</p>
+            ) : null}
           </div>
 
           <form className="login-form" onSubmit={handleSubmit}>
-            <label className="login-field">
-              <span className="login-field__label">Identifiant</span>
-              <span className="login-field__control">
-                <UserIcon />
-                <input
-                  autoCapitalize="none"
-                  autoComplete="username"
-                  autoCorrect="off"
-                  className="login-field__input"
-                  onChange={(event) => {
-                    setLoginId(event.target.value);
-                    setErrorMessage('');
-                  }}
-                  placeholder="Identifiant"
-                  type="text"
-                  value={loginId}
-                />
-              </span>
-            </label>
+            {isPasswordChangeMode ? (
+              <>
+                <div className="login-note login-note--panel">
+                  <span>Choisissez maintenant un mot de passe personnel.</span>
+                </div>
 
-            <label className="login-field">
-              <span className="login-field__label">Mot de passe</span>
-              <span className="login-field__control">
-                <LockIcon />
-                <input
-                  autoCapitalize="none"
-                  autoComplete="current-password"
-                  autoCorrect="off"
-                  className="login-field__input"
-                  onChange={(event) => {
-                    setPassword(event.target.value);
-                    setErrorMessage('');
-                  }}
-                  placeholder="Mot de passe"
-                  type="password"
-                  value={password}
-                />
-              </span>
-            </label>
+                <label className="login-field">
+                  <span className="login-field__label">Nouveau mot de passe</span>
+                  <span className="login-field__control">
+                    <LockIcon />
+                    <input
+                      autoCapitalize="none"
+                      autoComplete="new-password"
+                      autoCorrect="off"
+                      className="login-field__input"
+                      onChange={(event) => {
+                        setNextPassword(event.target.value);
+                        setErrorMessage('');
+                      }}
+                      placeholder="Nouveau mot de passe"
+                      type="password"
+                      value={nextPassword}
+                    />
+                  </span>
+                </label>
+
+                <label className="login-field">
+                  <span className="login-field__label">Confirmer le mot de passe</span>
+                  <span className="login-field__control">
+                    <LockIcon />
+                    <input
+                      autoCapitalize="none"
+                      autoComplete="new-password"
+                      autoCorrect="off"
+                      className="login-field__input"
+                      onChange={(event) => {
+                        setConfirmPassword(event.target.value);
+                        setErrorMessage('');
+                      }}
+                      placeholder="Confirmer le mot de passe"
+                      type="password"
+                      value={confirmPassword}
+                    />
+                  </span>
+                </label>
+              </>
+            ) : (
+              <>
+                <label className="login-field">
+                  <span className="login-field__label">Identifiant</span>
+                  <span className="login-field__control">
+                    <UserIcon />
+                    <input
+                      autoCapitalize="none"
+                      autoComplete="username"
+                      autoCorrect="off"
+                      className="login-field__input"
+                      onChange={(event) => {
+                        setLoginId(event.target.value);
+                        setErrorMessage('');
+                      }}
+                      placeholder="Identifiant"
+                      type="text"
+                      value={loginId}
+                    />
+                  </span>
+                </label>
+
+                <label className="login-field">
+                  <span className="login-field__label">Mot de passe</span>
+                  <span className="login-field__control">
+                    <LockIcon />
+                    <input
+                      autoCapitalize="none"
+                      autoComplete="current-password"
+                      autoCorrect="off"
+                      className="login-field__input"
+                      onChange={(event) => {
+                        setPassword(event.target.value);
+                        setErrorMessage('');
+                      }}
+                      placeholder="Mot de passe"
+                      type="password"
+                      value={password}
+                    />
+                  </span>
+                </label>
+              </>
+            )}
 
             {errorMessage ? (
               <p className="auth-error" role="alert">
@@ -205,8 +298,24 @@ export function LoginScreen() {
               disabled={isLoggingIn}
               type="submit"
             >
-              {isLoggingIn ? 'Connexion...' : 'Se connecter'}
+              {isLoggingIn
+                ? isPasswordChangeMode
+                  ? 'Mise à jour...'
+                  : 'Connexion...'
+                : isPasswordChangeMode
+                  ? 'Mettre à jour le mot de passe'
+                  : 'Se connecter'}
             </button>
+
+            {isPasswordChangeMode ? (
+              <button
+                className="login-submit login-submit--secondary"
+                onClick={handleCancelPasswordChange}
+                type="button"
+              >
+                Retour à l'écran de connexion
+              </button>
+            ) : null}
 
             <p className="login-note">
               <ShieldIcon />
