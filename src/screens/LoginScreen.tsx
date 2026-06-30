@@ -120,7 +120,10 @@ export function LoginScreen() {
     setIsLoggingIn(true);
 
     if (isPasswordChangeMode) {
-      const result = completePasswordChangeChallenge(nextPassword, confirmPassword);
+      const result = await completePasswordChangeChallenge(
+        nextPassword,
+        confirmPassword
+      );
       setIsLoggingIn(false);
 
       if (result.success) {
@@ -192,7 +195,7 @@ export function LoginScreen() {
               {isPasswordChangeMode ? 'Créer votre mot de passe' : 'Connexion'}
             </h1>
             {!isPasswordChangeMode ? (
-              <p>Accédez à votre espace interne, senior ou administrateur.</p>
+              <p>Accédez à votre espace interne ou senior.</p>
             ) : null}
           </div>
 

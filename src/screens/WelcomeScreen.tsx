@@ -1,4 +1,4 @@
-import { ChevronRight, NotebookTabs } from 'lucide-react';
+import { ChevronRight, NotebookTabs, Trophy } from 'lucide-react';
 import { useMemo } from 'react';
 
 import { InternalAvatar } from '../components/InternalAvatar';
@@ -11,59 +11,15 @@ import {
   formatDisplayName,
   formatSeniorDisplayName,
   getChoiceLabel,
-  hydrateAdminInterventionEvaluations,
 } from '../data/mockData';
-import { AdminInterventionEvaluation } from '../types';
-
-const ADMIN_EVALUATIONS_STORAGE_KEY =
-  'journal-bord:admin-intervention-evaluations:v1';
-const HOME_TROPHY_SHOWCASE = [
-  {
-    id: 'showcase-salpingectomie-1',
-    title: 'Première salpingectomie',
-    imageSrc: '/images/badges/salpingectomie-operateur-principal-1.png',
-    label: 'À venir',
-  },
-  {
-    id: 'showcase-colpocleisis-1',
-    title: 'Premier colpoclésis',
-    imageSrc: '/images/badges/colpocleisis-operateur-principal-1.png',
-    label: 'À venir',
-  },
-  {
-    id: 'showcase-salpingectomie-as',
-    title: 'As de la salpingectomie',
-    imageSrc: '/images/badges/salpingectomie-as.png',
-    label: 'Collection',
-  },
-] as const;
-
-function loadStoredAdminEvaluations() {
-  if (typeof window === 'undefined') {
-    return hydrateAdminInterventionEvaluations();
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(ADMIN_EVALUATIONS_STORAGE_KEY);
-
-    if (!rawValue) {
-      return hydrateAdminInterventionEvaluations();
-    }
-
-    const parsedValue = JSON.parse(rawValue);
-
-    return parsedValue && typeof parsedValue === 'object'
-      ? hydrateAdminInterventionEvaluations(
-          parsedValue as Record<string, AdminInterventionEvaluation>
-        )
-      : hydrateAdminInterventionEvaluations();
-  } catch {
-    return hydrateAdminInterventionEvaluations();
-  }
-}
+import {
+  buildTrophyDisplayModels,
+  loadStoredAdminEvaluations,
+} from '../utils/trophyDisplay';
 
 export function WelcomeScreen() {
   const {
+    adminTrophies,
     selectedInternal,
     savedInterventions,
     selectableSeniors,
@@ -88,18 +44,26 @@ export function WelcomeScreen() {
     selectedInternal.lastName
   );
   const trainingHospital = 'CHU de Nantes';
-  const recentTrophies = [...(selectedInternal.achievementBadges ?? [])]
-    .sort((left, right) => right.awardedAt.localeCompare(left.awardedAt))
-    .slice(0, 3);
+  const trophyDisplay = useMemo(
+    () =>
+      buildTrophyDisplayModels({
+        adminEvaluations,
+        adminTrophies,
+        profile: selectedInternal,
+        savedInterventions,
+      }),
+    [adminEvaluations, adminTrophies, savedInterventions, selectedInternal]
+  );
   const trophyPreview =
-    recentTrophies.length > 0
-      ? recentTrophies.map((badge) => ({
-          id: badge.id,
-          imageSrc: badge.imageSrc,
-          label: 'Obtenu',
-          title: badge.title,
-        }))
-      : HOME_TROPHY_SHOWCASE;
+    [...trophyDisplay.earned, ...trophyDisplay.progress]
+      .filter((badge) => badge.imageSrc)
+      .slice(0, 3)
+      .map((badge) => ({
+        id: badge.id,
+        imageSrc: badge.imageSrc as string,
+        label: badge.section === 'earned' ? 'Obtenu' : 'En cours',
+        title: badge.title,
+      }));
 
   return (
     <main className="screen-shell dashboard-screen">
@@ -145,20 +109,33 @@ export function WelcomeScreen() {
               <ChevronRight aria-hidden="true" />
             </button>
           </header>
-          <div className="dashboard-trophy-strip" role="list" aria-label="Aperçu des trophées">
-            {trophyPreview.map((badge) => (
-              <article
-                className={`dashboard-trophy-chip ${
-                  badge.label === 'Obtenu' ? '' : 'dashboard-trophy-chip--upcoming'
-                }`}
-                key={badge.id}
-                role="listitem"
-              >
-                <img alt={badge.title} src={badge.imageSrc} />
-                <span>{badge.label}</span>
-              </article>
-            ))}
-          </div>
+          {trophyPreview.length ? (
+            <div className="dashboard-trophy-strip" role="list" aria-label="Aperçu des trophées">
+              {trophyPreview.map((badge) => (
+                <article
+                  className={`dashboard-trophy-chip ${
+                    badge.label === 'Obtenu' ? '' : 'dashboard-trophy-chip--upcoming'
+                  }`}
+                  key={badge.id}
+                  role="listitem"
+                >
+                  <img alt={badge.title} src={badge.imageSrc} />
+                  <span>{badge.label}</span>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <section className="trophy-empty-state" aria-label="Aucun trophée actif">
+              <div className="trophy-empty-state__icon">
+                <Trophy aria-hidden="true" strokeWidth={2.1} />
+              </div>
+              <strong>Aucun trophée actif pour le moment</strong>
+              <p>
+                Les trophées apparaîtront ici dès qu’ils seront activés dans le
+                catalogue administrateur.
+              </p>
+            </section>
+          )}
         </section>
 
         <section className="dashboard-card">

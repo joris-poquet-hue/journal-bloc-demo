@@ -34,7 +34,7 @@ export function BottomNavigation() {
     {
       label: 'Fiches',
       isActive: (currentScreen) => currentScreen === 'preblock',
-      onPress: () => goToPreBlock('surgery'),
+      onPress: goToPreBlock,
     },
     {
       label: 'Profil',

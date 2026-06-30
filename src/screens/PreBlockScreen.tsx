@@ -51,7 +51,7 @@ function GuideFigure({
 }
 
 export function PreBlockScreen() {
-  const { preBlockContext } = useAppContext();
+  const { recordActivity } = useAppContext();
   const [view, setView] = useState<GuideView>('menu');
   const [expandedFigure, setExpandedFigure] = useState<ExpandedFigure | null>(null);
   useScrollResetOnChange([view]);
@@ -59,15 +59,14 @@ export function PreBlockScreen() {
     view === 'menu'
       ? null
       : techniqueGuides.find((guide) => guide.id === view) ?? null;
-  const menuSubtitle =
-    preBlockContext === 'obstetric'
-      ? 'Les fiches dédiées à la salle de naissance seront regroupées ici.'
-      : 'Consulte une fiche de rappel avant l’intervention.';
-  const availableGuides =
-    preBlockContext === 'obstetric' ? [] : techniqueGuides;
-  const sortedGuides = [...availableGuides].sort((left, right) =>
+  const sortedGuides = [...techniqueGuides].sort((left, right) =>
     left.title.localeCompare(right.title, 'fr', { sensitivity: 'base' })
   );
+
+  const openGuide = (guide: TechniqueGuide) => {
+    setView(guide.id);
+    recordActivity('Consultation d’une fiche technique', 'Fiche', guide.title);
+  };
 
   useEffect(() => {
     if (!expandedFigure) {
@@ -95,15 +94,15 @@ export function PreBlockScreen() {
     return (
       <ScreenContainer
         title="Fiches techniques"
-        subtitle={menuSubtitle}
+        subtitle="Consulte une fiche de rappel avant l’intervention."
       >
-        {availableGuides.length ? (
+        {sortedGuides.length ? (
           <div className="guide-menu-list">
             {sortedGuides.map((guide) => (
               <GuideMenuCard
                 key={guide.id}
                 guide={guide}
-                onPress={() => setView(guide.id)}
+                onPress={() => openGuide(guide)}
               />
             ))}
           </div>
@@ -115,7 +114,7 @@ export function PreBlockScreen() {
               </span>
               <div>
                 <strong>Bientôt disponible</strong>
-                <p>Les fiches obstétricales seront ajoutées dans cet espace.</p>
+                <p>Les prochaines fiches seront ajoutées dans cet espace.</p>
               </div>
             </div>
           </SectionCard>

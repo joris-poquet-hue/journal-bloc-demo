@@ -6,7 +6,6 @@ export type AppScreen =
   | 'form'
   | 'profile'
   | 'notebook'
-  | 'obstetric-journal'
   | 'checklist'
   | 'summary'
   | 'admin';
@@ -14,8 +13,6 @@ export type AppScreen =
 export type SessionRole = 'internal' | 'admin' | 'senior';
 
 export type SummaryMode = 'review' | 'confirmed';
-
-export type PreBlockContext = 'surgery' | 'obstetric';
 
 export type ChoiceOption<T extends string = string> = {
   value: T;
@@ -407,28 +404,13 @@ export type TestFeedback = {
 
 export type ActivityLogEntry = {
   id: string;
+  actorId?: string | null;
   actorRole: SessionRole;
   actorLabel: string;
   action: string;
   targetType: string;
   targetLabel: string;
   createdAt: string;
-};
-
-export type ObstetricJournalDraft = {
-  date: string;
-  internalId: string | null;
-  seniorId: string | null;
-  gesture: string;
-  instrumentalExtraction: string | null;
-  vacuumType: string | null;
-  forcepsType: string | null;
-  indication: string;
-};
-
-export type SavedObstetricGesture = ObstetricJournalDraft & {
-  id: string;
-  savedAt: string;
 };
 
 export type ChecklistProgress = {

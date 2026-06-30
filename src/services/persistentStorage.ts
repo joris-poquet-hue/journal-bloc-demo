@@ -1,7 +1,6 @@
 type PersistentArrayKey =
   | 'internal_profiles'
   | 'saved_interventions'
-  | 'saved_obstetric_gestures'
   | 'custom_surgical_interventions'
   | 'custom_seniors'
   | 'admin_trophies'

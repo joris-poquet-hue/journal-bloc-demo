@@ -24,43 +24,12 @@ import {
 } from '../types';
 import { ensureSurgicalInterventionDefinitionShape } from '../utils/surgicalInterventions';
 
-export const internalProfiles: InternalProfile[] = [
-  {
-    id: 'int-test',
-    firstName: 'Interne',
-    lastName: 'Test',
-    loginId: 'internet',
-    password: 'internet',
-    mustChangePassword: true,
-    promotion: 'Promo 2022',
-    semester: 'S8',
-    currentRotation: 'Stage de chirurgie',
-    createdAt: '2026-06-26T00:00:00.000Z',
-    lastLoginAt: null,
-    achievementBadges: [],
-    badgeMetrics: {
-      primarySalpingectomyCount: 0,
-      primaryColpocleisisCount: 0,
-    },
-    baselineStats: {
-      totalInterventions: 0,
-      primaryOperatorCount: 0,
-      primaryAssistantCount: 0,
-    },
-  },
-];
+export const ADMIN_LOGIN_ID = 'administrateur beta';
+export const ADMIN_PASSWORD = 'Fred3132848002!';
 
-export const seniors: Senior[] = [
-  {
-    id: 'sen-test',
-    firstName: 'Senior',
-    lastName: 'Test',
-    loginId: 'seniort',
-    password: 'seniort',
-    mustChangePassword: true,
-    createdAt: '2026-06-26T00:00:00.000Z',
-  },
-];
+export const internalProfiles: InternalProfile[] = [];
+
+export const seniors: Senior[] = [];
 
 export const selectableSeniors: Senior[] = [
   ...seniors,
@@ -94,16 +63,7 @@ export function getSelectableSeniors(customSeniors: Senior[] = []) {
   ];
 }
 
-export const procedureOptions: ChoiceOption<InterventionType>[] = [
-  {
-    value: 'salpingectomie',
-    label: 'Salpingectomie',
-  },
-  {
-    value: 'colpoclesis',
-    label: 'Colpoclésis',
-  },
-];
+export const procedureOptions: ChoiceOption<InterventionType>[] = [];
 
 export const indicationOptions: ChoiceOption<Indication>[] = [
   { value: 'geu', label: 'GEU' },
@@ -336,64 +296,14 @@ export const allChecklistSteps: ChecklistStep[] = [
   ...colpoclesisChecklistSteps,
 ];
 
-export const builtInSurgicalInterventions: SurgicalInterventionDefinition[] = [
-  ensureSurgicalInterventionDefinitionShape({
-    id: 'salpingectomie',
-    name: 'Salpingectomie',
-    indications: [
-      'Grossesse extra-utérine',
-      'Hydrosalpinx',
-      'Salpingectomie prophylactique',
-      'Stérilisation tubaire',
-      'Autre',
-    ],
-    allowedApproaches: ['coelioscopie', 'laparotomie', 'robot', 'vnotes'],
-    allowedEntryTechniques: ['trocart_direct', 'open', 'veress'],
-    requiresLaterality: true,
-    checklistSteps: salpingectomyChecklistSteps,
-    keyStepIds: ['step-9', 'step-10', 'step-12'],
-    status: 'active',
-    lateralityMode: 'right_left_bilateral',
-  }),
-  ensureSurgicalInterventionDefinitionShape({
-    id: 'colpoclesis',
-    name: 'Colpoclésis',
-    indications: ['Prolapsus avancé', 'Autre'],
-    allowedApproaches: ['voie_vaginale'],
-    allowedEntryTechniques: [],
-    requiresLaterality: false,
-    checklistSteps: colpoclesisChecklistSteps,
-    keyStepIds: ['colpo-step-3', 'colpo-step-4', 'colpo-step-5'],
-    status: 'active',
-    lateralityMode: 'none',
-  }),
-];
+export const builtInSurgicalInterventions: SurgicalInterventionDefinition[] = [];
 
 export function getSurgicalInterventionDefinitions(
   customInterventions: SurgicalInterventionDefinition[] = []
 ) {
-  const customById = new Map(
-    customInterventions.map((intervention) => [intervention.id, intervention])
+  return customInterventions.map((intervention) =>
+    ensureSurgicalInterventionDefinitionShape(intervention)
   );
-  const builtInIds = new Set(
-    builtInSurgicalInterventions.map((intervention) => intervention.id)
-  );
-  const resolvedBuiltIns = builtInSurgicalInterventions.map(
-    (intervention) =>
-      ensureSurgicalInterventionDefinitionShape(
-        customById.get(intervention.id) ?? intervention
-      )
-  );
-  const additionalCustomInterventions = customInterventions.filter(
-    (intervention) => !builtInIds.has(intervention.id)
-  );
-
-  return [
-    ...resolvedBuiltIns,
-    ...additionalCustomInterventions.map((intervention) =>
-      ensureSurgicalInterventionDefinitionShape(intervention)
-    ),
-  ];
 }
 
 export function getProcedureOptions(
@@ -872,72 +782,27 @@ function createSeedChecklist(caseItem: SeedInterventionCase) {
   ) as Record<string, ChecklistLevel>;
 }
 
-export const seededSavedInterventions: SavedIntervention[] = seedInterventionCases
-  .map((caseItem, index) => ({
-    id: `seed-internet-${`${index + 1}`.padStart(2, '0')}`,
-    date: caseItem.date,
-    internalId: 'int-test',
-    seniorId: 'sen-test',
-    procedure: caseItem.procedure,
-    indication: caseItem.indication,
-    indicationComment:
-      caseItem.procedure === 'colpoclesis'
-        ? 'Prolapsus génital symptomatique'
-        : '',
-    customIndication: null,
-    approach: caseItem.approach,
-    entryTechnique: caseItem.entryTechnique,
-    laterality: caseItem.laterality,
-    context: getSeedContext(caseItem.procedure, caseItem.indication),
-    complexity: caseItem.complexity,
-    role: 'operateur_principal' as const,
-    checklist: createSeedChecklist(caseItem),
-    autonomyScore: calculateSeedAutonomyScore(
-      caseItem.keyLevels,
-      caseItem.globalPerformance,
-      caseItem.categoryDifficulty
-    ),
-    savedAt: caseItem.savedAt,
-  }))
-  .sort((left, right) => right.savedAt.localeCompare(left.savedAt));
+export const seededSavedInterventions: SavedIntervention[] = [];
 
 export const seededAdminInterventionEvaluations: Record<
   string,
   AdminInterventionEvaluation
-> = Object.fromEntries(
-  seedInterventionCases.map((caseItem, index) => {
-    const interventionId = `seed-internet-${`${index + 1}`.padStart(2, '0')}`;
-
-    return [
-      interventionId,
-      {
-        interventionId,
-        globalPerformance: caseItem.globalPerformance,
-        categoryDifficulty: caseItem.categoryDifficulty,
-        seniorComment: '',
-        updatedAt: caseItem.savedAt,
-      },
-    ];
-  })
-);
+> = {};
 
 export function hydrateAdminInterventionEvaluations(
   evaluations: Record<string, AdminInterventionEvaluation> = {}
 ) {
-  return {
-    ...Object.fromEntries(
-      Object.entries(evaluations).filter(
-        ([interventionId]) => !isSeededDemoInterventionId(interventionId)
-      ).map(([interventionId, evaluation]) => [
+  return Object.fromEntries(
+    Object.entries(evaluations)
+      .filter(([interventionId]) => !isSeededDemoInterventionId(interventionId))
+      .map(([interventionId, evaluation]) => [
         interventionId,
         {
           ...evaluation,
           seniorComment: evaluation.seniorComment ?? '',
         },
       ])
-    ),
-    ...seededAdminInterventionEvaluations,
-  };
+  ) as Record<string, AdminInterventionEvaluation>;
 }
 
 const salpingectomyPrimaryBadgeMilestones = [
@@ -1865,7 +1730,10 @@ export function isAdminCredentials(loginId: string, password: string) {
   const normalizedLoginId = normalizeCredentialValue(loginId);
   const normalizedPassword = normalizeCredentialValue(password);
 
-  return normalizedLoginId === 'admin' && normalizedPassword === 'admin';
+  return (
+    normalizedLoginId === normalizeCredentialValue(ADMIN_LOGIN_ID) &&
+    normalizedPassword === normalizeCredentialValue(ADMIN_PASSWORD)
+  );
 }
 
 export function getSeniorByCredentials(

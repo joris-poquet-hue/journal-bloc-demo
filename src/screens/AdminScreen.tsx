@@ -121,6 +121,7 @@ type AdminActivityRange = 'day' | 'week' | 'month';
 type AdminInterventionStatusFilter = 'all' | 'evaluated' | 'pending';
 type AdminUserConnection = {
   id: string;
+  actorRole: 'internal' | 'senior';
   name: string;
   role: 'Interne' | 'Senior';
   lastLoginAt: string;
@@ -223,7 +224,6 @@ const EMPTY_INTERVENTION_FILTERS: AdminInterventionFilters = {
 const ADMIN_EVALUATIONS_STORAGE_KEY =
   'journal-bord:admin-intervention-evaluations:v1';
 const TEST_FEEDBACK_STORAGE_KEY = 'journal-bord:test-feedback:v1';
-const ACTIVITY_LOG_STORAGE_KEY = 'journal-bord:activity-log:v1';
 const SENIOR_LAST_LOGIN_STORAGE_KEY = 'journal-bord:senior-last-logins:v1';
 
 const ADMIN_ACTIVITY_RANGE_OPTIONS: Array<{
@@ -911,6 +911,12 @@ function formatAdminConnectionTimestamp(value: string) {
   return `${targetDate.toLocaleDateString('fr-FR')} à ${timeLabel}`;
 }
 
+function formatActivityLogEntrySummary(entry: ActivityLogEntry) {
+  return entry.targetLabel
+    ? `${entry.action} · ${entry.targetLabel}`
+    : entry.action;
+}
+
 function loadSeniorLastLoginMap() {
   if (typeof window === 'undefined') {
     return {} as Record<string, string>;
@@ -1580,12 +1586,14 @@ export function AdminScreen() {
     deleteInternalProfile,
     deleteSeniorProfile,
     deleteSavedInterventions,
+    activityLog,
     adminTrophies,
     adminTrophyStorageWarning: trophyStorageWarning,
     internalProfiles,
     isAdmin,
     isSenior,
     logout,
+    recordActivity,
     savedInterventions,
     setAdminTrophies,
     selectableSeniors,
@@ -1686,11 +1694,6 @@ export function AdminScreen() {
   const [testFeedbackMessage, setTestFeedbackMessage] = useState('');
   const [testFeedbackStatus, setTestFeedbackStatus] =
     useState<FeedbackState>(null);
-  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>(() =>
-    loadStoredArray<ActivityLogEntry>(ACTIVITY_LOG_STORAGE_KEY)
-  );
-  const [hasLoadedPersistentActivityLog, setHasLoadedPersistentActivityLog] =
-    useState(false);
   const [evaluationFeedback, setEvaluationFeedback] =
     useState<FeedbackState>(null);
   const [evaluationDraft, setEvaluationDraft] = useState<{
@@ -1792,46 +1795,6 @@ export function AdminScreen() {
       void savePersistentArray('test_feedback', testFeedbackItems);
     }
   }, [testFeedbackItems, hasLoadedPersistentTestFeedback]);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    async function loadPersistentActivityLog() {
-      const persistentActivity =
-        await loadPersistentArray<ActivityLogEntry>('activity_log');
-
-      if (isCancelled) {
-        return;
-      }
-
-      if (persistentActivity) {
-        setActivityLog(persistentActivity);
-      }
-
-      setHasLoadedPersistentActivityLog(true);
-    }
-
-    void loadPersistentActivityLog();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(
-      ACTIVITY_LOG_STORAGE_KEY,
-      JSON.stringify(activityLog)
-    );
-
-    if (hasLoadedPersistentActivityLog) {
-      void savePersistentArray('activity_log', activityLog.slice(0, 150));
-    }
-  }, [activityLog, hasLoadedPersistentActivityLog]);
 
   useEffect(() => {
     setSeniorLastLoginMap(loadSeniorLastLoginMap());
@@ -2021,6 +1984,7 @@ export function AdminScreen() {
     const internalConnections: AdminUserConnection[] = internalProfiles
       .filter((profile) => profile.lastLoginAt)
       .map((profile) => ({
+        actorRole: 'internal',
         id: profile.id,
         name: formatDisplayName(profile.firstName, profile.lastName),
         role: 'Interne',
@@ -2033,6 +1997,7 @@ export function AdminScreen() {
           seniorLastLoginMap[senior.id] != null
       )
       .map((senior) => ({
+        actorRole: 'senior',
         id: senior.id,
         name: formatSeniorDisplayName(senior),
         role: 'Senior',
@@ -2053,10 +2018,29 @@ export function AdminScreen() {
       return !Number.isNaN(timestamp) && now - timestamp <= fortyEightHoursInMs;
     });
   }, [userConnections]);
+  const recentActivitiesByActor = useMemo(() => {
+    return activityLog.reduce<Record<string, ActivityLogEntry[]>>((accumulator, entry) => {
+      if (!entry.actorId || entry.actorRole === 'admin') {
+        return accumulator;
+      }
+
+      const actorKey = `${entry.actorRole}:${entry.actorId}`;
+      const currentEntries = accumulator[actorKey] ?? [];
+
+      currentEntries.push(entry);
+      accumulator[actorKey] = currentEntries;
+
+      return accumulator;
+    }, {});
+  }, [activityLog]);
   const customSeniorAccounts = useMemo(
     () => customSeniors.filter((senior) => senior.isCustom),
     [customSeniors]
   );
+  const getConnectionActivities = (connection: AdminUserConnection) =>
+    (recentActivitiesByActor[`${connection.actorRole}:${connection.id}`] ?? [])
+      .filter((entry) => entry.createdAt >= connection.lastLoginAt)
+      .slice(0, 3);
   const filteredAdminTrophies = useMemo(() => {
     const normalizedSearch = trophySearch.trim().toLocaleLowerCase('fr-FR');
 
@@ -2421,6 +2405,7 @@ export function AdminScreen() {
         label: value.label,
         score: Math.round(averageNumbers(value.values) ?? 0),
         sampleSize: value.values.length,
+        tone: getSeniorStepTone(Math.round(averageNumbers(value.values) ?? 0)),
       }))
       .sort(
         (left, right) =>
@@ -2554,25 +2539,18 @@ export function AdminScreen() {
     };
   };
 
-  const addActivityLogEntry = (
-    action: string,
-    targetType: string,
-    targetLabel: string
+  const openProfileStats = (
+    profile: InternalProfile,
+    source: AdminProfileViewSource
   ) => {
-    const actor = getCurrentActor();
-
-    setActivityLog((current) => [
-      {
-        id: `activity-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        actorRole: actor.role,
-        actorLabel: actor.label,
-        action,
-        targetType,
-        targetLabel,
-        createdAt: new Date().toISOString(),
-      },
-      ...current,
-    ].slice(0, 150));
+    setSelectedProfileId(profile.id);
+    setSelectedProfileViewSource(source);
+    setView('profile');
+    recordActivity(
+      'Consultation des statistiques d’un interne',
+      'Interne',
+      formatDisplayName(profile.firstName, profile.lastName)
+    );
   };
 
   const handleSubmitTestFeedback = (event: FormEvent<HTMLFormElement>) => {
@@ -2600,7 +2578,7 @@ export function AdminScreen() {
       },
       ...current,
     ]);
-    addActivityLogEntry('Remarque de test envoyée', 'Remarque', message);
+    recordActivity('Remarque de test envoyée', 'Remarque', message);
     setTestFeedbackMessage('');
     setTestFeedbackStatus({
       kind: 'success',
@@ -2721,6 +2699,16 @@ export function AdminScreen() {
       kind: 'success',
       message: 'Évaluation senior validée.',
     });
+    if (selectedEvaluationInternal) {
+      recordActivity(
+        'Évaluation d’un interne validée',
+        'Interne',
+        formatDisplayName(
+          selectedEvaluationInternal.firstName,
+          selectedEvaluationInternal.lastName
+        )
+      );
+    }
     setSelectedEvaluationInterventionId(null);
   };
 
@@ -4439,19 +4427,40 @@ export function AdminScreen() {
         <SectionCard className="admin-dashboard-card" title="Toutes les connexions">
           {userConnections.length ? (
             <div className="admin-connections-list">
-              {userConnections.map((connection) => (
-                <article className="admin-connection-row" key={connection.id}>
-                  <div className="admin-connection-row__copy">
-                    <div className="admin-connection-row__main">
-                      <strong>{connection.name}</strong>
-                      <span className="admin-connection-row__time">
-                        {formatAdminConnectionTimestamp(connection.lastLoginAt)}
-                      </span>
+              {userConnections.map((connection) => {
+                const activities = getConnectionActivities(connection);
+
+                return (
+                  <article className="admin-connection-row" key={connection.id}>
+                    <div className="admin-connection-row__copy">
+                      <div className="admin-connection-row__main">
+                        <strong>{connection.name}</strong>
+                        <span className="admin-connection-row__time">
+                          {formatAdminConnectionTimestamp(connection.lastLoginAt)}
+                        </span>
+                      </div>
+                      <span>{connection.role}</span>
+                      <div className="admin-connection-row__activity-list">
+                        {activities.length ? (
+                          activities.map((entry) => (
+                            <span
+                              className="admin-connection-row__activity-item"
+                              key={entry.id}
+                            >
+                              {formatAdminConnectionTimestamp(entry.createdAt)} ·{' '}
+                              {formatActivityLogEntrySummary(entry)}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="admin-connection-row__activity-empty">
+                            Aucune activité récente enregistrée.
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <span>{connection.role}</span>
-                  </div>
-                </article>
-              ))}
+                  </article>
+                );
+              })}
             </div>
           ) : (
             <div className="validation-box">
@@ -4969,7 +4978,7 @@ export function AdminScreen() {
                               <span>{step.label}</span>
                               <div className="admin-profile-step-row__bar">
                                 <div
-                                  className="admin-profile-step-row__fill"
+                                  className={`admin-profile-step-row__fill admin-profile-step-row__fill--${step.tone}`}
                                   style={{ width: `${step.score}%` }}
                                 />
                               </div>
@@ -5124,11 +5133,7 @@ export function AdminScreen() {
                         <div className="admin-profile-card__actions admin-profile-card__actions--grid">
                           <button
                             className="mini-button mini-button--secondary"
-                            onClick={() => {
-                              setSelectedProfileId(profile.id);
-                              setSelectedProfileViewSource('profiles');
-                              setView('profile');
-                            }}
+                            onClick={() => openProfileStats(profile, 'profiles')}
                             type="button"
                           >
                             Voir les statistiques
@@ -6912,22 +6917,43 @@ export function AdminScreen() {
           </div>
         </SectionCard>
 
-        <SectionCard className="admin-dashboard-card" title="Dernières connexions utilisateurs">
+        <SectionCard className="admin-dashboard-card" title="Dernières activités utilisateurs">
           {recentUserConnections.length ? (
             <div className="admin-connections-list">
-              {recentUserConnections.map((connection) => (
-                <article className="admin-connection-row" key={connection.id}>
-                  <div className="admin-connection-row__copy">
-                    <div className="admin-connection-row__main">
-                      <strong>{connection.name}</strong>
-                      <small className="admin-connection-row__time">
-                        {formatAdminConnectionTimestamp(connection.lastLoginAt)}
-                      </small>
+              {recentUserConnections.map((connection) => {
+                const activities = getConnectionActivities(connection);
+
+                return (
+                  <article className="admin-connection-row" key={connection.id}>
+                    <div className="admin-connection-row__copy">
+                      <div className="admin-connection-row__main">
+                        <strong>{connection.name}</strong>
+                        <small className="admin-connection-row__time">
+                          {formatAdminConnectionTimestamp(connection.lastLoginAt)}
+                        </small>
+                      </div>
+                      <span>{connection.role}</span>
+                      <div className="admin-connection-row__activity-list">
+                        {activities.length ? (
+                          activities.map((entry) => (
+                            <span
+                              className="admin-connection-row__activity-item"
+                              key={entry.id}
+                            >
+                              {formatAdminConnectionTimestamp(entry.createdAt)} ·{' '}
+                              {formatActivityLogEntrySummary(entry)}
+                            </span>
+                          ))
+                        ) : (
+                          <span className="admin-connection-row__activity-empty">
+                            Aucune activité récente enregistrée.
+                          </span>
+                        )}
+                      </div>
                     </div>
-                    <span>{connection.role}</span>
-                  </div>
-                </article>
-              ))}
+                  </article>
+                );
+              })}
             </div>
           ) : (
             <div className="validation-box">
@@ -7405,9 +7431,6 @@ export function AdminScreen() {
                 const storedDefinition = customSurgicalInterventions.find(
                   (storedIntervention) => storedIntervention.id === intervention.id
                 );
-                const isBuiltInIntervention =
-                  intervention.id === 'salpingectomie' ||
-                  intervention.id === 'colpoclesis';
 
                 return (
                   <article
@@ -7440,7 +7463,7 @@ export function AdminScreen() {
                           }
                           type="button"
                         >
-                          {isBuiltInIntervention ? 'Réinitialiser' : 'Supprimer'}
+                          Supprimer
                         </button>
                       ) : null}
                     </div>
@@ -7478,15 +7501,11 @@ export function AdminScreen() {
                     <span>Mot de passe : {profile.password}</span>
                   </div>
                   <div className="admin-profile-card__actions">
-                      <button
-                        className="mini-button mini-button--secondary"
-                        onClick={() => {
-                          setSelectedProfileId(profile.id);
-                          setSelectedProfileViewSource('profiles');
-                          setView('profile');
-                        }}
-                        type="button"
-                      >
+                    <button
+                      className="mini-button mini-button--secondary"
+                      onClick={() => openProfileStats(profile, 'profiles')}
+                      type="button"
+                    >
                       Voir les statistiques
                     </button>
                     <button

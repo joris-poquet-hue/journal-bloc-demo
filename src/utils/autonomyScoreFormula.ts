@@ -4,9 +4,9 @@ import {
 } from '../types';
 
 const DIFFICULTY_COEFFICIENTS: Record<AdminCategoryDifficultyRating, number> = {
-  '1': 0.95,
-  '2': 1,
-  '3': 1.05,
+  '1': 0.85,
+  '2': 0.9,
+  '3': 1,
 };
 
 function clampScore(value: number) {

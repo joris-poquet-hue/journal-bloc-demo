@@ -87,6 +87,10 @@ function getChecklistValue(intervention: SavedIntervention, stepId: string) {
     return '';
   }
 
+  if (value === 'NA') {
+    return 'NA';
+  }
+
   return getChoiceLabel(checklistLevelOptions, value, '');
 }
 
@@ -319,8 +323,6 @@ function createSummaryWorksheet(
       'Date et heure d’enregistrement par l’interne',
       'Date et heure d’évaluation par le senior',
       'Délai avant évaluation senior en heures',
-      'Délai avant évaluation senior en jours',
-      'Délai d’attente actuel en heures',
       'Interne',
       'Senior',
       'Intervention',
@@ -329,7 +331,6 @@ function createSummaryWorksheet(
       'Technique d’entrée',
       'Latéralité',
       'Rôle de l’interne',
-      'Statut',
       'Score d’autonomie final',
       'Score autonomie temps opératoires clés',
       'Difficulté ressentie interne',
@@ -350,9 +351,7 @@ function createSummaryWorksheet(
         intervention.date,
         intervention.savedAt,
         context.evaluationTimestamp || 'Non évaluée',
-        context.delayBeforeEvaluationHours || '—',
-        context.delayBeforeEvaluationDays || '—',
-        context.currentWaitingHours || '—',
+        context.delayBeforeEvaluationHours || 'En attente',
         context.internalLabel,
         context.seniorLabel,
         context.procedureLabel,
@@ -361,7 +360,6 @@ function createSummaryWorksheet(
         context.entryTechniqueLabel,
         context.lateralityLabel,
         context.roleLabel,
-        context.evaluationStatusLabel,
         context.autonomyScore == null ? '' : `${context.autonomyScore}`,
         context.keyStepAutonomyScore,
         context.internalDifficultyLabel,
@@ -387,8 +385,6 @@ function createInternalDataWorksheet(
       'Difficulté ressentie',
       'Étape opératoire',
       'Score interne',
-      'Non applicable',
-      'Commentaire interne',
     ],
     rows: interventions.flatMap((intervention) => {
       const internal = getInternalById(intervention.internalId, internalProfiles);
@@ -419,8 +415,6 @@ function createInternalDataWorksheet(
           formatComplexityRating(intervention.complexity, ''),
           step.label,
           getChecklistValue(intervention, step.id),
-          level === 'NA' ? 'Oui' : 'Non',
-          '',
         ];
       });
     }),
@@ -444,11 +438,7 @@ function createSeniorDataWorksheet(
       'Date et heure d’évaluation',
       'Difficulté senior',
       'Performance senior',
-      'Score senior global si disponible',
-      'Étape évaluée',
-      'Score senior par étape si disponible',
       'Commentaire senior',
-      'Validation finale',
     ],
     rows: interventions.map((intervention) => {
       const context = buildInterventionContext(
@@ -467,11 +457,7 @@ function createSeniorDataWorksheet(
         context.evaluationTimestamp || 'Non évaluée',
         context.seniorDifficultyLabel,
         context.seniorPerformanceLabel,
-        context.adminEvaluation?.globalPerformance ?? '',
-        'Évaluation globale',
-        '',
         context.adminEvaluation?.seniorComment ?? '',
-        context.evaluationStatusLabel === 'Évaluée' ? 'Oui' : 'Non',
       ];
     }),
   };
@@ -489,10 +475,6 @@ function createStepDetailWorksheet(
       'Ordre de l’étape',
       'Nom de l’étape',
       'Score interne',
-      'Score senior si disponible',
-      'Non applicable',
-      'Commentaire interne',
-      'Commentaire senior',
     ],
     rows: interventions.flatMap((intervention) => {
       const procedureLabel = getChoiceLabel(
@@ -517,10 +499,6 @@ function createStepDetailWorksheet(
           `${index + 1}`,
           step.label,
           getChecklistValue(intervention, step.id),
-          '',
-          level === 'NA' ? 'Oui' : 'Non',
-          '',
-          '',
         ];
       });
     }),

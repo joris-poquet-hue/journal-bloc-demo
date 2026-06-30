@@ -1,9 +1,9 @@
 const ALLOWED_KEYS = new Set([
   'internal_profiles',
   'saved_interventions',
-  'saved_obstetric_gestures',
   'custom_surgical_interventions',
   'custom_seniors',
+  'admin_trophies',
   'admin_evaluations',
   'test_feedback',
   'activity_log',
@@ -12,39 +12,29 @@ const ALLOWED_KEYS = new Set([
 const SUPABASE_URL = process.env.SUPABASE_URL?.replace(/\/$/, '');
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const APP_STATE_TABLE = 'app_state';
-const REMOVED_DEMO_PROFILE_IDS = new Set(['int-1', 'int-2', 'int-3', 'int-test']);
-const REMOVED_DEMO_LOGIN_IDS = new Set(['interne1', 'interne2', 'internetest']);
-const REMOVED_CUSTOM_SENIOR_NAMES = new Set(['ylan camby']);
-const SEEDED_INTERNAL_PROFILES = [
-  {
-    id: 'int-jpoquet',
-    firstName: 'Joris',
-    lastName: 'Poquet',
-    loginId: 'jpoquet',
-    password: 'jotest',
-    promotion: 'Promo 2023',
-    semester: 'S5',
-    currentRotation: 'Chirurgie',
-    createdAt: '2026-01-01T00:00:00.000Z',
-    lastLoginAt: null,
-    achievementBadges: [],
-    badgeMetrics: {
-      primarySalpingectomyCount: 0,
-      primaryColpocleisisCount: 0,
-    },
-    baselineStats: {
-      totalInterventions: 0,
-      primaryOperatorCount: 0,
-      primaryAssistantCount: 0,
-    },
-  },
-];
-const SENIORS = [
-  {
-    loginId: 'svigoureux',
-    password: 'test1306',
-  },
-];
+const ADMIN_LOGIN_ID = 'administrateur beta';
+const ADMIN_PASSWORD = 'Fred3132848002!';
+const REMOVED_DEMO_PROFILE_IDS = new Set([
+  'int-1',
+  'int-2',
+  'int-3',
+  'int-test',
+  'int-jpoquet',
+]);
+const REMOVED_DEMO_LOGIN_IDS = new Set([
+  'interne1',
+  'interne2',
+  'internet',
+  'internetest',
+  'jpoquet',
+]);
+const REMOVED_CUSTOM_SENIOR_NAMES = new Set([
+  'ylan camby',
+  'dr vigoureux',
+  'senior test',
+]);
+const SEEDED_INTERNAL_PROFILES = [];
+const SENIORS = [];
 
 function sendJson(response, statusCode, payload) {
   response.statusCode = statusCode;
@@ -99,7 +89,8 @@ function isRemovedCustomSenior(senior) {
 function isSeededDemoInterventionId(interventionId) {
   return (
     String(interventionId ?? '').startsWith('seed-int2-') ||
-    String(interventionId ?? '').startsWith('seed-int3-')
+    String(interventionId ?? '').startsWith('seed-int3-') ||
+    String(interventionId ?? '').startsWith('seed-internet-')
   );
 }
 
@@ -117,12 +108,6 @@ function sanitizeAppState(key, data) {
       (intervention) =>
         !isSeededDemoInterventionId(intervention.id) &&
         !REMOVED_DEMO_PROFILE_IDS.has(intervention.internalId)
-    );
-  }
-
-  if (key === 'saved_obstetric_gestures') {
-    return data.filter(
-      (gesture) => !REMOVED_DEMO_PROFILE_IDS.has(gesture.internalId)
     );
   }
 
@@ -162,7 +147,10 @@ async function isAuthorized(request) {
     return false;
   }
 
-  if (loginId === 'admin' && password === 'admin') {
+  if (
+    loginId === normalizeCredentialValue(ADMIN_LOGIN_ID) &&
+    password === normalizeCredentialValue(ADMIN_PASSWORD)
+  ) {
     return true;
   }
 

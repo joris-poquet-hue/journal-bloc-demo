@@ -9,9 +9,13 @@ import {
 } from 'react';
 
 import {
+  ADMIN_LOGIN_ID,
   allChecklistSteps,
   defaultComplexityRating,
+  formatDisplayName,
+  formatSeniorDisplayName,
   getFixedContextForIntervention,
+  getChoiceLabel,
   getChecklistStepsForIntervention,
   getInternalByCredentials,
   getProcedureOptions,
@@ -29,6 +33,7 @@ import {
   seededSavedInterventions,
 } from '../data/mockData';
 import {
+  ActivityLogEntry,
   AdminTrophyDefinition,
   AppScreen,
   ChecklistLevel,
@@ -43,9 +48,6 @@ import {
   NotebookDocument,
   InternalProfile,
   NotebookNote,
-  ObstetricJournalDraft,
-  PreBlockContext,
-  SavedObstetricGesture,
   SavedIntervention,
   Senior,
   SessionRole,
@@ -81,16 +83,14 @@ type AppContextValue = {
   isSenior: boolean;
   sessionRole: SessionRole | null;
   summaryMode: SummaryMode;
-  preBlockContext: PreBlockContext;
   historyNavigationView: 'calendar' | 'progress' | null;
   internalProfiles: InternalProfile[];
   selectedInternal: InternalProfile | null;
   selectedSenior: Senior | null;
   draft: InterventionDraft;
-  obstetricDraft: ObstetricJournalDraft;
   lastSavedIntervention: SavedIntervention | null;
   savedInterventions: SavedIntervention[];
-  savedObstetricGestures: SavedObstetricGesture[];
+  activityLog: ActivityLogEntry[];
   notebookDocuments: NotebookDocument[];
   customSurgicalInterventions: SurgicalInterventionDefinition[];
   customSeniors: Senior[];
@@ -113,23 +113,27 @@ type AppContextValue = {
     status: 'authenticated' | 'error' | 'password-change-required';
   }>;
   logout: () => void;
+  recordActivity: (
+    action: string,
+    targetType: string,
+    targetLabel: string
+  ) => void;
   cancelPasswordChangeChallenge: () => void;
   completePasswordChangeChallenge: (
     nextPassword: string,
     confirmPassword: string
-  ) => {
+  ) => Promise<{
     message: string;
     success: boolean;
-  };
+  }>;
   goToSurgeryPortal: () => void;
-  goToObstetricJournal: () => void;
   historyNavigationDate: string | null;
   clearHistoryNavigationDate: () => void;
   goToSurgeryHistory: (targetDate?: string, targetView?: 'calendar' | 'progress') => void;
   goToTrophies: () => void;
   goToProfile: () => void;
   goToNotebook: () => void;
-  goToPreBlock: (context?: PreBlockContext) => void;
+  goToPreBlock: () => void;
   goToForm: () => void;
   goToChecklist: () => void;
   goToSummary: () => void;
@@ -138,7 +142,6 @@ type AppContextValue = {
   backToWelcome: () => void;
   startNewIntervention: () => void;
   saveIntervention: () => SavedIntervention | null;
-  saveObstetricGesture: () => SavedObstetricGesture | null;
   createInternalProfile: (
     input: CreateInternalProfileInput
   ) => CreateInternalProfileResult;
@@ -191,10 +194,6 @@ type AppContextValue = {
     field: K,
     value: InterventionDraft[K]
   ) => void;
-  updateObstetricDraftField: <K extends keyof ObstetricJournalDraft>(
-    field: K,
-    value: ObstetricJournalDraft[K]
-  ) => void;
   setChecklistLevel: (stepId: string, level: ChecklistLevel) => void;
   setAllChecklistLevels: (level: ChecklistLevel) => void;
 };
@@ -203,31 +202,58 @@ const AppContext = createContext<AppContextValue | undefined>(undefined);
 
 const INTERNAL_PROFILES_STORAGE_KEY = 'journal-bord:internal-profiles:v4';
 const SAVED_INTERVENTIONS_STORAGE_KEY = 'journal-bord:saved-interventions:v4';
-const SAVED_OBSTETRIC_GESTURES_STORAGE_KEY =
-  'journal-bord:saved-obstetric-gestures:v1';
 const LEGACY_NOTEBOOK_NOTES_STORAGE_KEY = 'journal-bord:notebook-notes:v1';
 const NOTEBOOK_DOCUMENTS_STORAGE_KEY = 'journal-bord:notebook-documents:v1';
 const CUSTOM_SURGICAL_INTERVENTIONS_STORAGE_KEY =
   'journal-bord:custom-surgical-interventions:v1';
 const CUSTOM_SENIORS_STORAGE_KEY = 'journal-bord:custom-seniors:v2';
 const ADMIN_TROPHIES_STORAGE_KEY = 'journal-bord:admin-trophies:v1';
+const ACTIVITY_LOG_STORAGE_KEY = 'journal-bord:activity-log:v1';
 const SENIOR_LAST_LOGIN_STORAGE_KEY = 'journal-bord:senior-last-logins:v1';
 const SENIOR_MANAGED_INTERNALS_STORAGE_KEY =
   'journal-bord:senior-managed-internals:v1';
+const ADMIN_EVALUATIONS_STORAGE_KEY =
+  'journal-bord:admin-intervention-evaluations:v1';
+const TEST_FEEDBACK_STORAGE_KEY = 'journal-bord:test-feedback:v1';
+const RESET_LOCAL_STATE_QUERY_PARAM = 'reset-local-state';
 const ACCOUNT_RESET_CUTOFF = Date.parse('2026-06-26T00:00:00.000Z');
 const REMOVED_DEMO_PROFILE_IDS = new Set([
   'int-1',
   'int-2',
   'int-3',
+  'int-test',
   'int-jpoquet',
 ]);
 const REMOVED_DEMO_LOGIN_IDS = new Set([
   'interne1',
   'interne2',
+  'internet',
   'internetest',
   'jpoquet',
 ]);
-const REMOVED_CUSTOM_SENIOR_NAMES = new Set(['ylan camby', 'dr vigoureux']);
+const REMOVED_CUSTOM_SENIOR_NAMES = new Set([
+  'ylan camby',
+  'dr vigoureux',
+  'senior test',
+]);
+const RESERVED_ADMIN_LOGIN_IDS = new Set([
+  'admin',
+  normalizeCredentialValue(ADMIN_LOGIN_ID),
+]);
+const LOCAL_STATE_STORAGE_KEYS = [
+  INTERNAL_PROFILES_STORAGE_KEY,
+  SAVED_INTERVENTIONS_STORAGE_KEY,
+  LEGACY_NOTEBOOK_NOTES_STORAGE_KEY,
+  NOTEBOOK_DOCUMENTS_STORAGE_KEY,
+  CUSTOM_SURGICAL_INTERVENTIONS_STORAGE_KEY,
+  CUSTOM_SENIORS_STORAGE_KEY,
+  ADMIN_TROPHIES_STORAGE_KEY,
+  ADMIN_EVALUATIONS_STORAGE_KEY,
+  TEST_FEEDBACK_STORAGE_KEY,
+  ACTIVITY_LOG_STORAGE_KEY,
+  SENIOR_LAST_LOGIN_STORAGE_KEY,
+  SENIOR_MANAGED_INTERNALS_STORAGE_KEY,
+];
 
 type PasswordChangeChallengeState = {
   currentPassword: string;
@@ -281,7 +307,8 @@ function hydrateInternalProfiles(profiles: InternalProfile[]) {
   const refreshedSeedProfiles = seededInternalProfiles.map((profile) =>
     hydrateInternalProfile({
       ...profile,
-      lastLoginAt: existingById.get(profile.id)?.lastLoginAt ?? profile.lastLoginAt,
+      ...existingById.get(profile.id),
+      id: profile.id,
     })
   );
   const customProfiles = hydratedProfiles.filter(
@@ -599,22 +626,26 @@ function createInitialDraft(internalId: string | null): InterventionDraft {
   };
 }
 
-function createInitialObstetricDraft(
-  internalId: string | null
-): ObstetricJournalDraft {
-  return {
-    date: getTodayIsoDate(),
-    internalId,
-    seniorId: null,
-    gesture: '',
-    instrumentalExtraction: null,
-    vacuumType: null,
-    forcepsType: null,
-    indication: '',
-  };
-}
-
 export function AppProvider({ children }: { children: ReactNode }) {
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const url = new URL(window.location.href);
+
+    if (url.searchParams.get(RESET_LOCAL_STATE_QUERY_PARAM) !== '1') {
+      return;
+    }
+
+    LOCAL_STATE_STORAGE_KEYS.forEach((storageKey) => {
+      window.localStorage.removeItem(storageKey);
+    });
+
+    url.searchParams.delete(RESET_LOCAL_STATE_QUERY_PARAM);
+    window.location.replace(url.toString());
+  }, []);
+
   const [screen, setScreen] = useState<AppScreen>('welcome');
   const [historyNavigationDate, setHistoryNavigationDate] = useState<string | null>(
     null
@@ -624,8 +655,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   >(null);
   const [sessionRole, setSessionRole] = useState<SessionRole | null>(null);
   const [summaryMode, setSummaryMode] = useState<SummaryMode>('review');
-  const [preBlockContext, setPreBlockContext] =
-    useState<PreBlockContext>('surgery');
   const [internalProfiles, setInternalProfiles] = useState<InternalProfile[]>(() =>
     hydrateInternalProfiles(
       loadStoredArray<InternalProfile>(
@@ -637,8 +666,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [selectedInternalId, setSelectedInternalId] = useState<string | null>(null);
   const [selectedSeniorId, setSelectedSeniorId] = useState<string | null>(null);
   const [draft, setDraft] = useState<InterventionDraft>(createInitialDraft(null));
-  const [obstetricDraft, setObstetricDraft] =
-    useState<ObstetricJournalDraft>(createInitialObstetricDraft(null));
   const [lastSavedIntervention, setLastSavedIntervention] =
     useState<SavedIntervention | null>(null);
   const [savedInterventions, setSavedInterventions] = useState<SavedIntervention[]>(() =>
@@ -647,14 +674,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         SAVED_INTERVENTIONS_STORAGE_KEY,
         seededSavedInterventions
       )
-    )
-  );
-  const [savedObstetricGestures, setSavedObstetricGestures] = useState<
-    SavedObstetricGesture[]
-  >(() =>
-    loadStoredArray<SavedObstetricGesture>(
-      SAVED_OBSTETRIC_GESTURES_STORAGE_KEY,
-      []
     )
   );
   const [notebookDocuments, setNotebookDocuments] =
@@ -677,6 +696,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     hydrateAdminTrophies(
       loadStoredArray<AdminTrophyDefinition>(ADMIN_TROPHIES_STORAGE_KEY, [])
     )
+  );
+  const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>(() =>
+    loadStoredArray<ActivityLogEntry>(ACTIVITY_LOG_STORAGE_KEY, [])
   );
   const [adminTrophyStorageWarning, setAdminTrophyStorageWarning] = useState<
     string | null
@@ -710,6 +732,81 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const isAdmin = sessionRole === 'admin';
   const isSenior = sessionRole === 'senior';
 
+  const appendActivityLogEntry = (
+    actor: {
+      id: string;
+      label: string;
+      role: SessionRole;
+    },
+    action: string,
+    targetType: string,
+    targetLabel: string
+  ) => {
+    setActivityLog((current) => {
+      const nextActivityLog = [
+        {
+          id: `activity-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          actorId: actor.id,
+          actorRole: actor.role,
+          actorLabel: actor.label,
+          action,
+          targetType,
+          targetLabel,
+          createdAt: new Date().toISOString(),
+        },
+        ...current,
+      ].slice(0, 150);
+
+      if (isPersistentStorageConfigured() && canSavePersistentState) {
+        void savePersistentArray('activity_log', nextActivityLog);
+      }
+
+      return nextActivityLog;
+    });
+  };
+
+  const getCurrentActivityActor = () => {
+    if (sessionRole === 'internal' && selectedInternal) {
+      return {
+        id: selectedInternal.id,
+        label: formatDisplayName(selectedInternal.firstName, selectedInternal.lastName),
+        role: 'internal' as const,
+      };
+    }
+
+    if (sessionRole === 'senior' && selectedSenior) {
+      return {
+        id: selectedSenior.id,
+        label: formatSeniorDisplayName(selectedSenior),
+        role: 'senior' as const,
+      };
+    }
+
+    if (sessionRole === 'admin') {
+      return {
+        id: 'admin',
+        label: 'Admin',
+        role: 'admin' as const,
+      };
+    }
+
+    return null;
+  };
+
+  const recordActivity = (
+    action: string,
+    targetType: string,
+    targetLabel: string
+  ) => {
+    const actor = getCurrentActivityActor();
+
+    if (!actor) {
+      return;
+    }
+
+    appendActivityLogEntry(actor, action, targetType, targetLabel);
+  };
+
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -739,24 +836,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       void savePersistentArray('saved_interventions', savedInterventions);
     }
   }, [savedInterventions]);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(
-      SAVED_OBSTETRIC_GESTURES_STORAGE_KEY,
-      JSON.stringify(savedObstetricGestures)
-    );
-
-    if (canSavePersistentState) {
-      void savePersistentArray(
-        'saved_obstetric_gestures',
-        savedObstetricGestures
-      );
-    }
-  }, [savedObstetricGestures]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -831,6 +910,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     window.localStorage.setItem(
+      ACTIVITY_LOG_STORAGE_KEY,
+      JSON.stringify(activityLog)
+    );
+
+    if (canSavePersistentState) {
+      void savePersistentArray('activity_log', activityLog.slice(0, 150));
+    }
+  }, [activityLog, canSavePersistentState]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem(
       SENIOR_MANAGED_INTERNALS_STORAGE_KEY,
       JSON.stringify(seniorManagedInternalsMap)
     );
@@ -844,28 +938,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const [
       persistentInternalProfiles,
       persistentSavedInterventions,
-      persistentSavedObstetricGestures,
       persistentCustomSurgicalInterventions,
       persistentCustomSeniors,
       persistentAdminTrophies,
+      persistentActivityLog,
     ] = await Promise.all([
       loadPersistentArray<InternalProfile>('internal_profiles'),
       loadPersistentArray<SavedIntervention>('saved_interventions'),
-      loadPersistentArray<SavedObstetricGesture>('saved_obstetric_gestures'),
       loadPersistentArray<SurgicalInterventionDefinition>(
         'custom_surgical_interventions'
       ),
       loadPersistentArray<Senior>('custom_seniors'),
       loadPersistentArray<AdminTrophyDefinition>('admin_trophies'),
+      loadPersistentArray<ActivityLogEntry>('activity_log'),
     ]);
 
     if (
       !persistentInternalProfiles &&
       !persistentSavedInterventions &&
-      !persistentSavedObstetricGestures &&
       !persistentCustomSurgicalInterventions &&
       !persistentCustomSeniors &&
-      !persistentAdminTrophies
+      !persistentAdminTrophies &&
+      !persistentActivityLog
     ) {
       return null;
     }
@@ -876,8 +970,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const nextSavedInterventions = persistentSavedInterventions
       ? hydrateSavedInterventions(persistentSavedInterventions)
       : savedInterventions;
-    const nextSavedObstetricGestures =
-      persistentSavedObstetricGestures ?? savedObstetricGestures;
     const nextCustomSurgicalInterventions =
       persistentCustomSurgicalInterventions
         ? hydrateSurgicalInterventionDefinitions(
@@ -890,6 +982,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const nextAdminTrophies = persistentAdminTrophies
       ? hydrateAdminTrophies(persistentAdminTrophies)
       : adminTrophies;
+    const nextActivityLog = persistentActivityLog ?? activityLog;
 
     if (persistentInternalProfiles) {
       setInternalProfiles(nextInternalProfiles);
@@ -897,10 +990,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     if (persistentSavedInterventions) {
       setSavedInterventions(nextSavedInterventions);
-    }
-
-    if (persistentSavedObstetricGestures) {
-      setSavedObstetricGestures(nextSavedObstetricGestures);
     }
 
     if (persistentCustomSurgicalInterventions) {
@@ -915,14 +1004,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setAdminTrophies(nextAdminTrophies);
     }
 
+    if (persistentActivityLog) {
+      setActivityLog(nextActivityLog);
+    }
+
     setCanSavePersistentState(true);
     return {
       internalProfiles: nextInternalProfiles,
       savedInterventions: nextSavedInterventions,
-      savedObstetricGestures: nextSavedObstetricGestures,
       customSurgicalInterventions: nextCustomSurgicalInterventions,
       customSeniors: nextCustomSeniors,
       adminTrophies: nextAdminTrophies,
+      activityLog: nextActivityLog,
     };
   };
 
@@ -947,10 +1040,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSelectedInternalId(profile.id);
     setSelectedSeniorId(null);
     setDraft(createInitialDraft(profile.id));
-    setObstetricDraft(createInitialObstetricDraft(profile.id));
     setLastSavedIntervention(null);
     setSummaryMode('review');
-    setPreBlockContext('surgery');
     setScreen('welcome');
   };
 
@@ -961,10 +1052,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSelectedInternalId(null);
     setSelectedSeniorId(senior.id);
     setDraft(createInitialDraft(null));
-    setObstetricDraft(createInitialObstetricDraft(null));
     setLastSavedIntervention(null);
     setSummaryMode('review');
-    setPreBlockContext('surgery');
     setScreen('admin');
   };
 
@@ -984,10 +1073,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSelectedInternalId(null);
       setSelectedSeniorId(null);
       setDraft(createInitialDraft(null));
-      setObstetricDraft(createInitialObstetricDraft(null));
       setLastSavedIntervention(null);
       setSummaryMode('review');
-      setPreBlockContext('surgery');
       setScreen('admin');
 
       return { status: 'authenticated' } as const;
@@ -1056,7 +1143,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCanSavePersistentState(false);
   };
 
-  const completePasswordChangeChallenge = (
+  const completePasswordChangeChallenge = async (
     nextPassword: string,
     confirmPassword: string
   ) => {
@@ -1112,12 +1199,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         mustChangePassword: false,
         password: sanitizedPassword,
       };
-
-      setInternalProfiles((current) =>
-        current.map((item) => (item.id === updatedProfile.id ? updatedProfile : item))
+      const nextInternalProfiles = internalProfiles.map((item) =>
+        item.id === updatedProfile.id ? updatedProfile : item
       );
+
+      if (isPersistentStorageConfigured()) {
+        setPersistentStorageCredentials(updatedProfile.loginId, challenge.currentPassword);
+        await savePersistentArray('internal_profiles', nextInternalProfiles);
+      }
+
+      setInternalProfiles(nextInternalProfiles);
       setPersistentStorageCredentials(updatedProfile.loginId, sanitizedPassword);
-      setCanSavePersistentState(false);
+      setCanSavePersistentState(true);
       authenticateInternal(updatedProfile, lastLoginAt);
 
       return {
@@ -1135,17 +1228,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
         success: false,
       };
     }
+    const seniorLoginId = senior.loginId;
 
     const updatedSenior: Senior = {
       ...senior,
-      loginId: senior.loginId,
+      loginId: seniorLoginId,
       mustChangePassword: false,
       password: sanitizedPassword,
     };
+    const nextCustomSeniors = upsertSeniorRecord(customSeniors, updatedSenior);
 
-    setCustomSeniors((current) => upsertSeniorRecord(current, updatedSenior));
-    setPersistentStorageCredentials(updatedSenior.loginId, sanitizedPassword);
-    setCanSavePersistentState(false);
+    if (isPersistentStorageConfigured()) {
+      setPersistentStorageCredentials(seniorLoginId, challenge.currentPassword);
+      await savePersistentArray('custom_seniors', nextCustomSeniors);
+    }
+
+    setCustomSeniors(nextCustomSeniors);
+    setPersistentStorageCredentials(seniorLoginId, sanitizedPassword);
+    setCanSavePersistentState(true);
     authenticateSenior(updatedSenior, lastLoginAt);
 
     return {
@@ -1162,22 +1262,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSelectedInternalId(null);
     setSelectedSeniorId(null);
     setDraft(createInitialDraft(null));
-    setObstetricDraft(createInitialObstetricDraft(null));
     setLastSavedIntervention(null);
     setSummaryMode('review');
-    setPreBlockContext('surgery');
     setScreen('welcome');
   };
 
   const goToSurgeryPortal = () => {
-    if (!selectedInternal) {
-      return;
-    }
-
-    setScreen('welcome');
-  };
-
-  const goToObstetricJournal = () => {
     if (!selectedInternal) {
       return;
     }
@@ -1202,6 +1292,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    recordActivity(
+      'Consultation de ses statistiques opératoires',
+      'Statistiques',
+      targetView === 'progress' ? 'Progression pédagogique' : 'Historique opératoire'
+    );
     setHistoryNavigationDate(targetDate ?? null);
     setHistoryNavigationView(targetView);
     setScreen('surgery-history');
@@ -1217,6 +1312,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    recordActivity('Consultation de ses trophées', 'Trophées', 'Mes trophées');
     setScreen('trophies');
   };
 
@@ -1233,11 +1329,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    recordActivity('Consultation de son bloc-notes', 'Bloc-notes', 'Notes personnelles');
     setScreen('notebook');
   };
 
-  const goToPreBlock = (context: PreBlockContext = 'surgery') => {
-    setPreBlockContext(context);
+  const goToPreBlock = () => {
     setScreen('preblock');
   };
 
@@ -1315,65 +1411,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setDraft(createInitialDraft(internalId));
     setSummaryMode('review');
     setScreen('welcome');
+    recordActivity(
+      'Ajout d’une intervention au journal',
+      'Intervention',
+      getChoiceLabel(surgicalProcedureOptions, intervention.procedure)
+    );
 
     return intervention;
-  };
-
-  const saveObstetricGesture = () => {
-    const internalId = obstetricDraft.internalId ?? selectedInternal?.id ?? null;
-    const gesture = obstetricDraft.gesture.trim();
-    const instrumentalExtraction =
-      obstetricDraft.instrumentalExtraction?.trim() || null;
-    const vacuumType = obstetricDraft.vacuumType?.trim() || null;
-    const forcepsType = obstetricDraft.forcepsType?.trim() || null;
-    const indication = obstetricDraft.indication.trim();
-
-    if (!internalId || !obstetricDraft.date || !obstetricDraft.seniorId) {
-      return null;
-    }
-
-    if (!gesture || !indication) {
-      return null;
-    }
-
-    if (gesture === 'Extraction instrumentales' && !instrumentalExtraction) {
-      return null;
-    }
-
-    if (instrumentalExtraction === 'Ventouse' && !vacuumType) {
-      return null;
-    }
-
-    if (instrumentalExtraction === 'Forceps' && !forcepsType) {
-      return null;
-    }
-
-    const savedGesture: SavedObstetricGesture = {
-      ...obstetricDraft,
-      internalId,
-      gesture,
-      instrumentalExtraction:
-        gesture === 'Extraction instrumentales' ? instrumentalExtraction : null,
-      vacuumType:
-        gesture === 'Extraction instrumentales' &&
-        instrumentalExtraction === 'Ventouse'
-          ? vacuumType
-          : null,
-      forcepsType:
-        gesture === 'Extraction instrumentales' &&
-        instrumentalExtraction === 'Forceps'
-          ? forcepsType
-          : null,
-      indication,
-      id: `${Date.now()}`,
-      savedAt: new Date().toISOString(),
-    };
-
-    setSavedObstetricGestures((current) => [savedGesture, ...current]);
-    setObstetricDraft(createInitialObstetricDraft(internalId));
-    setScreen('welcome');
-
-    return savedGesture;
   };
 
   const createInternalProfile = (
@@ -1553,7 +1597,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const normalizedLoginId = normalizeCredentialValue(sanitizedInput.loginId);
     const loginAlreadyExists =
-      normalizedLoginId === 'admin' ||
+      RESERVED_ADMIN_LOGIN_IDS.has(normalizedLoginId) ||
       internalProfiles.some(
         (profile) =>
           profile.id !== profileId &&
@@ -1679,7 +1723,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const normalizedLoginId = normalizeCredentialValue(sanitizedInput.loginId);
     const loginAlreadyExists =
-      normalizedLoginId === 'admin' ||
+      RESERVED_ADMIN_LOGIN_IDS.has(normalizedLoginId) ||
       internalProfiles.some(
         (profile) =>
           normalizeCredentialValue(profile.loginId) === normalizedLoginId
@@ -1747,7 +1791,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const normalizedLoginId = normalizeCredentialValue(sanitizedInput.loginId);
     const loginAlreadyExists =
-      normalizedLoginId === 'admin' ||
+      RESERVED_ADMIN_LOGIN_IDS.has(normalizedLoginId) ||
       internalProfiles.some(
         (profile) =>
           normalizeCredentialValue(profile.loginId) === normalizedLoginId
@@ -1812,7 +1856,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const normalizedLoginId = normalizeCredentialValue(sanitizedInput.loginId);
     const loginAlreadyExists =
-      normalizedLoginId === 'admin' ||
+      RESERVED_ADMIN_LOGIN_IDS.has(normalizedLoginId) ||
       internalProfiles.some(
         (profile) =>
           normalizeCredentialValue(profile.loginId) === normalizedLoginId
@@ -2091,9 +2135,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSavedInterventions((current) =>
       current.filter((intervention) => intervention.internalId !== profileId)
     );
-    setSavedObstetricGestures((current) =>
-      current.filter((gesture) => gesture.internalId !== profileId)
-    );
     setNotebookDocuments((current) =>
       current.filter((document) => document.internalId !== profileId)
     );
@@ -2103,11 +2144,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSelectedInternalId((current) => (current === profileId ? null : current));
     setDraft((current) =>
       current.internalId === profileId ? createInitialDraft(null) : current
-    );
-    setObstetricDraft((current) =>
-      current.internalId === profileId
-        ? createInitialObstetricDraft(null)
-        : current
     );
   };
 
@@ -2213,40 +2249,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  const updateObstetricDraftField = <K extends keyof ObstetricJournalDraft>(
-    field: K,
-    value: ObstetricJournalDraft[K]
-  ) => {
-    setObstetricDraft((current) => {
-      const nextDraft: ObstetricJournalDraft = {
-        ...current,
-        [field]: value,
-      };
-
-      if (field === 'gesture' && value !== 'Extraction instrumentales') {
-        nextDraft.instrumentalExtraction = null;
-        nextDraft.vacuumType = null;
-        nextDraft.forcepsType = null;
-      }
-
-      if (
-        field === 'instrumentalExtraction' &&
-        value !== 'Ventouse'
-      ) {
-        nextDraft.vacuumType = null;
-      }
-
-      if (
-        field === 'instrumentalExtraction' &&
-        value !== 'Forceps'
-      ) {
-        nextDraft.forcepsType = null;
-      }
-
-      return nextDraft;
-    });
-  };
-
   const setChecklistLevel = (stepId: string, level: ChecklistLevel) => {
     setDraft((current) => ({
       ...current,
@@ -2288,15 +2290,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
         isSenior,
         sessionRole,
         summaryMode,
-        preBlockContext,
         internalProfiles,
         selectedInternal,
         selectedSenior,
         draft,
-        obstetricDraft,
         lastSavedIntervention,
         savedInterventions,
-        savedObstetricGestures,
+        activityLog,
         notebookDocuments,
         customSurgicalInterventions,
         customSeniors,
@@ -2317,10 +2317,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         historyNavigationView,
         login,
         logout,
+        recordActivity,
         cancelPasswordChangeChallenge,
         completePasswordChangeChallenge,
         goToSurgeryPortal,
-        goToObstetricJournal,
         goToSurgeryHistory,
         clearHistoryNavigationDate,
         goToTrophies,
@@ -2335,7 +2335,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         backToWelcome,
         startNewIntervention,
         saveIntervention,
-        saveObstetricGesture,
         createInternalProfile,
         updateInternalProfile,
         updateInternalCredentials,
@@ -2355,7 +2354,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         clearNotebookDocument,
         updateSavedInterventionAutonomyScore,
         updateDraftField,
-        updateObstetricDraftField,
         setChecklistLevel,
         setAllChecklistLevels,
       }}
