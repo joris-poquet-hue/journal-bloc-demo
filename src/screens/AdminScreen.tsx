@@ -3491,6 +3491,13 @@ export function AdminScreen() {
     return nextDefinition;
   };
 
+  const migrateTrophyCollectionImages = async (
+    definitions: AdminTrophyDefinition[]
+  ): Promise<AdminTrophyDefinition[]> =>
+    Promise.all(
+      definitions.map((definition) => uploadLegacyTrophyImages(definition))
+    );
+
   useEffect(() => {
     if (
       !isAdmin ||
@@ -3518,9 +3525,7 @@ export function AdminScreen() {
 
     async function migrateLegacyTrophyImages() {
       try {
-        const migratedTrophies = await Promise.all(
-          legacyTrophies.map((trophy) => uploadLegacyTrophyImages(trophy))
-        );
+        const migratedTrophies = await migrateTrophyCollectionImages(legacyTrophies);
 
         if (isCancelled) {
           return;
@@ -3587,19 +3592,27 @@ export function AdminScreen() {
 
     try {
       const migratedDraft = await uploadLegacyTrophyImages(normalizedDraft);
-
-      setAdminTrophies((current) => {
-        const nextTrophy = {
-          ...migratedDraft,
-          updatedAt: new Date().toISOString(),
-        };
-
-        return existingTrophy
-          ? current.map((trophy) =>
-              trophy.id === nextTrophy.id ? nextTrophy : trophy
+      const nextTrophies = (
+        existingTrophy
+          ? adminTrophies.map((trophy) =>
+              trophy.id === migratedDraft.id
+                ? {
+                    ...migratedDraft,
+                    updatedAt: new Date().toISOString(),
+                  }
+                : trophy
             )
-          : [nextTrophy, ...current];
-      });
+          : [
+              {
+                ...migratedDraft,
+                updatedAt: new Date().toISOString(),
+              },
+              ...adminTrophies,
+            ]
+      ).map((trophy) => ensureTrophyDefinitionShape(trophy));
+      const migratedTrophies = await migrateTrophyCollectionImages(nextTrophies);
+
+      setAdminTrophies(migratedTrophies);
       setSelectedTrophyId(migratedDraft.id);
       setTrophyFormFeedback({
         kind: 'success',
@@ -6028,6 +6041,9 @@ export function AdminScreen() {
                     type="text"
                     value={trophyDraft.description}
                   />
+                  <small className="field-stack__hint">
+                    Ce champ est facultatif et n’empêche pas l’enregistrement.
+                  </small>
                 </label>
 
                 <div className="admin-create-form__grid">

@@ -784,9 +784,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       loadStoredAdminEvaluations
     );
   const [adminTrophies, setAdminTrophies] = useState<AdminTrophyDefinition[]>(() =>
-    hydrateAdminTrophies(
-      loadStoredArray<AdminTrophyDefinition>(ADMIN_TROPHIES_STORAGE_KEY, [])
-    )
+    hydrateAdminTrophies([])
   );
   const [activityLog, setActivityLog] = useState<ActivityLogEntry[]>(() =>
     loadStoredArray<ActivityLogEntry>(ACTIVITY_LOG_STORAGE_KEY, [])
@@ -1020,42 +1018,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    let isCancelled = false;
-    let savedLocally = false;
-
     try {
-      window.localStorage.setItem(
-        ADMIN_TROPHIES_STORAGE_KEY,
-        JSON.stringify(adminTrophies)
-      );
-      savedLocally = true;
-    } catch (error) {
-      console.warn('Admin trophies storage failed', error);
+      window.localStorage.removeItem(ADMIN_TROPHIES_STORAGE_KEY);
+    } catch {
+      // Ignore local cleanup failures: admin trophies are now server-backed only.
     }
 
+    if (!canSavePersistentState) {
+      setAdminTrophyStorageWarning(null);
+      return;
+    }
+
+    let isCancelled = false;
+
     void (async () => {
-      const savedRemotely = canSavePersistentState
-        ? await persistArrayWithFeedback('admin_trophies', adminTrophies)
-        : false;
+      const savedRemotely = await persistArrayWithFeedback(
+        'admin_trophies',
+        adminTrophies
+      );
 
       if (isCancelled) {
         return;
       }
 
-      if (savedLocally) {
-        setAdminTrophyStorageWarning(null);
-        return;
-      }
-
-      if (savedRemotely) {
-        setAdminTrophyStorageWarning(
-          'Le trophée a bien été enregistré sur le serveur, mais ses images sont trop volumineuses pour le stockage local du navigateur. Il sera rechargé après connexion, mais pas conservé hors ligne sur cet appareil.'
-        );
-        return;
-      }
-
       setAdminTrophyStorageWarning(
-        'Le trophée a bien été enregistré dans la session en cours, mais ses données sont trop volumineuses pour être sauvegardées localement. La sauvegarde serveur n’a pas pu être confirmée. Réduis la taille des images si tu veux garantir sa conservation après rechargement.'
+        savedRemotely
+          ? null
+          : 'Le trophée a bien été enregistré dans la session en cours, mais la sauvegarde serveur n’a pas pu être confirmée. Vérifie la connexion avant de recharger.'
       );
     })();
 
