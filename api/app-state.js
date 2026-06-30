@@ -12,7 +12,7 @@ const ALLOWED_KEYS = new Set([
 const SUPABASE_URL = process.env.SUPABASE_URL?.replace(/\/$/, '');
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const APP_STATE_TABLE = 'app_state';
-const ADMIN_LOGIN_ID = 'administrateur beta';
+const ADMIN_LOGIN_ID = 'adminbeta';
 const ADMIN_PASSWORD = 'Fred3132848002!';
 const REMOVED_DEMO_PROFILE_IDS = new Set([
   'int-1',

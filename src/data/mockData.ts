@@ -24,7 +24,7 @@ import {
 } from '../types';
 import { ensureSurgicalInterventionDefinitionShape } from '../utils/surgicalInterventions';
 
-export const ADMIN_LOGIN_ID = 'administrateur beta';
+export const ADMIN_LOGIN_ID = 'adminbeta';
 export const ADMIN_PASSWORD = 'Fred3132848002!';
 
 export const internalProfiles: InternalProfile[] = [];
