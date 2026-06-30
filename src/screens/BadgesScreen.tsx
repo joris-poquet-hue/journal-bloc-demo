@@ -1,16 +1,13 @@
 import {
-  Check,
   ChevronLeft,
   ChevronRight,
   Clock3,
-  LockKeyhole,
-  Sparkles,
-  Star,
   Trophy,
   X,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 
+import { InternalTrophyCard } from '../components/InternalTrophyCard';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { useAppContext } from '../context/AppContext';
@@ -20,7 +17,6 @@ import {
 } from '../utils/trophyDisplay';
 
 type TrophySectionId = 'earned' | 'progress' | 'secret';
-type TrophyKind = TrophyDisplayModel['section'];
 
 function TrophyHeroIllustration() {
   return (
@@ -63,102 +59,6 @@ function TrophySummaryCard({
         </div>
       </div>
     </section>
-  );
-}
-
-function TrophyCard({
-  item,
-  onPress,
-}: {
-  item: TrophyDisplayModel;
-  onPress: (item: TrophyDisplayModel) => void;
-}) {
-  const hasProgress =
-    typeof item.progressCurrent === 'number' && typeof item.progressTarget === 'number';
-  const progressCurrent = item.progressCurrent ?? 0;
-  const progressTarget = item.progressTarget ?? 0;
-  const progressRatio =
-    hasProgress
-      ? Math.max(0, Math.min(1, progressCurrent / progressTarget))
-      : 0;
-  const badgeAccentClass =
-    item.accent === 'green'
-      ? 'trophy-card__badge--green'
-      : item.accent === 'bronze'
-        ? 'trophy-card__badge--bronze'
-        : item.accent === 'gold'
-          ? 'trophy-card__badge--gold'
-          : item.accent === 'silver'
-            ? 'trophy-card__badge--silver'
-            : 'trophy-card__badge--blue';
-
-  return (
-    <button
-      className={`trophy-card trophy-card--${item.section} trophy-card--${item.accent}`}
-      data-trophy-id={item.id}
-      data-trophy-kind={item.section}
-      onClick={() => onPress(item)}
-      type="button"
-    >
-      {item.section === 'secret' ? (
-        <div className="trophy-card__secret-top">
-          <Sparkles className="trophy-card__secret-star trophy-card__secret-star--left" />
-          <div className="trophy-card__secret-lock">
-            <LockKeyhole aria-hidden="true" strokeWidth={2.05} />
-          </div>
-          <Sparkles className="trophy-card__secret-star trophy-card__secret-star--right" />
-        </div>
-      ) : (
-        <>
-          <div className={`trophy-card__badge ${badgeAccentClass}`}>
-            {item.section === 'earned' ? (
-              <Check aria-hidden="true" strokeWidth={2.5} />
-            ) : (
-              <Star aria-hidden="true" fill="currentColor" strokeWidth={2.2} />
-            )}
-          </div>
-          <div className="trophy-card__medallion">
-            {item.imageSrc ? (
-              <img
-                alt={item.title}
-                className="trophy-card__image"
-                src={item.imageSrc}
-              />
-            ) : (
-              <div className="trophy-card__medallion-inner">
-                <Trophy aria-hidden="true" strokeWidth={2.05} />
-              </div>
-            )}
-          </div>
-        </>
-      )}
-
-      <div className="trophy-card__content">
-        <strong>{item.title}</strong>
-        <span>{item.subtitle}</span>
-      </div>
-
-      {item.section === 'earned' && item.statusLabel ? (
-        <div className="trophy-card__status">
-          <span>{item.statusLabel}</span>
-          <Check aria-hidden="true" strokeWidth={2.4} />
-        </div>
-      ) : null}
-
-      {item.section === 'progress' && hasProgress ? (
-        <div className="trophy-card__progress-block">
-          <div aria-hidden="true" className="trophy-card__progress-track">
-            <div
-              className="trophy-card__progress-fill"
-              style={{ width: `${progressRatio * 100}%` }}
-            />
-          </div>
-          <strong className="trophy-card__progress-label">
-            {progressCurrent} / {progressTarget}
-          </strong>
-        </div>
-      ) : null}
-    </button>
   );
 }
 
@@ -232,7 +132,6 @@ export function TrophiesScreen() {
     trophyDisplay.earned.length > 0 ||
     trophyDisplay.progress.length > 0 ||
     trophyDisplay.secret.length > 0;
-  const handleTrophyPress = (_item: TrophyDisplayModel) => {};
 
   return (
     <>
@@ -278,7 +177,7 @@ export function TrophiesScreen() {
 
                 <div className="trophy-card-grid">
                   {section.previewItems.map((item) => (
-                    <TrophyCard item={item} key={item.id} onPress={handleTrophyPress} />
+                    <InternalTrophyCard item={item} key={item.id} />
                   ))}
                 </div>
               </section>
@@ -331,7 +230,7 @@ export function TrophiesScreen() {
 
             <div className="trophy-section-sheet__grid">
               {activeSheetSection.items.map((item) => (
-                <TrophyCard item={item} key={item.id} onPress={handleTrophyPress} />
+                <InternalTrophyCard item={item} key={item.id} />
               ))}
             </div>
           </div>

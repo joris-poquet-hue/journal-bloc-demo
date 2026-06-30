@@ -135,6 +135,11 @@ type AdminTrophyFilter =
   | 'active'
   | 'inactive';
 type AdminTrophyCardItem = AdminTrophyDefinition & {
+  levelObtainedCounts: Array<{
+    count: number;
+    label: string;
+    tier: TrophyLevelDefinition['tier'];
+  }>;
   obtainedCount: number;
   unlockedTier: ReturnType<typeof getUnlockedTrophyTierForProfile>;
   ruleSummary: string;
@@ -894,6 +899,10 @@ function parseOptionalNumber(value: string) {
 
 function formatObtainedCountLabel(count: number) {
   return `Obtenu par ${count} interne${count > 1 ? 's' : ''}`;
+}
+
+function formatTierObtainedCountLabel(label: string, count: number) {
+  return `${label} obtenu par ${count} interne${count > 1 ? 's' : ''}`;
 }
 
 type AdminActivityBucket = {
@@ -1826,9 +1835,27 @@ export function AdminScreen() {
           adminEvaluations
         );
         const previewProfile = internalProfiles[0] ?? null;
+        const levelObtainedCounts =
+          trophy.format === 'levels'
+            ? trophy.levels.map((level) => ({
+                count: internalProfiles.filter((profile) => {
+                  const unlockedTier = getUnlockedTrophyTierForProfile(
+                    trophy,
+                    profile,
+                    savedInterventions,
+                    adminEvaluations
+                  );
+
+                  return unlockedTier === level.tier;
+                }).length,
+                label: level.label,
+                tier: level.tier,
+              }))
+            : [];
 
         return {
           ...trophy,
+          levelObtainedCounts,
           obtainedCount,
           unlockedTier: previewProfile
             ? getUnlockedTrophyTierForProfile(
@@ -1972,11 +1999,6 @@ export function AdminScreen() {
       );
     });
   }, [trophyCards, trophyFilter, trophySearch]);
-  const selectedTrophy =
-    trophyCards.find((trophy) => trophy.id === selectedTrophyId) ??
-    filteredAdminTrophies[0] ??
-    trophyCards[0] ??
-    null;
 
   const profilesForAdminList = useMemo(
     () =>
@@ -5663,19 +5685,13 @@ export function AdminScreen() {
           <div className="admin-trophy-grid">
             {filteredAdminTrophies.map((trophy) => {
               const previewImage = getTrophyPreviewImage(trophy);
-              const isSelected = selectedTrophy?.id === trophy.id;
               const summaryLabel =
                 trophy.visibility === 'surprise' && trophy.type === 'special'
                   ? 'Règle visible uniquement par l’administrateur.'
                   : trophy.ruleSummary;
 
               return (
-                <article
-                  className={`admin-trophy-card ${
-                    isSelected ? 'admin-trophy-card--selected' : ''
-                  }`}
-                  key={trophy.id}
-                >
+                <article className="admin-trophy-card" key={trophy.id}>
                   <div className="admin-trophy-card__hero">
                     <div className="admin-trophy-card__image">
                       {previewImage ? (
@@ -5708,35 +5724,18 @@ export function AdminScreen() {
 
                   <div className="admin-trophy-card__footer">
                     <span>{formatObtainedCountLabel(trophy.obtainedCount)}</span>
-                    <span>
-                      {trophy.type === 'operatoire'
-                        ? trophy.operativeScope === 'approach'
-                          ? trophy.associatedApproach
-                            ? getChoiceLabel(
-                                approachOptions,
-                                trophy.associatedApproach,
-                                trophy.associatedApproach
-                              )
-                            : 'Voie d’abord à définir'
-                          : trophy.associatedProcedure
-                            ? getChoiceLabel(
-                                surgicalProcedureOptions,
-                                trophy.associatedProcedure,
-                                trophy.associatedProcedure
-                              )
-                            : 'Intervention à définir'
-                        : TROPHY_VISIBILITY_DESCRIPTIONS[trophy.visibility]}
-                    </span>
+                    {trophy.levelObtainedCounts.length ? (
+                      <div className="admin-trophy-card__impact-list">
+                        {trophy.levelObtainedCounts.map((level) => (
+                          <span key={level.tier}>
+                            {formatTierObtainedCountLabel(level.label, level.count)}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="admin-trophy-card__actions">
-                    <button
-                      className="mini-button mini-button--secondary"
-                      onClick={() => setSelectedTrophyId(trophy.id)}
-                      type="button"
-                    >
-                      Aperçu
-                    </button>
                     <button
                       className="mini-button mini-button--secondary"
                       onClick={() => handleEditTrophy(trophy.id)}
@@ -5782,68 +5781,6 @@ export function AdminScreen() {
             </div>
           </SectionCard>
         )}
-
-        {selectedTrophy ? (
-          <SectionCard
-            className="admin-dashboard-card admin-trophy-preview-shell"
-            description="Prévisualisation de l’affichage interne selon la configuration actuelle."
-            title="Aperçu côté interne"
-          >
-            <div className="admin-trophy-preview-panel">
-              <div className="admin-trophy-preview-card">
-                <div className="admin-trophy-preview-card__badge">
-                  {selectedTrophy.visibility === 'surprise' ? 'Trophée surprise' : 'Progression visible'}
-                </div>
-                <div className="admin-trophy-preview-card__visual">
-                  {getTrophyPreviewImage(selectedTrophy) ? (
-                    <img
-                      alt={selectedTrophy.title}
-                      src={getTrophyPreviewImage(selectedTrophy) as string}
-                    />
-                  ) : (
-                    <Trophy aria-hidden="true" />
-                  )}
-                </div>
-                <strong>{selectedTrophy.title}</strong>
-                <p>{selectedTrophy.description}</p>
-                {selectedTrophy.format === 'levels' ? (
-                  <div className="admin-preview-level-list">
-                    {selectedTrophy.levels.map((level) => (
-                      <div className="admin-preview-level-item" key={level.tier}>
-                        <span>{level.label}</span>
-                        <small>
-                          {level.threshold ?? 0} intervention(s){' '}
-                          {selectedTrophy.trackedInterventionStatus === 'evaluated'
-                            ? 'évaluée(s)'
-                            : 'enregistrée(s)'}
-                        </small>
-                      </div>
-                    ))}
-                  </div>
-                ) : selectedTrophy.visibility === 'surprise' ? (
-                  <div className="admin-trophy-preview-card__surprise-note">
-                    Ce trophée restera invisible avant son obtention.
-                  </div>
-                ) : null}
-              </div>
-
-              <div className="admin-trophy-preview-meta">
-                <div className="admin-preview-stat">
-                  <strong>{selectedTrophy.obtainedCount}</strong>
-                  <span>interne(s) l’ont obtenu</span>
-                </div>
-                <div className="admin-preview-stat">
-                  <strong>{TROPHY_STATUS_LABELS[selectedTrophy.status]}</strong>
-                  <span>statut actuel</span>
-                </div>
-                <div className="admin-preview-stat">
-                  <strong>{TROPHY_FORMAT_LABELS[selectedTrophy.format]}</strong>
-                  <span>format configuré</span>
-                </div>
-              </div>
-            </div>
-          </SectionCard>
-        ) : null}
 
         <SectionCard className="admin-dashboard-card admin-info-card">
           <div className="admin-info-card__body">

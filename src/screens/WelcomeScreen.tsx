@@ -2,6 +2,7 @@ import { ChevronRight, NotebookTabs, Trophy } from 'lucide-react';
 import { useMemo } from 'react';
 
 import { InternalAvatar } from '../components/InternalAvatar';
+import { InternalTrophyCard } from '../components/InternalTrophyCard';
 import {
   formatInterventionCardDate,
   SurgeryInterventionCard,
@@ -49,19 +50,20 @@ export function WelcomeScreen() {
         adminTrophies,
         profile: selectedInternal,
         savedInterventions,
-      }),
+    }),
     [adminEvaluations, adminTrophies, savedInterventions, selectedInternal]
   );
-  const trophyPreview =
-    [...trophyDisplay.earned, ...trophyDisplay.progress]
-      .filter((badge) => badge.imageSrc)
-      .slice(0, 3)
-      .map((badge) => ({
-        id: badge.id,
-        imageSrc: badge.imageSrc as string,
-        label: badge.section === 'earned' ? 'Obtenu' : 'En cours',
-        title: badge.title,
-      }));
+  const trophyPreview = useMemo(() => {
+    if (trophyDisplay.earned.length > 0) {
+      return [...trophyDisplay.earned, ...trophyDisplay.progress].slice(0, 3);
+    }
+
+    if (trophyDisplay.progress.length > 0) {
+      return trophyDisplay.progress.slice(0, 1);
+    }
+
+    return [];
+  }, [trophyDisplay.earned, trophyDisplay.progress]);
 
   return (
     <main className="screen-shell dashboard-screen">
@@ -109,17 +111,10 @@ export function WelcomeScreen() {
           </header>
           {trophyPreview.length ? (
             <div className="dashboard-trophy-strip" role="list" aria-label="Aperçu des trophées">
-              {trophyPreview.map((badge) => (
-                <article
-                  className={`dashboard-trophy-chip ${
-                    badge.label === 'Obtenu' ? '' : 'dashboard-trophy-chip--upcoming'
-                  }`}
-                  key={badge.id}
-                  role="listitem"
-                >
-                  <img alt={badge.title} src={badge.imageSrc} />
-                  <span>{badge.label}</span>
-                </article>
+              {trophyPreview.map((item) => (
+                <div key={item.id} role="listitem">
+                  <InternalTrophyCard compact item={item} />
+                </div>
               ))}
             </div>
           ) : (

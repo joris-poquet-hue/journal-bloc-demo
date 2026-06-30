@@ -30,6 +30,8 @@ export type TrophyDisplayModel = {
   description: string;
   id: string;
   imageSrc: string | null;
+  isSecret: boolean;
+  isUnlocked: boolean;
   progressCurrent: number | null;
   progressTarget: number | null;
   section: TrophyDisplayStatus;
@@ -217,11 +219,11 @@ export function buildTrophyDisplayModels({
               : 'blue';
       const subtitle =
         section === 'secret'
-          ? 'Continue à progresser pour le débloquer.'
+          ? 'Continue à progresser pour découvrir ce trophée.'
           : isEarned
             ? trophy.format === 'levels' && unlockedTier
               ? `Niveau ${getTierLabel(unlockedTier)}`
-              : trophy.description
+              : trophy.description || 'Trophée débloqué'
             : trophy.format === 'levels' && snapshot.nextTier
               ? `Prochain palier : ${getTierLabel(snapshot.nextTier)}`
               : trophy.description || buildTrophyRuleSummary(trophy);
@@ -231,16 +233,20 @@ export function buildTrophyDisplayModels({
         awardedAt: snapshot.awardedAt,
         description: trophy.description,
         id: trophy.id,
-        imageSrc:
-          section === 'secret'
-            ? null
-            : getImageForDefinition(trophy, unlockedTier, snapshot.nextTier),
+        imageSrc: isEarned
+          ? getImageForDefinition(trophy, unlockedTier, snapshot.nextTier)
+          : null,
+        isSecret,
+        isUnlocked: isEarned,
         progressCurrent: section === 'progress' ? snapshot.progressCurrent : null,
         progressTarget: section === 'progress' ? snapshot.progressTarget : null,
         section,
         statusLabel: isEarned ? 'Débloqué' : null,
         subtitle,
-        title: trophy.title || 'Trophée sans titre',
+        title:
+          isSecret && !isEarned
+            ? 'Trophée secret'
+            : trophy.title || 'Trophée sans titre',
       } satisfies TrophyDisplayModel;
     })
     .sort((left, right) => toTimestamp(right.awardedAt) - toTimestamp(left.awardedAt));
