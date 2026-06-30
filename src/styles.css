@@ -1662,6 +1662,16 @@ button {
   box-shadow: 0 14px 28px rgba(180, 35, 24, 0.14);
 }
 
+.app-screen-loading {
+  width: min(720px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 48px 24px 120px;
+  color: var(--text-muted);
+  font-size: 0.98rem;
+  font-weight: 700;
+  text-align: center;
+}
+
 .app-shell--with-bottom-nav .screen-shell {
   padding-bottom: calc(132px + env(safe-area-inset-bottom));
 }

@@ -29,6 +29,10 @@ function getAuthHeaders(): Record<string, string> {
   };
 }
 
+export function getPersistentStorageAuthHeaders() {
+  return getAuthHeaders();
+}
+
 export function setPersistentStorageCredentials(
   loginId: string,
   password: string

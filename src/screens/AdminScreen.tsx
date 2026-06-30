@@ -98,6 +98,7 @@ import {
   loadPersistentArray,
   savePersistentArray,
 } from '../services/persistentStorage';
+import { uploadTrophyImage } from '../services/trophyImageStorage';
 
 type AdminView =
   | 'home'
@@ -142,6 +143,7 @@ type TrophyFormFeedback = {
   kind: 'success' | 'error';
   message: string;
 } | null;
+type TrophyImageKey = keyof AdminTrophyDefinition['images'];
 type AdminProfileViewSource = 'profiles' | 'history';
 type ProfileAccountTab = 'internal' | 'senior';
 type ProfileStatsTab = 'history' | 'progress';
@@ -1585,6 +1587,11 @@ export function AdminScreen() {
   const [trophyFormFeedback, setTrophyFormFeedback] =
     useState<TrophyFormFeedback>(null);
   const [trophyValidationErrors, setTrophyValidationErrors] = useState<string[]>([]);
+  const [uploadingTrophyImageKeys, setUploadingTrophyImageKeys] = useState<
+    TrophyImageKey[]
+  >([]);
+  const [isSavingTrophy, setIsSavingTrophy] = useState(false);
+  const hasAttemptedLegacyTrophyImageMigrationRef = useRef(false);
   const [createForm, setCreateForm] =
     useState<CreateInternalProfileInput>(EMPTY_CREATE_FORM);
   const [editingInternalCredentialsProfileId, setEditingInternalCredentialsProfileId] =
@@ -3348,20 +3355,28 @@ export function AdminScreen() {
     }));
   };
 
-  const handleTrophyImageUpload = (
-    imageKey: keyof AdminTrophyDefinition['images'],
+  const handleTrophyImageUpload = async (
+    imageKey: TrophyImageKey,
     file: File | null
   ) => {
     if (!file) {
       return;
     }
 
-    const reader = new FileReader();
+    setTrophyFormFeedback(null);
+    setUploadingTrophyImageKeys((current) =>
+      current.includes(imageKey) ? current : [...current, imageKey]
+    );
 
-    reader.onload = () => {
-      const nextImageValue =
-        typeof reader.result === 'string' ? reader.result : null;
+    try {
+      const { publicUrl } = await uploadTrophyImage({
+        file,
+        fileName: file.name,
+        imageKey,
+        trophyId: trophyDraft?.id ?? 'trophy',
+      });
 
+      const nextImageValue = publicUrl;
       updateTrophyDraft((current) => ({
         ...current,
         images: {
@@ -3378,20 +3393,33 @@ export function AdminScreen() {
         ),
         updatedAt: new Date().toISOString(),
       }));
-    };
 
-    reader.readAsDataURL(file);
+      setTrophyFormFeedback({
+        kind: 'success',
+        message: 'L’image du trophée a été téléversée sur le serveur.',
+      });
+    } catch (error) {
+      setTrophyFormFeedback({
+        kind: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Le téléversement de l’image du trophée a échoué.',
+      });
+    } finally {
+      setUploadingTrophyImageKeys((current) =>
+        current.filter((currentKey) => currentKey !== imageKey)
+      );
+    }
   };
 
-  const handleTrophyImageRemove = (
-    imageKey: keyof AdminTrophyDefinition['images']
-  ) => {
+  const handleTrophyImageRemove = (imageKey: TrophyImageKey) => {
     updateTrophyDraft((current) => ({
       ...current,
       images: {
         ...current.images,
-          [imageKey]: null,
-        },
+        [imageKey]: null,
+      },
       levels: current.levels.map((level) =>
         level.tier === imageKey
           ? {
@@ -3404,7 +3432,126 @@ export function AdminScreen() {
     }));
   };
 
-  const handleSaveTrophy = () => {
+  const getTrophyImageFileExtension = (contentType: string) => {
+    if (contentType === 'image/png') {
+      return 'png';
+    }
+
+    if (contentType === 'image/webp') {
+      return 'webp';
+    }
+
+    if (contentType === 'image/gif') {
+      return 'gif';
+    }
+
+    return 'jpg';
+  };
+
+  const hasLegacyTrophyImage = (imageValue: string | null) =>
+    Boolean(imageValue && imageValue.startsWith('data:'));
+
+  const uploadLegacyTrophyImages = async (
+    definition: AdminTrophyDefinition
+  ): Promise<AdminTrophyDefinition> => {
+    const nextDefinition = ensureTrophyDefinitionShape(definition);
+    const imageKeys = TROPHY_IMAGE_FIELDS.map((field) => field.key);
+
+    for (const imageKey of imageKeys) {
+      const imageValue = nextDefinition.images[imageKey];
+
+      if (!imageValue || !hasLegacyTrophyImage(imageValue)) {
+        continue;
+      }
+
+      const imageResponse = await fetch(imageValue);
+      const imageBlob = await imageResponse.blob();
+      const extension = getTrophyImageFileExtension(imageBlob.type);
+      const imageFile = new File([imageBlob], `${imageKey}.${extension}`, {
+        type: imageBlob.type || 'image/jpeg',
+      });
+      const { publicUrl } = await uploadTrophyImage({
+        file: imageFile,
+        fileName: imageFile.name,
+        imageKey,
+        trophyId: nextDefinition.id,
+      });
+
+      nextDefinition.images[imageKey] = publicUrl;
+      nextDefinition.levels = nextDefinition.levels.map((level) =>
+        level.tier === imageKey
+          ? {
+              ...level,
+              imageSrc: publicUrl,
+            }
+          : level
+      );
+    }
+
+    return nextDefinition;
+  };
+
+  useEffect(() => {
+    if (
+      !isAdmin ||
+      trophyDraft ||
+      view === 'trophy-editor' ||
+      hasAttemptedLegacyTrophyImageMigrationRef.current
+    ) {
+      return;
+    }
+
+    const legacyTrophies = adminTrophies.filter((trophy) =>
+      Object.values(ensureTrophyDefinitionShape(trophy).images).some((imageValue) =>
+        hasLegacyTrophyImage(imageValue)
+      )
+    );
+
+    if (!legacyTrophies.length) {
+      hasAttemptedLegacyTrophyImageMigrationRef.current = true;
+      return;
+    }
+
+    hasAttemptedLegacyTrophyImageMigrationRef.current = true;
+
+    let isCancelled = false;
+
+    async function migrateLegacyTrophyImages() {
+      try {
+        const migratedTrophies = await Promise.all(
+          legacyTrophies.map((trophy) => uploadLegacyTrophyImages(trophy))
+        );
+
+        if (isCancelled) {
+          return;
+        }
+
+        const migratedTrophyMap = new Map(
+          migratedTrophies.map((trophy) => [
+            trophy.id,
+            {
+              ...trophy,
+              updatedAt: new Date().toISOString(),
+            },
+          ])
+        );
+
+        setAdminTrophies((current) =>
+          current.map((trophy) => migratedTrophyMap.get(trophy.id) ?? trophy)
+        );
+      } catch (error) {
+        console.warn('Legacy trophy image migration failed', error);
+      }
+    }
+
+    void migrateLegacyTrophyImages();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [adminTrophies, isAdmin, setAdminTrophies, trophyDraft, view]);
+
+  const handleSaveTrophy = async () => {
     if (!trophyDraft) {
       return;
     }
@@ -3435,23 +3582,42 @@ export function AdminScreen() {
       }
     }
 
-    setAdminTrophies((current) => {
-      const nextTrophy = {
-        ...normalizedDraft,
-        updatedAt: new Date().toISOString(),
-      };
+    setIsSavingTrophy(true);
+    setTrophyFormFeedback(null);
 
-      return existingTrophy
-        ? current.map((trophy) => (trophy.id === nextTrophy.id ? nextTrophy : trophy))
-        : [nextTrophy, ...current];
-    });
-    setSelectedTrophyId(normalizedDraft.id);
-    setTrophyFormFeedback({
-      kind: 'success',
-      message: 'Le trophée a été enregistré.',
-    });
-    setView('trophies');
-    setTrophyDraft(null);
+    try {
+      const migratedDraft = await uploadLegacyTrophyImages(normalizedDraft);
+
+      setAdminTrophies((current) => {
+        const nextTrophy = {
+          ...migratedDraft,
+          updatedAt: new Date().toISOString(),
+        };
+
+        return existingTrophy
+          ? current.map((trophy) =>
+              trophy.id === nextTrophy.id ? nextTrophy : trophy
+            )
+          : [nextTrophy, ...current];
+      });
+      setSelectedTrophyId(migratedDraft.id);
+      setTrophyFormFeedback({
+        kind: 'success',
+        message: 'Le trophée a été enregistré.',
+      });
+      setView('trophies');
+      setTrophyDraft(null);
+    } catch (error) {
+      setTrophyFormFeedback({
+        kind: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Le trophée n’a pas pu être enregistré.',
+      });
+    } finally {
+      setIsSavingTrophy(false);
+    }
   };
 
   const handleCancelTrophyEditor = () => {
@@ -5795,10 +5961,11 @@ export function AdminScreen() {
           <div />
           <button
             className="app-button app-button--primary"
+            disabled={isSavingTrophy || uploadingTrophyImageKeys.length > 0}
             onClick={handleSaveTrophy}
             type="button"
           >
-            Enregistrer
+            {isSavingTrophy ? 'Enregistrement...' : 'Enregistrer'}
           </button>
         </div>
 
@@ -5849,13 +6016,15 @@ export function AdminScreen() {
                 </label>
 
                 <label className="field-stack admin-create-form__field--full">
-                  <span className="field-stack__label">Description courte</span>
+                  <span className="field-stack__label">
+                    Description courte (optionnelle)
+                  </span>
                   <input
                     className="field-input"
                     onChange={(event) =>
                       handleTrophyDraftFieldChange('description', event.target.value)
                     }
-                    placeholder="Décrivez brièvement ce que récompense ce trophée."
+                    placeholder="Optionnel : décrivez brièvement ce que récompense ce trophée."
                     type="text"
                     value={trophyDraft.description}
                   />
@@ -6530,6 +6699,7 @@ export function AdminScreen() {
                   : TROPHY_IMAGE_FIELDS.filter((field) => field.key === 'single')
                 ).map((field) => {
                   const imageValue = trophyDraft.images[field.key];
+                  const isUploading = uploadingTrophyImageKeys.includes(field.key);
 
                   return (
                     <div className="admin-image-card" key={field.key}>
@@ -6542,9 +6712,10 @@ export function AdminScreen() {
                         )}
                       </div>
                       <label className="mini-button mini-button--secondary admin-image-card__upload">
-                        Changer l’image
+                        {isUploading ? 'Téléversement...' : 'Changer l’image'}
                         <input
                           accept="image/*"
+                          disabled={isUploading}
                           hidden
                           onChange={(event) =>
                             handleTrophyImageUpload(
@@ -6558,6 +6729,7 @@ export function AdminScreen() {
                       {imageValue ? (
                         <button
                           className="mini-button mini-button--danger"
+                          disabled={isUploading}
                           onClick={() => handleTrophyImageRemove(field.key)}
                           type="button"
                         >
@@ -6594,7 +6766,7 @@ export function AdminScreen() {
                   <div className="admin-surprise-preview__checklist">
                     <span>Image du trophée</span>
                     <span>Nom du trophée</span>
-                    <span>Description courte</span>
+                    <span>Description courte si renseignée</span>
                     <span>Date d’obtention si disponible</span>
                   </div>
                 </div>

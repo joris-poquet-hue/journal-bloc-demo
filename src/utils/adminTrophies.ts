@@ -807,10 +807,6 @@ export function validateTrophyDefinition(definition: AdminTrophyDefinition) {
     errors.push('Le nom du trophée est obligatoire.');
   }
 
-  if (!definition.description.trim()) {
-    errors.push('La description courte est obligatoire.');
-  }
-
   if (definition.type === 'operatoire') {
     if (
       definition.operativeScope === 'procedure' &&
