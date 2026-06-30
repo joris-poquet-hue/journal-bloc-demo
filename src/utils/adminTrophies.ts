@@ -183,7 +183,10 @@ function matchesRole(intervention: SavedIntervention, role: GlobalRole | '') {
 function matchesBaseFilters(
   intervention: SavedIntervention,
   definition: AdminTrophyDefinition,
-  adminEvaluations: Record<string, AdminInterventionEvaluation>
+  adminEvaluations: Record<string, AdminInterventionEvaluation>,
+  options?: {
+    ignoreTrackedStatus?: boolean;
+  }
 ) {
   if (
     definition.operativeScope === 'procedure' &&
@@ -211,6 +214,10 @@ function matchesBaseFilters(
     return false;
   }
 
+  if (options?.ignoreTrackedStatus) {
+    return true;
+  }
+
   return matchesTrackedStatus(
     intervention,
     adminEvaluations,
@@ -222,12 +229,15 @@ function getRelevantInterventionsForProfile(
   definition: AdminTrophyDefinition,
   profile: InternalProfile,
   interventions: SavedIntervention[],
-  adminEvaluations: Record<string, AdminInterventionEvaluation>
+  adminEvaluations: Record<string, AdminInterventionEvaluation>,
+  options?: {
+    ignoreTrackedStatus?: boolean;
+  }
 ) {
   return interventions.filter(
     (intervention) =>
       intervention.internalId === profile.id &&
-      matchesBaseFilters(intervention, definition, adminEvaluations)
+      matchesBaseFilters(intervention, definition, adminEvaluations, options)
   );
 }
 
@@ -588,21 +598,31 @@ export function getTrophyProgressSnapshotForProfile(
   }
 
   if (definition.format === 'levels') {
-    const relevantInterventions = getRelevantInterventionsForProfile(
+    const progressInterventions = getRelevantInterventionsForProfile(
+      definition,
+      profile,
+      interventions,
+      adminEvaluations,
+      {
+        ignoreTrackedStatus: true,
+      }
+    ).sort((left, right) => left.savedAt.localeCompare(right.savedAt));
+    const unlockInterventions = getRelevantInterventionsForProfile(
       definition,
       profile,
       interventions,
       adminEvaluations
     ).sort((left, right) => left.savedAt.localeCompare(right.savedAt));
-    const currentCount = relevantInterventions.length;
-    const averageAutonomy = getAverageAutonomy(relevantInterventions);
+    const currentCount = progressInterventions.length;
+    const unlockCount = unlockInterventions.length;
+    const averageAutonomy = getAverageAutonomy(unlockInterventions);
     let unlockedTier: BadgeTier | null = null;
     let awardedAt: string | null = null;
     let nextTier: BadgeTier | null = null;
     let nextThreshold: number | null = null;
     const lastRelevantIntervention =
-      relevantInterventions.length > 0
-        ? relevantInterventions[relevantInterventions.length - 1]
+      unlockInterventions.length > 0
+        ? unlockInterventions[unlockInterventions.length - 1]
         : null;
 
     definition.levels.forEach((level) => {
@@ -610,12 +630,12 @@ export function getTrophyProgressSnapshotForProfile(
       const autonomySatisfied =
         level.autonomyMin == null ||
         (averageAutonomy != null && averageAutonomy >= level.autonomyMin);
-      const levelUnlocked = currentCount >= threshold && autonomySatisfied;
+      const levelUnlocked = unlockCount >= threshold && autonomySatisfied;
 
       if (levelUnlocked) {
         unlockedTier = level.tier;
         awardedAt =
-          relevantInterventions[Math.max(0, threshold - 1)]?.savedAt ??
+          unlockInterventions[Math.max(0, threshold - 1)]?.savedAt ??
           lastRelevantIntervention?.savedAt ??
           awardedAt;
       } else if (!nextTier) {

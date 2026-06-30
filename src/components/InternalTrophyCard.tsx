@@ -43,6 +43,7 @@ function getProgressFillStyle(progressRatio: number): CSSProperties {
 
   return {
     width: `${progressRatio * 100}%`,
+    minWidth: progressRatio > 0 ? '12px' : '0',
     background: `linear-gradient(90deg, ${startColor} 0%, ${endColor} 100%)`,
   };
 }

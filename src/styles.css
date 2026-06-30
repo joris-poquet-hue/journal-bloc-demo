@@ -472,6 +472,7 @@
 }
 
 .internal-trophy-card {
+  width: 100%;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -547,7 +548,9 @@
 .internal-trophy-card__copy {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 6px;
+  text-align: center;
 }
 
 .internal-trophy-card__copy strong {
@@ -565,6 +568,7 @@
 
 .internal-trophy-card__progress {
   margin-top: auto;
+  width: 100%;
 }
 
 .internal-trophy-card__progress-track {
@@ -601,14 +605,40 @@
 
 .internal-trophy-card--compact {
   min-height: 0;
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
 }
 
 .internal-trophy-card--compact .internal-trophy-card__visual {
-  min-height: 132px;
+  min-height: 104px;
+  padding: 12px;
 }
 
 .internal-trophy-card--compact .internal-trophy-card__copy strong {
   font-size: 0.95rem;
+}
+
+.internal-trophy-card--compact .internal-trophy-card__mystery {
+  width: 78px;
+  height: 78px;
+  font-size: 2.2rem;
+}
+
+.internal-trophy-card--compact .internal-trophy-card__image {
+  width: min(100%, 82px);
+}
+
+.internal-trophy-card--compact .internal-trophy-card__copy,
+.internal-trophy-card--compact .internal-trophy-card__progress,
+.internal-trophy-card--compact .internal-trophy-card__status {
+  grid-column: 2;
+}
+
+.internal-trophy-card--compact .internal-trophy-card__copy {
+  align-items: flex-start;
+  text-align: left;
 }
 
 @media (max-width: 420px) {
@@ -672,6 +702,26 @@
 
   .internal-trophy-card__copy strong {
     font-size: 0.92rem;
+  }
+
+  .internal-trophy-card--compact {
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .internal-trophy-card--compact .internal-trophy-card__visual {
+    min-height: 92px;
+    padding: 10px;
+  }
+
+  .internal-trophy-card--compact .internal-trophy-card__mystery {
+    width: 68px;
+    height: 68px;
+    font-size: 2rem;
+  }
+
+  .internal-trophy-card--compact .internal-trophy-card__image {
+    width: min(100%, 72px);
   }
 }
 
@@ -5132,16 +5182,6 @@ button {
 
 .dashboard-trophy-strip > [role='listitem'] {
   min-width: 0;
-}
-
-@media (min-width: 720px) {
-  .dashboard-trophy-strip {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .trophy-card-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 .approach-icon {
