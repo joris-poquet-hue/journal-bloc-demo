@@ -4,9 +4,12 @@ node_modules
 dist
 build
 web-build
+playwright-report
+test-results
 *.log
 .DS_Store
 .vercel
 .env*
 !.env.example
 supabase/.temp
+supabase/auth-users.local.json
