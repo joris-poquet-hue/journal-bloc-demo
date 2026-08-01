@@ -261,15 +261,23 @@ module.exports = async function handler(request, response) {
     }
 
     if (requestsEmailConfirmation) {
+      const purpose = action === 'complete-setup' ? 'activation' : 'change';
+
       await requestConfirmedEmailChange(
         request,
         authenticatedAccessToken,
         action === 'complete-setup'
-          ? { email: contactEmail, password }
-          : { email: contactEmail }
+          ? {
+              data: { emailTemplatePurpose: purpose },
+              email: contactEmail,
+              password,
+            }
+          : {
+              data: { emailTemplatePurpose: purpose },
+              email: contactEmail,
+            }
       );
 
-      const purpose = action === 'complete-setup' ? 'activation' : 'change';
       await storePendingEmailConfirmation(identity.profile, contactEmail, purpose);
       await recordEmailConfirmationRequest(identity.profile, purpose);
       await clearAuthFailures(rateLimitScope);
@@ -285,13 +293,41 @@ module.exports = async function handler(request, response) {
       });
     }
 
-    await authAdminRequest(
-      `admin/users/${encodeURIComponent(identity.profile.auth_user_id)}`,
-      {
-        body: { password },
-        method: 'PUT',
+    if (authenticatedAccessToken) {
+      const { payload, response: passwordResponse } = await supabaseRequest(
+        `${SUPABASE_URL}/auth/v1/user`,
+        {
+          body: JSON.stringify({ password }),
+          headers: {
+            apikey: SUPABASE_SERVICE_ROLE_KEY,
+            Authorization: `Bearer ${authenticatedAccessToken}`,
+            'Content-Type': 'application/json',
+            ...getForwardedAuthHeaders(request),
+          },
+          method: 'PUT',
+        }
+      );
+
+      if (!passwordResponse.ok) {
+        throw Object.assign(
+          new Error(
+            getAuthErrorMessage(
+              payload,
+              'Impossible de modifier le mot de passe.'
+            )
+          ),
+          { status: passwordResponse.status }
+        );
       }
-    );
+    } else {
+      await authAdminRequest(
+        `admin/users/${encodeURIComponent(identity.profile.auth_user_id)}`,
+        {
+          body: { password },
+          method: 'PUT',
+        }
+      );
+    }
 
     if (isRecoverySession) {
       await restRequest('application_sessions', {

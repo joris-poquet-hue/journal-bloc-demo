@@ -1,0 +1,20 @@
+{{ if eq .Data.emailTemplatePurpose "activation" }}
+<h2>Bienvenue sur Mon Journal de Bloc</h2>
+<p>Bonjour,</p>
+<p>Votre compte a été créé par l’administrateur de votre établissement.</p>
+<p>Pour terminer son activation et accéder à votre espace, confirmez votre adresse e-mail en cliquant sur le bouton ci-dessous.</p>
+<p><a href="{{ .ConfirmationURL }}">Confirmer mon adresse e-mail</a></p>
+<p>Ce lien est personnel et valable pendant une heure.</p>
+<p>Si vous ne reconnaissez pas cette demande, n’utilisez pas ce lien et contactez votre administrateur local.</p>
+<p>L’équipe Mon Journal de Bloc</p>
+{{ else }}
+<h2>Confirmation de votre nouvelle adresse e-mail</h2>
+<p>Bonjour,</p>
+<p>Une demande de modification de l’adresse e-mail associée à votre compte Mon Journal de Bloc a été effectuée.</p>
+<p>Cliquez sur le bouton ci-dessous pour confirmer votre nouvelle adresse e-mail :</p>
+<p><strong>{{ .NewEmail }}</strong></p>
+<p><a href="{{ .ConfirmationURL }}">Confirmer ma nouvelle adresse e-mail</a></p>
+<p>Sans confirmation, votre adresse e-mail actuelle restera inchangée.</p>
+<p>Si vous n’êtes pas à l’origine de cette demande, ignorez ce message et contactez votre administrateur local.</p>
+<p>L’équipe Mon Journal de Bloc</p>
+{{ end }}

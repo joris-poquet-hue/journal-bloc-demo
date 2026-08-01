@@ -73,15 +73,39 @@ test('la première connexion saisit une seule adresse et attend sa confirmation 
   assert.doesNotMatch(passwordApi, /confirmContactEmail/);
   assert.match(passwordApi, /requestConfirmedEmailChange/);
   assert.match(passwordApi, /pendingEmailConfirmation: true/);
+  assert.match(passwordApi, /emailTemplatePurpose: purpose/);
   assert.doesNotMatch(passwordApi, /email_confirm: true/);
-  assert.match(passwordApi, /\{ email: contactEmail, password \}/);
+  assert.match(passwordApi, /email: contactEmail,[\s\S]*password/);
   assert.doesNotMatch(loginScreen, /Confirmer l’adresse e-mail/);
   assert.match(loginScreen, /Un lien te sera envoyé/);
   assert.match(loginScreen, /Mot de passe ou clé d’accès/);
   assert.doesNotMatch(appContext, /sanitizedContactEmailConfirmation/);
   assert.match(callbackApi, /callbackType !== 'email_change'/);
   assert.match(callbackApi, /pending_activation: false/);
+  assert.match(callbackApi, /delete confirmedAuthMetadata\.emailTemplatePurpose/);
   assert.match(callbackApi, /purpose === 'activation' \? false/);
+});
+
+test('les e-mails Auth sont versionnés en français et distinguent activation et changement', async () => {
+  const [changeEmail, recovery, passwordChanged, emailChanged, projectContext] =
+    await Promise.all([
+      readProjectFile('supabase/templates/change-email.html'),
+      readProjectFile('supabase/templates/recovery.html'),
+      readProjectFile('supabase/templates/password-changed.html'),
+      readProjectFile('supabase/templates/email-changed.html'),
+      readProjectFile('CONTEXTE_PROJET.md'),
+    ]);
+
+  assert.match(changeEmail, /emailTemplatePurpose/);
+  assert.match(changeEmail, /Bienvenue sur Mon Journal de Bloc/);
+  assert.match(changeEmail, /Confirmer ma nouvelle adresse e-mail/);
+  assert.match(recovery, /Réinitialiser mon mot de passe/);
+  assert.match(passwordChanged, /Le mot de passe associé à votre compte/);
+  assert.doesNotMatch(passwordChanged, /Accéder à Mon Journal de Bloc/);
+  assert.match(emailChanged, /vient d’être remplacée par/);
+  assert.match(emailChanged, /\{\{ \.Email \}\}/);
+  assert.match(projectContext, /notification de sécurité[\s\S]*ancienne adresse/);
+  assert.match(projectContext, /ne bloque jamais le[\s\S]*changement/);
 });
 
 test('le changement d’adresse exige le mot de passe actuel et révoque les anciennes sessions après confirmation', async () => {
@@ -103,6 +127,8 @@ test('le changement d’adresse exige le mot de passe actuel et révoque les anc
 
   assert.match(passwordApi, /action === 'change-email'/);
   assert.match(passwordApi, /Le mot de passe actuel est obligatoire/);
+  assert.match(passwordApi, /SUPABASE_URL}\/auth\/v1\/user/);
+  assert.match(passwordApi, /Authorization: `Bearer \$\{authenticatedAccessToken\}`/);
   assert.match(passwordApi, /pendingContactEmail: contactEmail/);
   assert.match(callbackApi, /contactEmail: confirmedEmail/);
   assert.match(callbackApi, /rpc\/finalize_confirmed_email/);

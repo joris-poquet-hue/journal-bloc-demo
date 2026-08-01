@@ -197,6 +197,16 @@ et non uniquement par l'affichage ou le masquage de boutons.
 - Une fois la nouvelle adresse confirmée, les anciennes sessions du compte sont
   révoquées et une nouvelle session sécurisée est créée pour l'utilisateur ayant
   confirmé le changement.
+- La confirmation de la nouvelle adresse déclenche une notification de sécurité
+  à l'ancienne adresse. Cette notification informe du remplacement et ne demande
+  aucune confirmation : l'absence d'accès à l'ancienne boîte ne bloque jamais le
+  changement.
+- Le lien de confirmation envoyé à la nouvelle adresse reste l'unique validation
+  nécessaire au changement.
+- Une modification volontaire du mot de passe depuis le profil déclenche une
+  notification de sécurité à l'adresse e-mail actuellement associée au compte.
+- Les e-mails d'activation, de récupération et de sécurité sont rédigés en
+  français et identifient clairement Mon Journal de Bloc.
 
 ### 4.6 Mot de passe oublié
 

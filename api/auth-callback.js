@@ -101,10 +101,14 @@ module.exports = async function handler(request, response) {
         ...(profile.metadata ?? {}),
         contactEmail: confirmedEmail,
       };
+      const confirmedAuthMetadata = {
+        ...(user.user_metadata ?? {}),
+      };
 
       delete confirmedMetadata.pendingContactEmail;
       delete confirmedMetadata.pendingEmailPurpose;
       delete confirmedMetadata.pendingEmailRequestedAt;
+      delete confirmedAuthMetadata.emailTemplatePurpose;
 
       let activationFlagUpdated = false;
       let emailLifecycleFinalized = false;
@@ -119,6 +123,7 @@ module.exports = async function handler(request, response) {
                   ...(user.app_metadata ?? {}),
                   pending_activation: false,
                 },
+                user_metadata: confirmedAuthMetadata,
               },
               method: 'PUT',
             }
@@ -135,6 +140,18 @@ module.exports = async function handler(request, response) {
           method: 'POST',
         });
         emailLifecycleFinalized = true;
+
+        if (purpose === 'change') {
+          await authAdminRequest(
+            `admin/users/${encodeURIComponent(profile.auth_user_id)}`,
+            {
+              body: {
+                user_metadata: confirmedAuthMetadata,
+              },
+              method: 'PUT',
+            }
+          ).catch(() => null);
+        }
 
         await revokeAllApplicationSessions(
           profile.id,
