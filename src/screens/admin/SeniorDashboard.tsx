@@ -71,6 +71,7 @@ export function SeniorDashboard({
   selectableSeniors,
   selectedSenior,
   surgicalProcedureOptions,
+  requestEmailChange,
   updateSeniorCredentials,
   updateSeniorManagedInternals,
 }: {
@@ -84,6 +85,10 @@ export function SeniorDashboard({
   selectableSeniors: Senior[];
   selectedSenior: Senior;
   surgicalProcedureOptions: ChoiceOption<InterventionType>[];
+  requestEmailChange: (
+    contactEmail: string,
+    currentPassword: string
+  ) => Promise<{ message: string; success: boolean }>;
   updateSeniorCredentials: (
     seniorId: string,
     input: UpdateSeniorCredentialsInput
@@ -106,6 +111,7 @@ export function SeniorDashboard({
   const [isInternalSettingsSheetOpen, setIsInternalSettingsSheetOpen] =
     useState(false);
   const [isPasswordSheetOpen, setIsPasswordSheetOpen] = useState(false);
+  const [isEmailSheetOpen, setIsEmailSheetOpen] = useState(false);
   const [isPendingEvaluationsSheetOpen, setIsPendingEvaluationsSheetOpen] =
     useState(false);
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
@@ -118,6 +124,11 @@ export function SeniorDashboard({
     confirmPassword: '',
   });
   const [passwordFeedback, setPasswordFeedback] = useState<FeedbackState>(null);
+  const [emailForm, setEmailForm] = useState({
+    contactEmail: '',
+    currentPassword: '',
+  });
+  const [emailFeedback, setEmailFeedback] = useState<FeedbackState>(null);
   const [exportFeedback, setExportFeedback] = useState<FeedbackState>(null);
   const [internalSettingsFeedback, setInternalSettingsFeedback] =
     useState<FeedbackState>(null);
@@ -521,6 +532,23 @@ export function SeniorDashboard({
     });
   };
 
+  const handleRequestEmailChange = async () => {
+    setEmailFeedback(null);
+    const result = await requestEmailChange(
+      emailForm.contactEmail,
+      emailForm.currentPassword
+    );
+
+    setEmailFeedback({
+      kind: result.success ? 'success' : 'error',
+      message: result.message,
+    });
+
+    if (result.success) {
+      setEmailForm({ contactEmail: '', currentPassword: '' });
+    }
+  };
+
   const handleEvaluateIntervention = (interventionId: string) => {
     saveSeniorDashboardNavigationState(
       {
@@ -746,6 +774,20 @@ export function SeniorDashboard({
                 >
                   <Users aria-hidden="true" />
                   <span>Configurer mes internes</span>
+                </button>
+                <button
+                  className="senior-settings__menu-item"
+                  onClick={() => {
+                    setIsSettingsMenuOpen(false);
+                    setEmailForm({ contactEmail: '', currentPassword: '' });
+                    setEmailFeedback(null);
+                    setIsEmailSheetOpen(true);
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  <Mail aria-hidden="true" />
+                  <span>Modifier l’adresse e-mail</span>
                 </button>
                 <button
                   className="senior-settings__menu-item"
@@ -1131,6 +1173,108 @@ export function SeniorDashboard({
                 type="button"
               >
                 Enregistrer
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isEmailSheetOpen ? (
+        <div
+          className="account-sheet-backdrop"
+          onClick={() => setIsEmailSheetOpen(false)}
+        >
+          <div
+            aria-labelledby="senior-email-settings-title"
+            aria-modal="true"
+            className="account-sheet senior-account-sheet"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="account-sheet__header">
+              <div className="account-sheet__heading">
+                <h3 id="senior-email-settings-title">Modifier l’adresse e-mail</h3>
+                <p className="account-sheet__text">
+                  La nouvelle adresse sera utilisée après confirmation du lien reçu.
+                </p>
+              </div>
+              <button
+                aria-label="Fermer la fenêtre de modification de l’adresse e-mail"
+                className="account-sheet__close"
+                onClick={() => setIsEmailSheetOpen(false)}
+                type="button"
+              >
+                <X aria-hidden="true" />
+              </button>
+            </div>
+
+            {emailFeedback ? (
+              <div
+                className={
+                  emailFeedback.kind === 'success' ? 'auth-success' : 'auth-error'
+                }
+                role="status"
+              >
+                {emailFeedback.message}
+              </div>
+            ) : null}
+
+            <div className="account-sheet__stack">
+              <p className="account-sheet__text">
+                Adresse actuelle :{' '}
+                <strong>{selectedSenior.contactEmail || 'Non renseignée'}</strong>
+              </p>
+              <label className="account-sheet__field">
+                <span>Nouvelle adresse e-mail</span>
+                <input
+                  autoCapitalize="none"
+                  autoComplete="email"
+                  className="account-sheet__input"
+                  onChange={(event) => {
+                    setEmailForm((current) => ({
+                      ...current,
+                      contactEmail: event.target.value,
+                    }));
+                    setEmailFeedback(null);
+                  }}
+                  required
+                  type="email"
+                  value={emailForm.contactEmail}
+                />
+              </label>
+              <label className="account-sheet__field">
+                <span>Mot de passe actuel</span>
+                <input
+                  autoComplete="current-password"
+                  className="account-sheet__input"
+                  onChange={(event) => {
+                    setEmailForm((current) => ({
+                      ...current,
+                      currentPassword: event.target.value,
+                    }));
+                    setEmailFeedback(null);
+                  }}
+                  required
+                  type="password"
+                  value={emailForm.currentPassword}
+                />
+              </label>
+            </div>
+
+            <div className="account-sheet__actions account-sheet__actions--split">
+              <button
+                className="account-button"
+                onClick={() => setIsEmailSheetOpen(false)}
+                type="button"
+              >
+                Fermer
+              </button>
+              <button
+                className="flow-button flow-button--primary"
+                onClick={handleRequestEmailChange}
+                type="button"
+              >
+                Envoyer le lien de confirmation
               </button>
             </div>
           </div>

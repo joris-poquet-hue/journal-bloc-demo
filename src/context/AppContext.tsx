@@ -98,6 +98,7 @@ import {
 } from '../services/backendRepository';
 import {
   consumeSupabaseAuthCallback,
+  requestSupabaseEmailChange,
   requestSupabasePasswordRecovery,
   restoreSupabaseSession,
   setSupabaseAccessToken,
@@ -207,10 +208,16 @@ type AppContextValue = {
   cancelPasswordChangeChallenge: () => void;
   completePasswordChangeChallenge: (
     contactEmail: string,
-    confirmContactEmail: string,
     currentPassword: string,
     nextPassword: string,
     confirmPassword: string
+  ) => Promise<{
+    message: string;
+    success: boolean;
+  }>;
+  requestEmailChange: (
+    contactEmail: string,
+    currentPassword: string
   ) => Promise<{
     message: string;
     success: boolean;
@@ -1965,7 +1972,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const completePasswordChangeChallenge = async (
     contactEmail: string,
-    confirmContactEmail: string,
     currentPassword: string,
     nextPassword: string,
     confirmPassword: string
@@ -1982,8 +1988,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const sanitizedPassword = nextPassword;
     const sanitizedConfirmation = confirmPassword;
     const sanitizedContactEmail = sanitizeContactEmail(contactEmail);
-    const sanitizedContactEmailConfirmation =
-      sanitizeContactEmail(confirmContactEmail);
 
     if (!sanitizedContactEmail) {
       return {
@@ -1995,16 +1999,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (!isValidContactEmail(sanitizedContactEmail)) {
       return {
         message: 'L’adresse e-mail renseignée n’est pas valide.',
-        success: false,
-      };
-    }
-
-    if (
-      challenge.reason === 'forced' &&
-      sanitizedContactEmail !== sanitizedContactEmailConfirmation
-    ) {
-      return {
-        message: 'Les deux adresses e-mail ne correspondent pas.',
         success: false,
       };
     }
@@ -2035,10 +2029,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
 
       if (challenge.reason === 'forced') {
-        await updateSupabasePassword(currentPassword, sanitizedPassword, {
+        const confirmationRequest = await updateSupabasePassword(
+          currentPassword,
+          sanitizedPassword,
+          {
           completeSetupContactEmail: sanitizedContactEmail,
-          confirmSetupContactEmail: sanitizedContactEmailConfirmation,
-        });
+          }
+        );
+
+        setPasswordChangeChallengeState(null);
+        await signOutFromSupabase({ scope: 'current' });
+        setSupabaseAccessToken(null);
+        setPersistentSyncIssues({});
+
+        return {
+          message:
+            confirmationRequest.message ||
+            'Un lien de confirmation vient d’être envoyé. Ouvre-le pour activer ton compte.',
+          success: true,
+        };
       } else {
         await updateSupabasePassword(null, sanitizedPassword);
         await completeBackendPasswordSetup(sanitizedContactEmail);
@@ -2074,6 +2083,48 @@ export function AppProvider({ children }: { children: ReactNode }) {
           'Le mot de passe n’a pas pu être mis à jour. Reconnecte-toi et réessaie.',
         success: false,
       };
+    }
+  };
+
+  const requestEmailChange = async (
+    contactEmail: string,
+    currentPassword: string
+  ) => {
+    const sanitizedContactEmail = sanitizeContactEmail(contactEmail);
+
+    if (!sanitizedContactEmail || !isValidContactEmail(sanitizedContactEmail)) {
+      return {
+        message: 'L’adresse e-mail renseignée n’est pas valide.',
+        success: false,
+      };
+    }
+
+    if (!currentPassword) {
+      return {
+        message: 'Renseigne ton mot de passe actuel.',
+        success: false,
+      };
+    }
+
+    try {
+      const result = await requestSupabaseEmailChange(
+        currentPassword,
+        sanitizedContactEmail
+      );
+
+      return {
+        message:
+          result.message ||
+          'Un lien de confirmation vient d’être envoyé à la nouvelle adresse.',
+        success: true,
+      };
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim()
+          ? error.message.trim()
+          : 'Le changement d’adresse e-mail n’a pas pu être demandé.';
+
+      return { message, success: false };
     }
   };
 
@@ -3828,6 +3879,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         cancelInterventionFormAnalyticsSession,
         cancelPasswordChangeChallenge,
         completePasswordChangeChallenge,
+        requestEmailChange,
         requestPasswordRecovery,
         goToSurgeryPortal,
         goToSurgeryHistory,

@@ -62,22 +62,67 @@ test('la création génère la clé uniquement côté serveur et ne la stocke pa
   assert.match(accountService, /accessKey\?: string/);
 });
 
-test('la première connexion exige deux e-mails identiques et invalide la clé en remplaçant le mot de passe', async () => {
-  const [passwordApi, loginScreen, appContext] = await Promise.all([
+test('la première connexion saisit une seule adresse et attend sa confirmation avant activation', async () => {
+  const [passwordApi, callbackApi, loginScreen, appContext] = await Promise.all([
     readProjectFile('api/auth-password.js'),
+    readProjectFile('api/auth-callback.js'),
     readProjectFile('src/screens/LoginScreen.tsx'),
     readProjectFile('src/context/AppContext.tsx'),
   ]);
 
-  assert.match(passwordApi, /confirmContactEmail/);
-  assert.match(passwordApi, /contactEmail !== confirmContactEmail/);
-  assert.match(passwordApi, /email: contactEmail/);
-  assert.match(passwordApi, /email_confirm: true/);
-  assert.match(passwordApi, /password,/);
-  assert.match(passwordApi, /must_change_password: false/);
-  assert.match(loginScreen, /Confirmer l’adresse e-mail/);
+  assert.doesNotMatch(passwordApi, /confirmContactEmail/);
+  assert.match(passwordApi, /requestConfirmedEmailChange/);
+  assert.match(passwordApi, /pendingEmailConfirmation: true/);
+  assert.doesNotMatch(passwordApi, /email_confirm: true/);
+  assert.match(passwordApi, /\{ email: contactEmail, password \}/);
+  assert.doesNotMatch(loginScreen, /Confirmer l’adresse e-mail/);
+  assert.match(loginScreen, /Un lien te sera envoyé/);
   assert.match(loginScreen, /Mot de passe ou clé d’accès/);
-  assert.match(appContext, /sanitizedContactEmail !== sanitizedContactEmailConfirmation/);
+  assert.doesNotMatch(appContext, /sanitizedContactEmailConfirmation/);
+  assert.match(callbackApi, /callbackType !== 'email_change'/);
+  assert.match(callbackApi, /pending_activation: false/);
+  assert.match(callbackApi, /purpose === 'activation' \? false/);
+});
+
+test('le changement d’adresse exige le mot de passe actuel et révoque les anciennes sessions après confirmation', async () => {
+  const [
+    passwordApi,
+    callbackApi,
+    emailLifecycleMigration,
+    profileScreen,
+    seniorDashboard,
+  ] = await Promise.all([
+    readProjectFile('api/auth-password.js'),
+    readProjectFile('api/auth-callback.js'),
+    readProjectFile(
+      'supabase/migrations/202608010002_confirmed_email_lifecycle.sql'
+    ),
+    readProjectFile('src/screens/ProfileScreen.tsx'),
+    readProjectFile('src/screens/admin/SeniorDashboard.tsx'),
+  ]);
+
+  assert.match(passwordApi, /action === 'change-email'/);
+  assert.match(passwordApi, /Le mot de passe actuel est obligatoire/);
+  assert.match(passwordApi, /pendingContactEmail: contactEmail/);
+  assert.match(callbackApi, /contactEmail: confirmedEmail/);
+  assert.match(callbackApi, /rpc\/finalize_confirmed_email/);
+  assert.match(callbackApi, /revokeAllApplicationSessions/);
+  assert.match(
+    emailLifecycleMigration,
+    /create or replace function public\.finalize_confirmed_email/
+  );
+  assert.match(
+    emailLifecycleMigration,
+    /update public\.profiles[\s\S]*insert into public\.activity_log/
+  );
+  assert.match(
+    emailLifecycleMigration,
+    /grant execute on function public\.finalize_confirmed_email[\s\S]*to service_role/
+  );
+  assert.match(profileScreen, /label="Adresse e-mail"/);
+  assert.match(profileScreen, /requestEmailChange/);
+  assert.match(seniorDashboard, /Modifier l’adresse e-mail/);
+  assert.match(seniorDashboard, /Envoyer le lien de confirmation/);
 });
 
 test('une régénération est réservée à un compte encore en attente et remplace immédiatement l’ancienne clé', async () => {

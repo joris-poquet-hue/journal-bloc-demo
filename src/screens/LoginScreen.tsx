@@ -84,7 +84,6 @@ export function LoginScreen() {
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
   const [contactEmail, setContactEmail] = useState('');
-  const [confirmContactEmail, setConfirmContactEmail] = useState('');
   const [nextPassword, setNextPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -95,12 +94,10 @@ export function LoginScreen() {
   useEffect(() => {
     if (!passwordChangeChallenge) {
       setContactEmail('');
-      setConfirmContactEmail('');
       return;
     }
 
     setContactEmail(passwordChangeChallenge.contactEmail ?? '');
-    setConfirmContactEmail('');
   }, [passwordChangeChallenge]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -110,7 +107,6 @@ export function LoginScreen() {
     if (isPasswordChangeMode) {
       const result = await completePasswordChangeChallenge(
         contactEmail,
-        confirmContactEmail,
         password,
         nextPassword,
         confirmPassword
@@ -119,9 +115,9 @@ export function LoginScreen() {
 
       if (result.success) {
         setErrorMessage('');
+        setStatusMessage(result.message);
         setPassword('');
         setContactEmail('');
-        setConfirmContactEmail('');
         setNextPassword('');
         setConfirmPassword('');
         return;
@@ -153,7 +149,6 @@ export function LoginScreen() {
     cancelPasswordChangeChallenge();
     setPassword('');
     setContactEmail('');
-    setConfirmContactEmail('');
     setNextPassword('');
     setConfirmPassword('');
     setErrorMessage('');
@@ -253,8 +248,9 @@ export function LoginScreen() {
                 {passwordChangeChallenge?.isFirstLogin ? (
                   <>
                     <p className="login-note login-note--compact">
-                      Première connexion : renseigne deux fois ton adresse e-mail,
-                      puis choisis ton mot de passe personnel.
+                      Première connexion : renseigne ton adresse e-mail puis
+                      choisis ton mot de passe personnel. Un lien te sera envoyé
+                      pour activer le compte.
                     </p>
 
                     <label className="login-field">
@@ -277,27 +273,6 @@ export function LoginScreen() {
                       </span>
                     </label>
 
-                    <label className="login-field">
-                      <span className="login-field__label">
-                        Confirmer l’adresse e-mail
-                      </span>
-                      <span className="login-field__control">
-                        <UserIcon />
-                        <input
-                          autoCapitalize="none"
-                          autoComplete="email"
-                          autoCorrect="off"
-                          className="login-field__input"
-                          onChange={(event) => {
-                            setConfirmContactEmail(event.target.value);
-                            setErrorMessage('');
-                          }}
-                          placeholder="Saisir à nouveau l’adresse"
-                          type="email"
-                          value={confirmContactEmail}
-                        />
-                      </span>
-                    </label>
                   </>
                 ) : null}
 

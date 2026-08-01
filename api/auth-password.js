@@ -24,6 +24,97 @@ const {
   toPendingAuthPassword,
 } = require('../src/accessKey.cjs');
 
+const DEFAULT_AUTH_REDIRECT_URL = 'https://monjournaldebloc.fr/';
+
+function getAuthErrorMessage(payload, fallback) {
+  return (
+    payload?.msg ||
+    payload?.error_description ||
+    payload?.error ||
+    payload?.message ||
+    fallback
+  );
+}
+
+function getAuthRedirectUrl() {
+  return String(
+    process.env.SUPABASE_AUTH_REDIRECT_TO || DEFAULT_AUTH_REDIRECT_URL
+  ).trim();
+}
+
+async function requestConfirmedEmailChange(request, accessToken, input) {
+  const redirectTo = getAuthRedirectUrl();
+  const { payload, response } = await supabaseRequest(
+    `${SUPABASE_URL}/auth/v1/user?redirect_to=${encodeURIComponent(redirectTo)}`,
+    {
+      body: JSON.stringify(input),
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        ...getForwardedAuthHeaders(request),
+      },
+      method: 'PUT',
+    }
+  );
+
+  if (!response.ok) {
+    throw Object.assign(
+      new Error(
+        getAuthErrorMessage(
+          payload,
+          'Impossible d’envoyer le lien de confirmation à cette adresse.'
+        )
+      ),
+      { status: response.status }
+    );
+  }
+}
+
+async function storePendingEmailConfirmation(profile, contactEmail, purpose) {
+  const requestedAt = new Date().toISOString();
+
+  await restRequest('profiles', {
+    body: {
+      metadata: {
+        ...(profile.metadata ?? {}),
+        pendingContactEmail: contactEmail,
+        pendingEmailPurpose: purpose,
+        pendingEmailRequestedAt: requestedAt,
+      },
+      updated_at: requestedAt,
+    },
+    headers: {
+      Prefer: 'return=minimal',
+    },
+    method: 'PATCH',
+    searchParams: {
+      id: `eq.${profile.id}`,
+    },
+  });
+}
+
+async function recordEmailConfirmationRequest(profile, purpose) {
+  await restRequest('activity_log', {
+    body: {
+      action:
+        purpose === 'activation'
+          ? 'Confirmation e-mail de première connexion demandée'
+          : 'Confirmation de la nouvelle adresse e-mail demandée',
+      actor_label: `${profile.first_name} ${profile.last_name}`.trim(),
+      actor_role: profile.role,
+      created_by_profile_id: profile.id,
+      profile_id: profile.id,
+      target_label: profile.login_id,
+      target_type: 'Compte utilisateur',
+    },
+    headers: {
+      Prefer: 'return=minimal',
+    },
+    method: 'POST',
+  });
+}
+
 module.exports = async function handler(request, response) {
   if (request.method !== 'POST') {
     response.setHeader('Allow', 'POST');
@@ -37,13 +128,12 @@ module.exports = async function handler(request, response) {
   }
 
   let identity;
-
   const transientAccessTokens = new Set();
 
   try {
     identity = await authenticateRequest(request);
   } catch (error) {
-    console.error('Unable to verify the password-change session.', error);
+    console.error('Unable to verify the credential-change session.', error);
     return sendJson(response, 503, { error: 'Impossible de vérifier la session.' });
   }
 
@@ -59,47 +149,69 @@ module.exports = async function handler(request, response) {
     return sendJson(response, 400, { error: 'Corps JSON invalide.' });
   }
 
+  const action =
+    body?.action === 'change-email'
+      ? 'change-email'
+      : body?.completeSetup === true
+        ? 'complete-setup'
+        : 'change-password';
   const currentPassword =
     typeof body?.currentPassword === 'string' ? body.currentPassword : '';
   const password = typeof body?.password === 'string' ? body.password : '';
-  const completeSetup = body?.completeSetup === true;
   const contactEmail = normalizeEmail(body?.contactEmail);
-  const confirmContactEmail = normalizeEmail(body?.confirmContactEmail);
-  const passwordError = validatePassword(password);
   const isRecoverySession = identity.session?.auth_context === 'recovery';
+  const changesPassword = action !== 'change-email';
+  const requestsEmailConfirmation = action !== 'change-password';
 
-  if (!currentPassword && !isRecoverySession) {
+  if (!currentPassword && (!isRecoverySession || action !== 'change-password')) {
     return sendJson(response, 400, { error: 'Le mot de passe actuel est obligatoire.' });
   }
 
-  if (passwordError) {
-    return sendJson(response, 400, { error: passwordError });
+  if (changesPassword) {
+    const passwordError = validatePassword(password);
+
+    if (passwordError) {
+      return sendJson(response, 400, { error: passwordError });
+    }
+
+    if (currentPassword && currentPassword === password) {
+      return sendJson(response, 400, {
+        error: 'Le nouveau mot de passe doit être différent du mot de passe actuel.',
+      });
+    }
   }
 
-  if (currentPassword && currentPassword === password) {
+  if (requestsEmailConfirmation && !isValidEmail(contactEmail)) {
     return sendJson(response, 400, {
-      error: 'Le nouveau mot de passe doit être différent du mot de passe actuel.',
+      error: 'L’adresse e-mail renseignée n’est pas valide.',
     });
   }
 
-  if (completeSetup) {
-    if (!isValidEmail(contactEmail)) {
-      return sendJson(response, 400, {
-        error: 'L’adresse e-mail renseignée n’est pas valide.',
-      });
-    }
+  if (action === 'complete-setup' && !identity.profile.must_change_password) {
+    return sendJson(response, 409, {
+      error: 'Ce compte a déjà terminé sa première connexion.',
+    });
+  }
 
-    if (contactEmail !== confirmContactEmail) {
-      return sendJson(response, 400, {
-        error: 'Les deux adresses e-mail ne correspondent pas.',
-      });
-    }
+  if (action === 'change-email' && identity.profile.must_change_password) {
+    return sendJson(response, 409, {
+      error: 'Termine d’abord la confirmation de ta première adresse e-mail.',
+    });
+  }
+
+  if (
+    action === 'change-email' &&
+    contactEmail === normalizeEmail(identity.profile.metadata?.contactEmail)
+  ) {
+    return sendJson(response, 400, {
+      error: 'La nouvelle adresse e-mail doit être différente de l’adresse actuelle.',
+    });
   }
 
   const rateLimitScope = buildRateLimitScope(
     request,
     identity.profile.login_id,
-    'password-change'
+    requestsEmailConfirmation ? 'email-change' : 'password-change'
   );
   const rateLimit = await checkRateLimit(rateLimitScope);
 
@@ -111,9 +223,11 @@ module.exports = async function handler(request, response) {
   }
 
   try {
+    let authenticatedAccessToken = null;
+
     if (currentPassword) {
       const authenticationPassword =
-        completeSetup &&
+        action === 'complete-setup' &&
         identity.profile.must_change_password &&
         isAccessKey(currentPassword)
           ? toPendingAuthPassword(currentPassword)
@@ -142,63 +256,42 @@ module.exports = async function handler(request, response) {
         });
       }
 
+      authenticatedAccessToken = payload.access_token;
       transientAccessTokens.add(payload.access_token);
+    }
+
+    if (requestsEmailConfirmation) {
+      await requestConfirmedEmailChange(
+        request,
+        authenticatedAccessToken,
+        action === 'complete-setup'
+          ? { email: contactEmail, password }
+          : { email: contactEmail }
+      );
+
+      const purpose = action === 'complete-setup' ? 'activation' : 'change';
+      await storePendingEmailConfirmation(identity.profile, contactEmail, purpose);
+      await recordEmailConfirmationRequest(identity.profile, purpose);
+      await clearAuthFailures(rateLimitScope);
+
+      return sendJson(response, 200, {
+        message:
+          purpose === 'activation'
+            ? 'Un lien de confirmation vient d’être envoyé. Ouvre-le pour activer ton compte.'
+            : 'Un lien de confirmation vient d’être envoyé à la nouvelle adresse. L’adresse actuelle reste active jusque-là.',
+        pendingEmailConfirmation: true,
+        profile: toPublicProfile(identity.profile),
+        success: true,
+      });
     }
 
     await authAdminRequest(
       `admin/users/${encodeURIComponent(identity.profile.auth_user_id)}`,
       {
-        body: completeSetup
-          ? {
-              app_metadata: {
-                ...(identity.user.app_metadata ?? {}),
-                pending_activation: false,
-              },
-              email: contactEmail,
-              email_confirm: true,
-              password,
-            }
-          : { password },
+        body: { password },
         method: 'PUT',
       }
     );
-
-    if (completeSetup) {
-      await restRequest('profiles', {
-        body: {
-          metadata: {
-            ...(identity.profile.metadata ?? {}),
-            contactEmail,
-          },
-          must_change_password: false,
-          updated_at: new Date().toISOString(),
-        },
-        headers: {
-          Prefer: 'return=minimal',
-        },
-        method: 'PATCH',
-        searchParams: {
-          id: `eq.${identity.profile.id}`,
-        },
-      });
-
-      await restRequest('activity_log', {
-        body: {
-          action: 'Première connexion finalisée',
-          actor_label:
-            `${identity.profile.first_name} ${identity.profile.last_name}`.trim(),
-          actor_role: identity.profile.role,
-          created_by_profile_id: identity.profile.id,
-          profile_id: identity.profile.id,
-          target_label: identity.profile.login_id,
-          target_type: 'Compte utilisateur',
-        },
-        headers: {
-          Prefer: 'return=minimal',
-        },
-        method: 'POST',
-      });
-    }
 
     if (isRecoverySession) {
       await restRequest('application_sessions', {
@@ -218,7 +311,7 @@ module.exports = async function handler(request, response) {
     const { payload: refreshedSession, response: refreshedAuthResponse } =
       await supabaseRequest(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
         body: JSON.stringify({
-          email: completeSetup ? contactEmail : identity.user.email,
+          email: identity.user.email,
           password,
         }),
         headers: {
@@ -240,29 +333,17 @@ module.exports = async function handler(request, response) {
     }
 
     transientAccessTokens.add(refreshedSession.access_token);
-
     await clearAuthFailures(rateLimitScope);
 
     return sendJson(response, 200, {
-      profile: toPublicProfile({
-        ...identity.profile,
-        metadata: completeSetup
-          ? {
-              ...(identity.profile.metadata ?? {}),
-              contactEmail,
-            }
-          : identity.profile.metadata,
-        must_change_password: completeSetup
-          ? false
-          : identity.profile.must_change_password,
-      }),
+      profile: toPublicProfile(identity.profile),
       success: true,
     });
   } catch (error) {
-    console.error('Password change failed.', error);
+    console.error('Credential change failed.', error);
     await registerAuthFailure(rateLimitScope);
     return sendJson(response, error.status || 400, {
-      error: error.message || 'Impossible de modifier le mot de passe.',
+      error: error.message || 'Impossible de modifier les informations du compte.',
     });
   } finally {
     await Promise.all(

@@ -7,6 +7,7 @@ import {
   Info,
   LockKeyhole,
   LogOut,
+  Mail,
   MessageCircle,
   ShieldCheck,
   Trash2,
@@ -32,6 +33,7 @@ import type { Senior } from '../types';
 type AccountSheet =
   | 'training'
   | 'photo'
+  | 'email'
   | 'password'
   | 'export'
   | 'pending-interventions'
@@ -40,6 +42,7 @@ type AccountSheet =
 
 const accountSheetLabels = {
   about: 'À propos de Mon Journal de Bloc',
+  email: 'Adresse e-mail',
   export: 'Exporter mes statistiques',
   password: 'Mot de passe',
   'pending-interventions': 'Interventions en attente',
@@ -176,6 +179,7 @@ export function ProfileScreen() {
     selectableSeniors,
     logout,
     startNewIntervention,
+    requestEmailChange,
     updateInternalCredentials,
     updateInternalProfileSettings,
   } = useAppContext();
@@ -191,6 +195,10 @@ export function ProfileScreen() {
     currentPassword: '',
     nextPassword: '',
     confirmPassword: '',
+  });
+  const [emailForm, setEmailForm] = useState({
+    contactEmail: '',
+    currentPassword: '',
   });
   const [pendingDeletionCandidateId, setPendingDeletionCandidateId] =
     useState<string | null>(null);
@@ -233,6 +241,13 @@ export function ProfileScreen() {
         currentPassword: '',
         nextPassword: '',
         confirmPassword: '',
+      });
+    }
+
+    if (sheet === 'email') {
+      setEmailForm({
+        contactEmail: '',
+        currentPassword: '',
       });
     }
 
@@ -304,6 +319,24 @@ export function ProfileScreen() {
       mustChangePassword: false,
       password: passwordForm.nextPassword,
     });
+
+    setFeedback({
+      tone: result.success ? 'success' : 'error',
+      message: result.message,
+    });
+
+    if (result.success) {
+      closeSheet();
+    }
+  };
+
+  const handleEmailSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    const result = await requestEmailChange(
+      emailForm.contactEmail,
+      emailForm.currentPassword
+    );
 
     setFeedback({
       tone: result.success ? 'success' : 'error',
@@ -560,6 +593,15 @@ export function ProfileScreen() {
             label="Mot de passe"
             onClick={() => openSheet('password')}
           />
+          <AccountActionRow
+            description={
+              selectedInternal.contactEmail ||
+              'Adresse à confirmer lors de la première connexion'
+            }
+            icon={<Mail strokeWidth={2.05} />}
+            label="Adresse e-mail"
+            onClick={() => openSheet('email')}
+          />
         </div>
       </AccountSection>
 
@@ -803,6 +845,64 @@ export function ProfileScreen() {
                   <div className="account-sheet__actions">
                     <button className="flow-button flow-button--primary" type="submit">
                       Mettre à jour
+                    </button>
+                  </div>
+                </form>
+              </AccountSheetFrame>
+            ) : null}
+
+            {activeSheet === 'email' ? (
+              <AccountSheetFrame
+                description="La nouvelle adresse remplacera l’adresse actuelle après confirmation du lien reçu."
+                eyebrow="Mon profil"
+                icon={<Mail strokeWidth={2} />}
+                title="Adresse e-mail"
+                onClose={closeSheet}
+              >
+                <form className="account-sheet__form" onSubmit={handleEmailSubmit}>
+                  <p className="account-sheet__text">
+                    Adresse actuelle :{' '}
+                    <strong>
+                      {selectedInternal.contactEmail || 'Non renseignée'}
+                    </strong>
+                  </p>
+                  <SheetField
+                    label="Nouvelle adresse e-mail"
+                    type="email"
+                    value={emailForm.contactEmail}
+                    onChange={(event) => {
+                      setEmailForm((current) => ({
+                        ...current,
+                        contactEmail: event.target.value,
+                      }));
+                      setFeedback(null);
+                    }}
+                  />
+                  <SheetField
+                    label="Mot de passe actuel"
+                    type="password"
+                    value={emailForm.currentPassword}
+                    onChange={(event) => {
+                      setEmailForm((current) => ({
+                        ...current,
+                        currentPassword: event.target.value,
+                      }));
+                      setFeedback(null);
+                    }}
+                  />
+                  {feedback ? (
+                    <div
+                      className={
+                        feedback.tone === 'success' ? 'auth-success' : 'auth-error'
+                      }
+                      role="status"
+                    >
+                      {feedback.message}
+                    </div>
+                  ) : null}
+                  <div className="account-sheet__actions">
+                    <button className="flow-button flow-button--primary" type="submit">
+                      Envoyer le lien de confirmation
                     </button>
                   </div>
                 </form>
@@ -1118,7 +1218,7 @@ function SheetField({
   label: string;
   value: string;
   onChange: (event: ChangeEvent<HTMLInputElement>) => void;
-  type?: 'text' | 'password';
+  type?: 'email' | 'text' | 'password';
 }) {
   return (
     <label className="account-sheet__field">

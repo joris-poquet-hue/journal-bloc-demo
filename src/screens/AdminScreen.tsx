@@ -1336,6 +1336,7 @@ export function AdminScreen() {
     logout,
     recordActivity,
     regenerateAccessKey,
+    requestEmailChange,
     refreshBackendData,
     renameInstitution,
     savedInterventions,
@@ -8378,6 +8379,7 @@ export function AdminScreen() {
         selectableSeniors={selectableSeniors}
         selectedSenior={selectedSenior}
         surgicalProcedureOptions={surgicalProcedureOptions}
+        requestEmailChange={requestEmailChange}
         updateSeniorCredentials={updateSeniorCredentials}
         updateSeniorManagedInternals={updateSeniorManagedInternals}
       />

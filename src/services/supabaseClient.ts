@@ -261,7 +261,10 @@ export async function consumeSupabaseAuthCallback() {
   const accessToken = params.get('access_token');
   const callbackType = params.get('type');
 
-  if (!accessToken || callbackType !== 'recovery') {
+  if (
+    !accessToken ||
+    (callbackType !== 'recovery' && callbackType !== 'email_change')
+  ) {
     return null;
   }
 
@@ -316,14 +319,15 @@ export async function updateSupabasePassword(
   password: string,
   options: {
     completeSetupContactEmail?: string;
-    confirmSetupContactEmail?: string;
   } = {}
 ) {
   const response = await fetch('/api/auth-password', {
     body: JSON.stringify({
+      action: options.completeSetupContactEmail
+        ? 'complete-setup'
+        : 'change-password',
       completeSetup: Boolean(options.completeSetupContactEmail),
       contactEmail: options.completeSetupContactEmail,
-      confirmContactEmail: options.confirmSetupContactEmail,
       currentPassword,
       password,
     }),
@@ -337,6 +341,8 @@ export async function updateSupabasePassword(
   const payload = (await response.json().catch(() => null)) as
     | {
         error?: string;
+        message?: string;
+        pendingEmailConfirmation?: boolean;
         profile?: SupabaseLoginProfile;
         success?: boolean;
       }
@@ -353,6 +359,51 @@ export async function updateSupabasePassword(
   if (payload.profile) {
     setActiveSession(toApplicationSession(payload.profile));
   }
+
+  return {
+    message: payload.message ?? '',
+    pendingEmailConfirmation: payload.pendingEmailConfirmation === true,
+  };
+}
+
+export async function requestSupabaseEmailChange(
+  currentPassword: string,
+  contactEmail: string
+) {
+  const response = await fetch('/api/auth-password', {
+    body: JSON.stringify({
+      action: 'change-email',
+      contactEmail,
+      currentPassword,
+    }),
+    cache: 'no-store',
+    credentials: 'same-origin',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    method: 'POST',
+  });
+  const payload = (await response.json().catch(() => null)) as
+    | {
+        error?: string;
+        message?: string;
+        pendingEmailConfirmation?: boolean;
+        success?: boolean;
+      }
+    | null;
+
+  if (!response.ok || !payload?.success) {
+    throw new SupabaseRestError(
+      response.status,
+      payload?.error ?? 'Impossible de demander le changement d’adresse e-mail.',
+      payload
+    );
+  }
+
+  return {
+    message: payload.message ?? '',
+    pendingEmailConfirmation: payload.pendingEmailConfirmation === true,
+  };
 }
 
 export async function signOutFromSupabase(

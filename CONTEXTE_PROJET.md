@@ -159,12 +159,14 @@ et non uniquement par l'affichage ou le masquage de boutons.
 ### 4.2 Première connexion
 
 - L'utilisateur saisit son identifiant et sa clé provisoire.
-- Il renseigne ensuite deux fois son adresse e-mail. Les deux valeurs doivent être
-  identiques.
-- Il crée un mot de passe personnel avant d'accéder à son espace.
-- Aucun lien de confirmation de l'adresse e-mail n'est exigé à cette étape.
-- Une fois ces informations acceptées, l'accès est immédiat et la clé provisoire
-  est invalidée.
+- Il renseigne ensuite une seule fois son adresse e-mail et crée un mot de passe
+  personnel, saisi deux fois pour confirmation.
+- Un lien de confirmation est envoyé à l'adresse e-mail renseignée.
+- Le compte reste en attente et l'utilisateur n'accède pas à son espace tant que
+  le lien n'a pas été confirmé.
+- Un nouveau lien peut être demandé si le précédent a expiré.
+- La confirmation de l'adresse active le compte et invalide définitivement la
+  clé provisoire.
 
 ### 4.3 Connexions suivantes
 
@@ -186,8 +188,15 @@ et non uniquement par l'affichage ou le masquage de boutons.
 ### 4.5 Adresse e-mail
 
 - L'interne et le senior gèrent eux-mêmes leur adresse e-mail.
+- La première adresse n'est activée qu'après confirmation du lien envoyé par
+  e-mail.
 - Après la première connexion, changer l'adresse exige le mot de passe actuel et
   une confirmation envoyée à la nouvelle adresse.
+- La nouvelle adresse est saisie une seule fois. L'adresse actuelle reste active
+  jusqu'à la confirmation de la nouvelle.
+- Une fois la nouvelle adresse confirmée, les anciennes sessions du compte sont
+  révoquées et une nouvelle session sécurisée est créée pour l'utilisateur ayant
+  confirmé le changement.
 
 ### 4.6 Mot de passe oublié
 

@@ -1,6 +1,7 @@
 const {
   SUPABASE_SERVICE_ROLE_KEY,
   SUPABASE_URL,
+  authAdminRequest,
   createApplicationSession,
   getForwardedAuthHeaders,
   getProfileByAuthUserId,
@@ -8,6 +9,9 @@ const {
   isApplicationSessionConfigured,
   isMobileApplicationRequest,
   logoutSupabaseAccessToken,
+  normalizeEmail,
+  restRequest,
+  revokeAllApplicationSessions,
   sendJson,
   setApplicationSessionCookie,
   supabaseRequest,
@@ -39,7 +43,10 @@ module.exports = async function handler(request, response) {
   const accessToken = String(body?.accessToken ?? '').trim();
   const callbackType = String(body?.type ?? '').trim();
 
-  if (!accessToken || callbackType !== 'recovery') {
+  if (
+    !accessToken ||
+    (callbackType !== 'recovery' && callbackType !== 'email_change')
+  ) {
     return sendJson(response, 400, { error: 'Réponse d’authentification invalide.' });
   }
 
@@ -64,6 +71,121 @@ module.exports = async function handler(request, response) {
 
     if (!profile?.auth_user_id) {
       return sendJson(response, 401, { error: 'Profil introuvable.' });
+    }
+
+    if (callbackType === 'email_change') {
+      const confirmedEmail = normalizeEmail(user.email);
+      const pendingEmail = normalizeEmail(
+        profile.metadata?.pendingContactEmail
+      );
+
+      if (!confirmedEmail) {
+        return sendJson(response, 400, {
+          error: 'L’adresse e-mail confirmée est introuvable.',
+        });
+      }
+
+      if (pendingEmail && confirmedEmail !== pendingEmail) {
+        return sendJson(response, 409, {
+          error:
+            'La nouvelle adresse n’est pas encore confirmée. Ouvre le lien reçu sur cette nouvelle adresse.',
+        });
+      }
+
+      const purpose =
+        profile.metadata?.pendingEmailPurpose === 'activation' ||
+        profile.must_change_password
+          ? 'activation'
+          : 'change';
+      const confirmedMetadata = {
+        ...(profile.metadata ?? {}),
+        contactEmail: confirmedEmail,
+      };
+
+      delete confirmedMetadata.pendingContactEmail;
+      delete confirmedMetadata.pendingEmailPurpose;
+      delete confirmedMetadata.pendingEmailRequestedAt;
+
+      let activationFlagUpdated = false;
+      let emailLifecycleFinalized = false;
+
+      try {
+        if (purpose === 'activation') {
+          await authAdminRequest(
+            `admin/users/${encodeURIComponent(profile.auth_user_id)}`,
+            {
+              body: {
+                app_metadata: {
+                  ...(user.app_metadata ?? {}),
+                  pending_activation: false,
+                },
+              },
+              method: 'PUT',
+            }
+          );
+          activationFlagUpdated = true;
+        }
+
+        await restRequest('rpc/finalize_confirmed_email', {
+          body: {
+            p_confirmed_email: confirmedEmail,
+            p_profile_id: profile.id,
+            p_purpose: purpose,
+          },
+          method: 'POST',
+        });
+        emailLifecycleFinalized = true;
+
+        await revokeAllApplicationSessions(
+          profile.id,
+          purpose === 'activation'
+            ? 'Première connexion confirmée'
+            : 'Adresse e-mail modifiée'
+        );
+
+        const finalizedProfile = {
+          ...profile,
+          metadata: confirmedMetadata,
+          must_change_password:
+            purpose === 'activation' ? false : profile.must_change_password,
+          updated_at: new Date().toISOString(),
+        };
+        const applicationSession = await createApplicationSession(
+          finalizedProfile,
+          request,
+          { authContext: 'standard' }
+        );
+        setApplicationSessionCookie(response, applicationSession.token);
+
+        return sendJson(response, 200, {
+          ...(isMobileApplicationRequest(request)
+            ? { mobileSessionToken: applicationSession.token }
+            : {}),
+          message:
+            purpose === 'activation'
+              ? 'Adresse confirmée. Ton compte est maintenant actif.'
+              : 'Nouvelle adresse confirmée et enregistrée.',
+          profile: toPublicProfile(finalizedProfile),
+          type: 'email_change',
+        });
+      } catch (error) {
+        if (activationFlagUpdated && !emailLifecycleFinalized) {
+          await authAdminRequest(
+            `admin/users/${encodeURIComponent(profile.auth_user_id)}`,
+            {
+              body: {
+                app_metadata: {
+                  ...(user.app_metadata ?? {}),
+                  pending_activation: true,
+                },
+              },
+              method: 'PUT',
+            }
+          ).catch(() => null);
+        }
+
+        throw error;
+      }
     }
 
     const applicationSession = await createApplicationSession(profile, request, {
