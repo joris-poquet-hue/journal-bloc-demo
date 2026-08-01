@@ -1,0 +1,67 @@
+{
+  "expo": {
+    "name": "Mon Journal de Bloc",
+    "slug": "mon-journal-de-bloc",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "monjournaldebloc",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "bundleIdentifier": "fr.monjournaldebloc.app",
+      "requireFullScreen": true,
+      "infoPlist": {
+        "CFBundleDevelopmentRegion": "fr",
+        "CFBundleLocalizations": [
+          "fr"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "fr.monjournaldebloc.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-secure-store",
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Autorise Mon Journal de Bloc à utiliser Face ID pour protéger ta session."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Autorise Mon Journal de Bloc à accéder à tes photos pour choisir une photo de profil.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#00A9C7",
+          "defaultChannel": "trophies",
+          "enableBackgroundRemoteNotifications": false
+        }
+      ],
+      "expo-status-bar"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "4d3e525c-06f9-4ece-b4b6-906128f0ea03"
+      }
+    },
+    "owner": "jorispqt"
+  }
+}
