@@ -5,18 +5,17 @@ const {
   isConfigured,
   requireAdmin,
   restRequest,
-  revokeAllApplicationSessions,
   sendJson,
   toPublicProfile,
 } = require('../src/serverAuth.cjs');
-const {
-  deactivatePushSubscriptionsForProfile,
-} = require('../src/pushNotifications.cjs');
 const {
   generateAccessKey,
   generatePendingAuthEmail,
   toPendingAuthPassword,
 } = require('../src/accessKey.cjs');
+const {
+  changeAccountLifecycle,
+} = require('../src/serverAccountLifecycle.cjs');
 
 const ALLOWED_ROLES = new Set(['internal', 'senior', 'admin']);
 
@@ -318,66 +317,13 @@ async function updateAccount(input, adminIdentity) {
   return rows?.[0] ?? null;
 }
 
-async function deleteAccount(profileId, expectedVersion, adminIdentity) {
-  const currentProfile = await findProfile(profileId);
-
-  if (!currentProfile) {
-    const error = new Error('Ce profil est introuvable.');
-    error.status = 404;
-    throw error;
-  }
-
-  if (currentProfile.id === adminIdentity.profile.id) {
-    const error = new Error('Le compte administrateur connecté ne peut pas être supprimé.');
-    error.status = 409;
-    throw error;
-  }
-
-
-  if (!Number.isInteger(expectedVersion) || expectedVersion < 1) {
-    const error = new Error('La version du profil est obligatoire. Rechargez les données.');
-    error.status = 409;
-    throw error;
-  }
-
-  await revokeAllApplicationSessions(profileId, 'account_deactivated');
-  await deactivatePushSubscriptionsForProfile(profileId);
-
-  const deactivatedProfiles = await restRequest('profiles', {
-    body: {
-      auth_user_id: null,
-      is_active: false,
-      metadata: {
-        ...(currentProfile.metadata ?? {}),
-        deactivatedAt: new Date().toISOString(),
-      },
-      updated_by_profile_id: adminIdentity.profile.id,
-    },
-    headers: {
-      Prefer: 'return=representation',
-    },
-    method: 'PATCH',
-    searchParams: {
-      id: `eq.${profileId}`,
-      version: `eq.${expectedVersion}`,
-    },
+async function deactivateAccount(profileId, expectedVersion, adminIdentity) {
+  return changeAccountLifecycle({
+    adminIdentity,
+    expectedVersion,
+    profileId,
+    targetActive: false,
   });
-
-  if (!deactivatedProfiles?.length) {
-    const error = new Error(
-      'Ce profil a été modifié par une autre session. Rechargez les données.'
-    );
-    error.status = 409;
-    throw error;
-  }
-
-  if (currentProfile.auth_user_id) {
-    await authAdminRequest(
-      `admin/users/${encodeURIComponent(currentProfile.auth_user_id)}`,
-      { method: 'DELETE' }
-    );
-  }
-
 }
 
 module.exports = async function handler(request, response) {
@@ -421,10 +367,17 @@ module.exports = async function handler(request, response) {
     }
 
     try {
-      await deleteAccount(input.profileId, input.expectedVersion, adminIdentity);
-      return sendJson(response, 200, { success: true });
+      const profile = await deactivateAccount(
+        input.profileId,
+        input.expectedVersion,
+        adminIdentity
+      );
+      return sendJson(response, 200, {
+        profile: toPublicProfile(profile),
+        success: true,
+      });
     } catch (error) {
-      console.error('Administrator account deletion failed.', error);
+      console.error('Administrator account deactivation failed.', error);
       return sendJson(response, error.status || 400, {
         error: error.message || 'Impossible de désactiver ce compte.',
       });

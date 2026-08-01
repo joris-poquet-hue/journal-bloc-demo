@@ -12,6 +12,7 @@ import {
   Info,
   LogOut,
   Pencil,
+  RotateCcw,
   Search,
   Star,
   Trophy,
@@ -115,6 +116,7 @@ import {
 import { downloadAnalyticsExcel } from '../utils/analyticsExport';
 import { downloadInterventionsExcel } from '../utils/export';
 import { loadBackendDisabledProfiles } from '../services/backendRepository';
+import { reactivateAdminAccount } from '../services/adminAccountService';
 import type { BackendProfile } from '../shared/backendTypes';
 import {
   cleanupTrophyImages,
@@ -1321,8 +1323,8 @@ export function AdminScreen() {
     customSeniors,
     customSurgicalInterventions,
     deleteCustomSurgicalIntervention,
-    deleteInternalProfile,
-    deleteSeniorProfile,
+    deactivateInternalProfile,
+    deactivateSeniorProfile,
     activityLog,
     adminTrophies,
     adminTrophyStorageWarning: trophyStorageWarning,
@@ -1426,6 +1428,10 @@ export function AdminScreen() {
   const [disabledProfilesError, setDisabledProfilesError] = useState<string | null>(
     null
   );
+  const [disabledProfilesFeedback, setDisabledProfilesFeedback] =
+    useState<FeedbackState>(null);
+  const [reactivatingProfileId, setReactivatingProfileId] =
+    useState<string | null>(null);
   const [isLoadingDisabledProfiles, setIsLoadingDisabledProfiles] =
     useState(false);
   const [revealedAccessKey, setRevealedAccessKey] = useState<{
@@ -3427,10 +3433,10 @@ export function AdminScreen() {
     setEditSeniorCredentialsForm(EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM);
   };
 
-  const handleDeleteSeniorProfile = async (senior: Senior) => {
+  const handleDeactivateSeniorProfile = async (senior: Senior) => {
     const seniorLabel = formatSeniorDisplayName(senior);
     const confirmed = window.confirm(
-      `Supprimer le compte senior ${seniorLabel} ?`
+      `Désactiver le compte senior ${seniorLabel} ?\n\nSon identité de connexion et toutes ses données seront conservées. Ses sessions actives seront immédiatement révoquées.`
     );
 
     if (!confirmed) {
@@ -3438,18 +3444,18 @@ export function AdminScreen() {
     }
 
     try {
-      await deleteSeniorProfile(senior.id);
+      await deactivateSeniorProfile(senior.id);
       setEditingSeniorId((current) => (current === senior.id ? null : current));
       setEditSeniorCredentialsForm(EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM);
       setSeniorFeedback(null);
       setSeniorAccountFeedback({
         kind: 'success',
-        message: `Le compte senior ${seniorLabel} a été supprimé.`,
+        message: `Le compte senior ${seniorLabel} a été désactivé.`,
       });
     } catch (error) {
       setSeniorAccountFeedback({
         kind: 'error',
-        message: error instanceof Error ? error.message : 'Suppression impossible.',
+        message: error instanceof Error ? error.message : 'Désactivation impossible.',
       });
     }
   };
@@ -3998,7 +4004,7 @@ export function AdminScreen() {
     });
   };
 
-  const handleDeleteInternalProfile = async (profile: InternalProfile) => {
+  const handleDeactivateInternalProfile = async (profile: InternalProfile) => {
     const confirmed = window.confirm(
       `Désactiver le profil de ${formatDisplayName(
         profile.firstName,
@@ -4011,16 +4017,69 @@ export function AdminScreen() {
     }
 
     try {
-      await deleteInternalProfile(profile.id);
+      await deactivateInternalProfile(profile.id);
       setFeedback({
         kind: 'success',
-        message: `Le profil ${formatDisplayName(profile.firstName, profile.lastName)} a été supprimé.`,
+        message: `Le profil ${formatDisplayName(profile.firstName, profile.lastName)} a été désactivé.`,
       });
     } catch (error) {
       setFeedback({
         kind: 'error',
-        message: error instanceof Error ? error.message : 'Suppression impossible.',
+        message: error instanceof Error ? error.message : 'Désactivation impossible.',
       });
+    }
+  };
+
+  const handleReactivateProfile = async (profile: BackendProfile) => {
+    const profileLabel = formatDisplayName(profile.firstName, profile.lastName);
+
+    if (!profile.authUserId) {
+      setDisabledProfilesFeedback({
+        kind: 'error',
+        message: `Le compte historique de ${profileLabel} ne possède plus d’identité Supabase Auth et ne peut pas être réactivé automatiquement.`,
+      });
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Réactiver le compte de ${profileLabel} ?\n\nSon identité et son mot de passe sont conservés. Une nouvelle connexion sera exigée sur chaque appareil.`
+      )
+    ) {
+      return;
+    }
+
+    setDisabledProfilesFeedback(null);
+    setReactivatingProfileId(profile.id);
+
+    try {
+      await reactivateAdminAccount(profile.id, profile.version);
+      setDisabledProfiles((current) =>
+        current.filter((candidate) => candidate.id !== profile.id)
+      );
+      setDisabledProfilesFeedback({
+        kind: 'success',
+        message: `Le compte de ${profileLabel} a été réactivé. Une nouvelle connexion est nécessaire.`,
+      });
+
+      try {
+        await refreshBackendData();
+      } catch {
+        setDisabledProfilesFeedback({
+          kind: 'error',
+          message: `Le compte de ${profileLabel} est réactivé, mais l’affichage des profils actifs n’a pas pu être actualisé. Rechargez la page.`,
+        });
+      }
+    } catch (error) {
+      setDisabledProfilesFeedback({
+        kind: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'La réactivation du compte a échoué.',
+      });
+    } finally {
+      setReactivatingProfileId(null);
     }
   };
 
@@ -6551,7 +6610,7 @@ export function AdminScreen() {
                           ) : null}
                           <button
                             className="mini-button mini-button--danger"
-                            onClick={() => handleDeleteInternalProfile(profile)}
+                            onClick={() => handleDeactivateInternalProfile(profile)}
                             type="button"
                           >
                             Désactiver le profil
@@ -6615,7 +6674,7 @@ export function AdminScreen() {
                           ) : null}
                           <button
                             className="mini-button mini-button--danger"
-                            onClick={() => handleDeleteSeniorProfile(senior)}
+                            onClick={() => handleDeactivateSeniorProfile(senior)}
                             type="button"
                           >
                             Désactiver le compte
@@ -6925,9 +6984,10 @@ export function AdminScreen() {
         {isAdmin ? (
           <SectionCard
             className="admin-dashboard-card"
-            description="Cette vue est en lecture seule. Les comptes restent rattachés à leur historique sans pouvoir se reconnecter."
-            title="Historique des comptes désactivés"
+            description="Les comptes et leur identité de connexion sont conservés. Une réactivation exige une nouvelle connexion sur chaque appareil."
+            title="Comptes désactivés"
           >
+            <FeedbackMessage feedback={disabledProfilesFeedback} />
             {isLoadingDisabledProfiles ? (
               <div className="validation-box" role="status">
                 <strong>Chargement de l’historique…</strong>
@@ -6972,6 +7032,25 @@ export function AdminScreen() {
                           </span>
                         </div>
                       </div>
+                    </div>
+                    <div className="admin-profile-card__actions">
+                      {profile.authUserId ? (
+                        <button
+                          className="mini-button mini-button--secondary"
+                          disabled={reactivatingProfileId === profile.id}
+                          onClick={() => void handleReactivateProfile(profile)}
+                          type="button"
+                        >
+                          <RotateCcw aria-hidden="true" size={16} />
+                          {reactivatingProfileId === profile.id
+                            ? 'Réactivation…'
+                            : 'Réactiver'}
+                        </button>
+                      ) : (
+                        <span className="profile-card__badge">
+                          Identité Auth absente
+                        </span>
+                      )}
                     </div>
                   </article>
                 ))}
@@ -8637,10 +8716,10 @@ export function AdminScreen() {
                     </button>
                     <button
                       className="mini-button mini-button--danger"
-                      onClick={() => handleDeleteInternalProfile(profile)}
+                      onClick={() => handleDeactivateInternalProfile(profile)}
                       type="button"
                     >
-                      Supprimer le profil
+                      Désactiver le profil
                     </button>
                   </div>
                 </article>

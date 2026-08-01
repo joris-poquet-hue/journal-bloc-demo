@@ -8,6 +8,7 @@ function readSource(path) {
 
 const adminScreen = readSource('../src/screens/AdminScreen.tsx');
 const backendRepository = readSource('../src/services/backendRepository.ts');
+const adminAccountService = readSource('../src/services/adminAccountService.ts');
 
 test('le dépôt charge séparément les profils inactifs pour l’Administrateur', () => {
   const functionStart = backendRepository.indexOf(
@@ -25,14 +26,19 @@ test('le dépôt charge séparément les profils inactifs pour l’Administrateu
   assert.match(source, /updated_at\.desc/);
 });
 
-test('l’interface Admin affiche un historique séparé et en lecture seule', () => {
-  assert.match(adminScreen, /Historique des comptes désactivés/);
-  assert.match(adminScreen, /Cette vue est en lecture seule/);
+test('l’interface Admin affiche les comptes désactivés et permet leur réactivation', () => {
+  assert.match(adminScreen, /Comptes désactivés/);
+  assert.match(adminScreen, /leur identité de connexion sont conservés/);
   assert.match(adminScreen, /loadBackendDisabledProfiles/);
   assert.match(adminScreen, /profile\.role === 'internal'/);
+  assert.match(adminScreen, /handleReactivateProfile/);
+  assert.match(adminScreen, /Réactiver/);
+  assert.match(adminAccountService, /action: 'deactivate' \| 'reactivate'/);
+  assert.match(adminAccountService, /reactivateAdminAccount/);
+  assert.match(adminAccountService, /\/api\/admin-account-lifecycle/);
 
   const historyStart = adminScreen.indexOf(
-    'title="Historique des comptes désactivés"'
+    'title="Comptes désactivés"'
   );
   const historyEnd = adminScreen.indexOf(
     '\n          </SectionCard>',
@@ -40,6 +46,7 @@ test('l’interface Admin affiche un historique séparé et en lecture seule', (
   );
   const historySource = adminScreen.slice(historyStart, historyEnd);
 
-  assert.doesNotMatch(historySource, /onClick=.*(?:delete|update|reactivat)/i);
-  assert.doesNotMatch(historySource, /contactEmail|loginId|authUserId/);
+  assert.match(historySource, /onClick=.*handleReactivateProfile/i);
+  assert.doesNotMatch(historySource, /profile\.contactEmail|profile\.loginId/);
+  assert.doesNotMatch(historySource, />\s*\{profile\.authUserId\}\s*</);
 });

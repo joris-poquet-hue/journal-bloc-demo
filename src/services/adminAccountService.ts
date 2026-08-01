@@ -14,7 +14,7 @@ export type AdminAccountPayload = {
 };
 
 export type AdminAccountProfile = {
-  authUserId: string;
+  authUserId: string | null;
   contactEmail: string | null;
   firstName: string;
   id: string;
@@ -114,30 +114,50 @@ export async function regenerateAdminAccessKey(
   };
 }
 
-export async function deleteAdminAccount(
+async function changeAdminAccountLifecycle(
   profileId: string,
-  expectedVersion: number
+  expectedVersion: number,
+  action: 'deactivate' | 'reactivate'
 ) {
   if (!getSupabaseSession()) {
     throw new Error('La session administrateur a expiré. Reconnectez-vous.');
   }
 
-  const response = await fetch('/api/admin-users', {
-    body: JSON.stringify({ expectedVersion, profileId }),
+  const response = await fetch('/api/admin-account-lifecycle', {
+    body: JSON.stringify({ action, expectedVersion, profileId }),
     cache: 'no-store',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    method: 'DELETE',
+    method: 'POST',
   });
   const result = (await response.json().catch(() => null)) as
-    | { error?: string; success?: boolean }
+    | { error?: string; profile?: AdminAccountProfile; success?: boolean }
     | null;
 
-  if (!response.ok || !result?.success) {
+  if (!response.ok || !result?.success || !result.profile) {
     throw new SupabaseRestError(
       response.status,
-      result?.error ?? 'Impossible de supprimer ce compte.',
+      result?.error ??
+        (action === 'reactivate'
+          ? 'Impossible de réactiver ce compte.'
+          : 'Impossible de désactiver ce compte.'),
       result
     );
   }
+
+  return result.profile;
+}
+
+export function deactivateAdminAccount(
+  profileId: string,
+  expectedVersion: number
+) {
+  return changeAdminAccountLifecycle(profileId, expectedVersion, 'deactivate');
+}
+
+export function reactivateAdminAccount(
+  profileId: string,
+  expectedVersion: number
+) {
+  return changeAdminAccountLifecycle(profileId, expectedVersion, 'reactivate');
 }

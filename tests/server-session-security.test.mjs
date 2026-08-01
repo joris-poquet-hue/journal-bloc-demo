@@ -17,6 +17,9 @@ const migration = readSource(
 const enforcementMigration = readSource(
   '../supabase/migrations/202607270005_enforce_server_managed_sessions.sql'
 );
+const lifecycleMigration = readSource(
+  '../supabase/migrations/202608010001_reversible_account_lifecycle.sql'
+);
 const serverAuth = readSource('../src/serverAuth.cjs');
 const webAuth = readSource('../src/services/supabaseClient.ts');
 const appContext = readSource('../src/context/AppContext.tsx');
@@ -24,6 +27,7 @@ const loginApi = readSource('../api/auth-login.js');
 const logoutApi = readSource('../api/auth-logout.js');
 const sessionApi = readSource('../api/auth-session.js');
 const adminUsersApi = readSource('../api/admin-users.js');
+const adminLifecycleApi = readSource('../api/admin-account-lifecycle.js');
 const backendApi = readSource('../api/backend.js');
 const mobileBootstrapApi = readSource('../api/auth-mobile-bootstrap.js');
 const mobileShell = readSource('../mobile/WebAppShell.tsx');
@@ -169,8 +173,16 @@ test('la déconnexion et la désactivation révoquent toutes les sessions', () =
   assert.match(logoutApi, /revokeAllApplicationSessions/);
   assert.match(logoutApi, /'voluntary_logout'/);
   assert.match(logoutApi, /body\?\.scope === 'current'/);
-  assert.match(adminUsersApi, /revokeAllApplicationSessions/);
-  assert.match(adminUsersApi, /account_deactivated/);
+  assert.match(adminUsersApi, /changeAccountLifecycle/);
+  assert.match(adminLifecycleApi, /changeAccountLifecycle/);
+  assert.match(
+    lifecycleMigration,
+    /update public\.application_sessions[\s\S]*revocation_reason[\s\S]*account_deactivated/i
+  );
+  assert.match(
+    lifecycleMigration,
+    /delete from auth\.sessions[\s\S]*user_id = target_profile\.auth_user_id/i
+  );
   assert.match(webAuth, /MONJDB_SESSION_REVOKED/);
   assert.match(appContext, /monjdb:session-expired/);
 });

@@ -118,7 +118,7 @@ import type {
 } from '../shared/backendTypes';
 import {
   createAdminAccount,
-  deleteAdminAccount,
+  deactivateAdminAccount,
   regenerateAdminAccessKey,
   updateAdminAccount,
 } from '../services/adminAccountService';
@@ -283,7 +283,7 @@ type AppContextValue = {
     seniorId: string,
     internalIds: string[]
   ) => Promise<void>;
-  deleteSeniorProfile: (seniorId: string) => Promise<void>;
+  deactivateSeniorProfile: (seniorId: string) => Promise<void>;
   createSurgicalIntervention: (
     input: CreateSurgicalInterventionInput
   ) => Promise<CreateSurgicalInterventionResult>;
@@ -292,7 +292,7 @@ type AppContextValue = {
     input: CreateSurgicalInterventionInput
   ) => Promise<CreateSurgicalInterventionResult>;
   deleteCustomSurgicalIntervention: (interventionId: string) => Promise<void>;
-  deleteInternalProfile: (profileId: string) => Promise<void>;
+  deactivateInternalProfile: (profileId: string) => Promise<void>;
   deletePendingIntervention: (interventionId: string) => Promise<void>;
   saveSeniorEvaluation: (
     evaluation: AdminInterventionEvaluation
@@ -3194,14 +3194,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   };
 
-  const deleteSeniorProfile = async (seniorId: string) => {
+  const deactivateSeniorProfile = async (seniorId: string) => {
     const senior = selectableSeniors.find((item) => item.id === seniorId);
 
     if (!senior?.version) {
-      throw new Error('Rechargez les données avant de supprimer ce compte.');
+      throw new Error('Rechargez les données avant de désactiver ce compte.');
     }
 
-    await deleteAdminAccount(seniorId, senior.version);
+    await deactivateAdminAccount(seniorId, senior.version);
     setCustomSeniors((current) =>
       current.filter((senior) => senior.id !== seniorId)
     );
@@ -3548,7 +3548,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
   };
 
-  const deleteInternalProfile = async (profileId: string) => {
+  const deactivateInternalProfile = async (profileId: string) => {
     if (!profileId) {
       return;
     }
@@ -3556,10 +3556,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const profile = internalProfiles.find((item) => item.id === profileId);
 
     if (!profile?.version) {
-      throw new Error('Rechargez les données avant de supprimer ce compte.');
+      throw new Error('Rechargez les données avant de désactiver ce compte.');
     }
 
-    await deleteAdminAccount(profileId, profile.version);
+    await deactivateAdminAccount(profileId, profile.version);
     setInternalProfiles((current) =>
       current.filter((profile) => profile.id !== profileId)
     );
@@ -3857,11 +3857,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         updateSeniorProfile,
         updateSeniorCredentials,
         updateSeniorManagedInternals,
-        deleteSeniorProfile,
+        deactivateSeniorProfile,
         createSurgicalIntervention,
         updateSurgicalIntervention,
         deleteCustomSurgicalIntervention,
-        deleteInternalProfile,
+        deactivateInternalProfile,
         deletePendingIntervention,
         saveSeniorEvaluation,
         setAdminTrophies,

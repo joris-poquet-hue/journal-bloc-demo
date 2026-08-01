@@ -254,18 +254,22 @@ try {
 
   assert.ok(targetVersion > 0, 'Version du profil cible introuvable.');
 
-  const deactivationResponse = await fetch(`${baseUrl}/api/admin-users`, {
-    body: JSON.stringify({
-      expectedVersion: targetVersion,
-      profileId,
-    }),
-    headers: {
-      'Content-Type': 'application/json',
-      Cookie: adminSession.cookie,
-      'User-Agent': adminSession.userAgent,
-    },
-    method: 'DELETE',
-  });
+  const deactivationResponse = await fetch(
+    `${baseUrl}/api/admin-account-lifecycle`,
+    {
+      body: JSON.stringify({
+        action: 'deactivate',
+        expectedVersion: targetVersion,
+        profileId,
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: adminSession.cookie,
+        'User-Agent': adminSession.userAgent,
+      },
+      method: 'POST',
+    }
+  );
   const deactivationPayload = await deactivationResponse.json();
 
   assert.equal(
@@ -290,15 +294,72 @@ try {
     searchParams: {
       id: `eq.${profileId}`,
       limit: '1',
-      select: 'auth_user_id,is_active',
+      select: 'auth_user_id,is_active,version',
     },
   });
 
   assert.equal(deactivatedProfiles?.[0]?.is_active, false);
-  assert.equal(deactivatedProfiles?.[0]?.auth_user_id, null);
+  assert.equal(
+    deactivatedProfiles?.[0]?.auth_user_id,
+    authUserId,
+    'La désactivation doit conserver la même identité Supabase Auth.'
+  );
+
+  const reactivationResponse = await fetch(
+    `${baseUrl}/api/admin-account-lifecycle`,
+    {
+      body: JSON.stringify({
+        action: 'reactivate',
+        expectedVersion: Number(deactivatedProfiles?.[0]?.version ?? 0),
+        profileId,
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: adminSession.cookie,
+        'User-Agent': adminSession.userAgent,
+      },
+      method: 'POST',
+    }
+  );
+  const reactivationPayload = await reactivationResponse.json();
+
+  assert.equal(
+    reactivationResponse.status,
+    200,
+    reactivationPayload?.error
+  );
+
+  const reactivatedProfiles = await restRequest('profiles', {
+    searchParams: {
+      id: `eq.${profileId}`,
+      limit: '1',
+      select: 'auth_user_id,is_active',
+    },
+  });
+
+  assert.equal(reactivatedProfiles?.[0]?.is_active, true);
+  assert.equal(reactivatedProfiles?.[0]?.auth_user_id, authUserId);
+
+  for (const session of sessionsBeforeDeactivation) {
+    const response =
+      session.kind === 'web'
+        ? await restoreWebSession(session)
+        : await restoreMobileSession(session);
+    assert.equal(
+      response.status,
+      401,
+      'La réactivation ne doit jamais restaurer une ancienne session.'
+    );
+  }
+
+  const reactivatedSession = await login(
+    'web',
+    'Project1SessionTest/Reactivation-Web'
+  );
+  await assertSessionWorks(reactivatedSession);
 
   console.log(
-    'Production session verification passed: 2 web + 2 mobile, inactivity, global logout and account deactivation.'
+    'Production session verification passed: 2 web + 2 mobile, inactivity, global logout, reversible deactivation and fresh-login reactivation.'
   );
 } finally {
   if (profileId) {
