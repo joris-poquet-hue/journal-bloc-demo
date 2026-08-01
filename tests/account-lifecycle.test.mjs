@@ -17,7 +17,6 @@ function readSource(path) {
 const migration = readSource(
   '../supabase/migrations/202608010001_reversible_account_lifecycle.sql'
 );
-const lifecycleApi = readSource('../api/admin-account-lifecycle.js');
 const legacyAdminApi = readSource('../api/admin-users.js');
 const adminScreen = readSource('../src/screens/AdminScreen.tsx');
 
@@ -123,7 +122,7 @@ test('la migration protège l’identité, révoque les accès et audite les deu
   );
 });
 
-test('les deux API Admin passent par le cycle réversible sans supprimer l’utilisateur Auth', () => {
+test('l’API Admin mutualisée passe par le cycle réversible sans supprimer l’utilisateur Auth', () => {
   const deactivateStart = legacyAdminApi.indexOf(
     'async function deactivateAccount'
   );
@@ -139,7 +138,8 @@ test('les deux API Admin passent par le cycle réversible sans supprimer l’uti
   assert.doesNotMatch(deactivateSource, /authAdminRequest/);
   assert.doesNotMatch(deactivateSource, /method:\s*'DELETE'/);
   assert.doesNotMatch(deactivateSource, /auth_user_id\s*:\s*null/);
-  assert.match(lifecycleApi, /action === 'reactivate'/);
-  assert.match(lifecycleApi, /targetActive/);
+  assert.match(legacyAdminApi, /action === 'reactivate'/);
+  assert.match(legacyAdminApi, /targetActive/);
+  assert.match(legacyAdminApi, /request\.method === 'PUT'/);
   assert.match(adminScreen, /handleReactivateProfile/);
 });

@@ -123,12 +123,12 @@ async function changeAdminAccountLifecycle(
     throw new Error('La session administrateur a expiré. Reconnectez-vous.');
   }
 
-  const response = await fetch('/api/admin-account-lifecycle', {
+  const response = await fetch('/api/admin-users', {
     body: JSON.stringify({ action, expectedVersion, profileId }),
     cache: 'no-store',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
-    method: 'POST',
+    method: 'PUT',
   });
   const result = (await response.json().catch(() => null)) as
     | { error?: string; profile?: AdminAccountProfile; success?: boolean }

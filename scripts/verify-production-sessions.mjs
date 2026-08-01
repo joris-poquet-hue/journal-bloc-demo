@@ -255,7 +255,7 @@ try {
   assert.ok(targetVersion > 0, 'Version du profil cible introuvable.');
 
   const deactivationResponse = await fetch(
-    `${baseUrl}/api/admin-account-lifecycle`,
+    `${baseUrl}/api/admin-users`,
     {
       body: JSON.stringify({
         action: 'deactivate',
@@ -267,7 +267,7 @@ try {
         Cookie: adminSession.cookie,
         'User-Agent': adminSession.userAgent,
       },
-      method: 'POST',
+      method: 'PUT',
     }
   );
   const deactivationPayload = await deactivationResponse.json();
@@ -306,7 +306,7 @@ try {
   );
 
   const reactivationResponse = await fetch(
-    `${baseUrl}/api/admin-account-lifecycle`,
+    `${baseUrl}/api/admin-users`,
     {
       body: JSON.stringify({
         action: 'reactivate',
@@ -318,7 +318,7 @@ try {
         Cookie: adminSession.cookie,
         'User-Agent': adminSession.userAgent,
       },
-      method: 'POST',
+      method: 'PUT',
     }
   );
   const reactivationPayload = await reactivationResponse.json();

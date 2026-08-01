@@ -327,8 +327,8 @@ async function deactivateAccount(profileId, expectedVersion, adminIdentity) {
 }
 
 module.exports = async function handler(request, response) {
-  if (!['POST', 'PATCH', 'DELETE'].includes(request.method)) {
-    response.setHeader('Allow', 'POST, PATCH, DELETE');
+  if (!['POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method)) {
+    response.setHeader('Allow', 'POST, PATCH, PUT, DELETE');
     return sendJson(response, 405, { error: 'Méthode non autorisée.' });
   }
 
@@ -357,6 +357,46 @@ module.exports = async function handler(request, response) {
     body = await getRequestBody(request);
   } catch {
     return sendJson(response, 400, { error: 'Corps JSON invalide.' });
+  }
+
+  if (request.method === 'PUT') {
+    const action = String(body?.action ?? '').trim();
+    const expectedVersion = Number(body?.expectedVersion ?? 0);
+    const profileId = String(body?.profileId ?? '').trim();
+
+    if (!profileId) {
+      return sendJson(response, 400, {
+        error: 'L’identifiant du profil est obligatoire.',
+      });
+    }
+
+    if (!['deactivate', 'reactivate'].includes(action)) {
+      return sendJson(response, 400, {
+        error: 'L’action de cycle de vie est invalide.',
+      });
+    }
+
+    try {
+      const profile = await changeAccountLifecycle({
+        adminIdentity,
+        expectedVersion,
+        profileId,
+        targetActive: action === 'reactivate',
+      });
+
+      return sendJson(response, 200, {
+        action,
+        profile: toPublicProfile(profile),
+        success: true,
+      });
+    } catch (error) {
+      console.error('Administrator account lifecycle operation failed.', error);
+      return sendJson(response, error.status || 400, {
+        error:
+          error.message ||
+          'Impossible de modifier l’état de ce compte.',
+      });
+    }
   }
 
   const input = sanitizeProfileInput(body);

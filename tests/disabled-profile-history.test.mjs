@@ -35,7 +35,8 @@ test('l’interface Admin affiche les comptes désactivés et permet leur réact
   assert.match(adminScreen, /Réactiver/);
   assert.match(adminAccountService, /action: 'deactivate' \| 'reactivate'/);
   assert.match(adminAccountService, /reactivateAdminAccount/);
-  assert.match(adminAccountService, /\/api\/admin-account-lifecycle/);
+  assert.match(adminAccountService, /\/api\/admin-users/);
+  assert.match(adminAccountService, /method: 'PUT'/);
 
   const historyStart = adminScreen.indexOf(
     'title="Comptes désactivés"'

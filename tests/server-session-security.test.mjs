@@ -27,7 +27,6 @@ const loginApi = readSource('../api/auth-login.js');
 const logoutApi = readSource('../api/auth-logout.js');
 const sessionApi = readSource('../api/auth-session.js');
 const adminUsersApi = readSource('../api/admin-users.js');
-const adminLifecycleApi = readSource('../api/admin-account-lifecycle.js');
 const backendApi = readSource('../api/backend.js');
 const mobileBootstrapApi = readSource('../api/auth-mobile-bootstrap.js');
 const mobileShell = readSource('../mobile/WebAppShell.tsx');
@@ -174,7 +173,7 @@ test('la déconnexion et la désactivation révoquent toutes les sessions', () =
   assert.match(logoutApi, /'voluntary_logout'/);
   assert.match(logoutApi, /body\?\.scope === 'current'/);
   assert.match(adminUsersApi, /changeAccountLifecycle/);
-  assert.match(adminLifecycleApi, /changeAccountLifecycle/);
+  assert.match(adminUsersApi, /request\.method === 'PUT'/);
   assert.match(
     lifecycleMigration,
     /update public\.application_sessions[\s\S]*revocation_reason[\s\S]*account_deactivated/i
