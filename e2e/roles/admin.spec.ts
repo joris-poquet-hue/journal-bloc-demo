@@ -26,7 +26,7 @@ test.describe('Parcours Administrateur', () => {
     ).toBeVisible();
     await expect(
       page.getByRole('heading', {
-        name: 'Historique des comptes désactivés',
+        name: 'Comptes désactivés',
         level: 2,
       })
     ).toBeVisible();

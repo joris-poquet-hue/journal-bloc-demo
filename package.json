@@ -15,6 +15,7 @@
     "db:legacy-snapshots:dry-run": "node scripts/apply-legacy-intervention-snapshots.mjs",
     "db:legacy-snapshots:apply": "node scripts/apply-legacy-intervention-snapshots.mjs --apply",
     "demo:accounts": "node scripts/create-demo-accounts.mjs",
+    "e2e:accounts:provision": "node scripts/provision-e2e-accounts.mjs",
     "auth:prepare": "node scripts/prepare-auth-users.mjs",
     "auth:invite:dry-run": "node scripts/invite-auth-users.mjs",
     "auth:invite": "node scripts/invite-auth-users.mjs --apply",

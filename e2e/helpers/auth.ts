@@ -53,9 +53,18 @@ export async function loginAs(page: Page, credentials: Credentials) {
   await page.goto('/');
   await page.getByLabel('Identifiant').fill(credentials.loginId);
   await page.getByLabel('Mot de passe ou clé d’accès').fill(credentials.password);
+  const loginResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().includes('/api/auth-login') &&
+      response.request().method() === 'POST',
+    { timeout: 30_000 }
+  );
+
   await page.getByRole('button', { name: 'Se connecter' }).click();
 
-  await expect(page.getByRole('button', { name: 'Se connecter' })).toBeHidden({
+  const loginResponse = await loginResponsePromise;
+  expect(loginResponse.ok()).toBe(true);
+  await expect(page.getByRole('region', { name: 'Connexion' })).toBeHidden({
     timeout: 20_000,
   });
   await expect(page.getByRole('alert')).toHaveCount(0);

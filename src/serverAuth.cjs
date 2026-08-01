@@ -334,7 +334,7 @@ async function getProfileByLoginId(loginId) {
       login_id: `eq.${loginId}`,
       is_active: 'eq.true',
       select:
-        'id,auth_user_id,role,first_name,last_name,login_id,metadata,must_change_password,is_active,version,updated_at,updated_by_profile_id',
+        'id,auth_user_id,role,first_name,last_name,login_id,institution,institution_id,metadata,must_change_password,is_active,version,updated_at,updated_by_profile_id',
     },
   });
 
@@ -348,7 +348,7 @@ async function getProfileByAuthUserId(authUserId) {
       is_active: 'eq.true',
       limit: '1',
       select:
-        'id,auth_user_id,role,first_name,last_name,login_id,metadata,must_change_password,is_active,version,updated_at,updated_by_profile_id',
+        'id,auth_user_id,role,first_name,last_name,login_id,institution,institution_id,metadata,must_change_password,is_active,version,updated_at,updated_by_profile_id',
     },
   });
 
