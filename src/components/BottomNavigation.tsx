@@ -29,7 +29,7 @@ export function BottomNavigation() {
       label: 'Progression',
       isActive: (currentScreen) =>
         currentScreen === 'surgery-history' || currentScreen === 'trophies',
-      onPress: () => goToSurgeryHistory(),
+      onPress: () => goToSurgeryHistory(undefined, 'progress'),
     },
     {
       label: 'Fiches',
@@ -44,7 +44,9 @@ export function BottomNavigation() {
   ];
 
   const isAdding =
-    screen === 'form' || screen === 'checklist' || screen === 'summary';
+    screen === 'form' ||
+    screen === 'context-variables' ||
+    screen === 'summary';
 
   return (
     <nav className="bottom-nav" aria-label="Navigation principale">

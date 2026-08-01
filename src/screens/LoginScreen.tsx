@@ -1,6 +1,7 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 
 import { useAppContext } from '../context/AppContext';
+import { PASSWORD_POLICY_HELP } from '../utils/passwordPolicy';
 
 function UserIcon() {
   return (
@@ -72,48 +73,35 @@ function ShieldIcon() {
   );
 }
 
-function InfoIcon() {
-  return (
-    <svg aria-hidden="true" className="login-demo-card__icon" fill="none" viewBox="0 0 24 24">
-      <path
-        d="M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-      <path
-        d="M12 11.25v5"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-      <path
-        d="M12 8h.01"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="2.4"
-      />
-    </svg>
-  );
-}
-
 export function LoginScreen() {
   const {
     cancelPasswordChangeChallenge,
     completePasswordChangeChallenge,
     login,
     passwordChangeChallenge,
+    requestPasswordRecovery,
   } = useAppContext();
   const [loginId, setLoginId] = useState('');
   const [password, setPassword] = useState('');
+  const [contactEmail, setContactEmail] = useState('');
+  const [confirmContactEmail, setConfirmContactEmail] = useState('');
   const [nextPassword, setNextPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const isPasswordChangeMode = passwordChangeChallenge != null;
+
+  useEffect(() => {
+    if (!passwordChangeChallenge) {
+      setContactEmail('');
+      setConfirmContactEmail('');
+      return;
+    }
+
+    setContactEmail(passwordChangeChallenge.contactEmail ?? '');
+    setConfirmContactEmail('');
+  }, [passwordChangeChallenge]);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -121,6 +109,9 @@ export function LoginScreen() {
 
     if (isPasswordChangeMode) {
       const result = await completePasswordChangeChallenge(
+        contactEmail,
+        confirmContactEmail,
+        password,
         nextPassword,
         confirmPassword
       );
@@ -129,6 +120,8 @@ export function LoginScreen() {
       if (result.success) {
         setErrorMessage('');
         setPassword('');
+        setContactEmail('');
+        setConfirmContactEmail('');
         setNextPassword('');
         setConfirmPassword('');
         return;
@@ -159,9 +152,32 @@ export function LoginScreen() {
   const handleCancelPasswordChange = () => {
     cancelPasswordChangeChallenge();
     setPassword('');
+    setContactEmail('');
+    setConfirmContactEmail('');
     setNextPassword('');
     setConfirmPassword('');
     setErrorMessage('');
+  };
+
+  const handlePasswordRecovery = async () => {
+    setErrorMessage('');
+    setStatusMessage('');
+
+    if (!loginId.trim()) {
+      setErrorMessage('Renseigne d’abord ton identifiant.');
+      return;
+    }
+
+    setIsLoggingIn(true);
+    const result = await requestPasswordRecovery(loginId);
+    setIsLoggingIn(false);
+
+    if (result.success) {
+      setStatusMessage(result.message);
+      return;
+    }
+
+    setErrorMessage(result.message);
   };
 
   return (
@@ -171,6 +187,31 @@ export function LoginScreen() {
       <div className="login-page__line" />
 
       <div className="login-page__frame">
+        <header className="login-web-story">
+          <span className="login-web-story__logo-stage">
+            <img
+              alt="Mon Journal de Bloc"
+              className="login-web-story__logo"
+              src="/images/brand/MonJDB_logoH.png"
+            />
+          </span>
+          <h1>
+            Observe tes progrès.
+            <br />
+            Construis ton autonomie.
+          </h1>
+          <p>
+            Toutes tes interventions, évaluations et réussites réunies au même
+            endroit.
+          </p>
+          <span className="login-web-story__path" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+            <i />
+          </span>
+        </header>
+
         <header className="login-brand">
           <span className="login-brand__logo-shell" aria-hidden="true">
             <img
@@ -189,22 +230,80 @@ export function LoginScreen() {
           </div>
         </header>
 
-        <section aria-labelledby="login-title" className="login-card">
-          <div className="login-card__header">
-            <h1 id="login-title">
-              {isPasswordChangeMode ? 'Créer votre mot de passe' : 'Connexion'}
-            </h1>
-            {!isPasswordChangeMode ? (
-              <p>Accédez à votre espace interne ou senior.</p>
-            ) : null}
-          </div>
+        <section
+          aria-label={
+            isPasswordChangeMode ? 'Création du mot de passe' : 'Connexion'
+          }
+          className="login-card"
+        >
+          <header className="login-card__header login-card__header--web">
+            <span>
+              {isPasswordChangeMode ? 'Sécurisation du compte' : 'Accès personnel'}
+            </span>
+            <h2>
+              {isPasswordChangeMode
+                ? 'Création du mot de passe'
+                : 'Bienvenue'}
+            </h2>
+          </header>
 
           <form className="login-form" onSubmit={handleSubmit}>
             {isPasswordChangeMode ? (
               <>
-                <div className="login-note login-note--panel">
-                  <span>Choisissez maintenant un mot de passe personnel.</span>
-                </div>
+                {passwordChangeChallenge?.isFirstLogin ? (
+                  <>
+                    <p className="login-note login-note--compact">
+                      Première connexion : renseigne deux fois ton adresse e-mail,
+                      puis choisis ton mot de passe personnel.
+                    </p>
+
+                    <label className="login-field">
+                      <span className="login-field__label">Adresse e-mail</span>
+                      <span className="login-field__control">
+                        <UserIcon />
+                        <input
+                          autoCapitalize="none"
+                          autoComplete="email"
+                          autoCorrect="off"
+                          className="login-field__input"
+                          onChange={(event) => {
+                            setContactEmail(event.target.value);
+                            setErrorMessage('');
+                          }}
+                          placeholder="prenom.nom@exemple.fr"
+                          type="email"
+                          value={contactEmail}
+                        />
+                      </span>
+                    </label>
+
+                    <label className="login-field">
+                      <span className="login-field__label">
+                        Confirmer l’adresse e-mail
+                      </span>
+                      <span className="login-field__control">
+                        <UserIcon />
+                        <input
+                          autoCapitalize="none"
+                          autoComplete="email"
+                          autoCorrect="off"
+                          className="login-field__input"
+                          onChange={(event) => {
+                            setConfirmContactEmail(event.target.value);
+                            setErrorMessage('');
+                          }}
+                          placeholder="Saisir à nouveau l’adresse"
+                          type="email"
+                          value={confirmContactEmail}
+                        />
+                      </span>
+                    </label>
+                  </>
+                ) : null}
+
+                <p className="login-note login-note--compact">
+                  {PASSWORD_POLICY_HELP}
+                </p>
 
                 <label className="login-field">
                   <span className="login-field__label">Nouveau mot de passe</span>
@@ -261,7 +360,6 @@ export function LoginScreen() {
                         setLoginId(event.target.value);
                         setErrorMessage('');
                       }}
-                      placeholder="Identifiant"
                       type="text"
                       value={loginId}
                     />
@@ -269,7 +367,9 @@ export function LoginScreen() {
                 </label>
 
                 <label className="login-field">
-                  <span className="login-field__label">Mot de passe</span>
+                  <span className="login-field__label">
+                    Mot de passe ou clé d’accès
+                  </span>
                   <span className="login-field__control">
                     <LockIcon />
                     <input
@@ -281,7 +381,6 @@ export function LoginScreen() {
                         setPassword(event.target.value);
                         setErrorMessage('');
                       }}
-                      placeholder="Mot de passe"
                       type="password"
                       value={password}
                     />
@@ -296,6 +395,12 @@ export function LoginScreen() {
               </p>
             ) : null}
 
+            {statusMessage ? (
+              <p className="auth-success" role="status">
+                {statusMessage}
+              </p>
+            ) : null}
+
             <button
               className="login-submit"
               disabled={isLoggingIn}
@@ -306,7 +411,9 @@ export function LoginScreen() {
                   ? 'Mise à jour...'
                   : 'Connexion...'
                 : isPasswordChangeMode
-                  ? 'Mettre à jour le mot de passe'
+                  ? passwordChangeChallenge?.isFirstLogin
+                    ? 'Finaliser mon compte'
+                    : 'Mettre à jour le mot de passe'
                   : 'Se connecter'}
             </button>
 
@@ -318,22 +425,23 @@ export function LoginScreen() {
               >
                 Retour à l'écran de connexion
               </button>
-            ) : null}
+            ) : (
+              <button
+                className="login-submit login-submit--secondary"
+                disabled={isLoggingIn}
+                onClick={handlePasswordRecovery}
+                type="button"
+              >
+                Mot de passe oublié
+              </button>
+            )}
 
             <p className="login-note">
               <ShieldIcon />
-              <span>Identifiants générés par l’administrateur du service.</span>
+              <span>Accès gérés par administrateur local</span>
             </p>
           </form>
         </section>
-
-        <aside className="login-demo-card" aria-label="Version de démonstration">
-          <InfoIcon />
-          <div>
-            <p className="login-demo-card__title">Version de démonstration</p>
-            <p className="login-demo-card__subtitle">En cours de développement…</p>
-          </div>
-        </aside>
       </div>
     </main>
   );

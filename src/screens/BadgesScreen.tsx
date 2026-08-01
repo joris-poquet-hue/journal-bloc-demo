@@ -16,7 +16,7 @@ import {
   buildTrophyDisplayModels,
 } from '../utils/trophyDisplay';
 
-type TrophySectionId = 'earned' | 'progress' | 'secret';
+type TrophySectionId = 'earned' | 'progress';
 
 function TrophyHeroIllustration() {
   return (
@@ -66,12 +66,49 @@ export function TrophiesScreen() {
   const {
     adminEvaluations,
     adminTrophies,
+    customSurgicalInterventions,
     selectedInternal,
     savedInterventions,
+    trophyAwards,
     backToWelcome,
   } = useAppContext();
   const [activeSectionSheet, setActiveSectionSheet] = useState<TrophySectionId | null>(
     null
+  );
+  const isNativeApp =
+    typeof window !== 'undefined' &&
+    Boolean(
+      (window as Window & { __MONJDB_NATIVE_APP__?: boolean })
+        .__MONJDB_NATIVE_APP__
+    );
+  const trophyDisplay = useMemo(
+    () => {
+      if (!selectedInternal) {
+        return {
+          counts: { earned: 0, progress: 0 },
+          earned: [],
+          progress: [],
+          secret: [],
+        };
+      }
+
+      return buildTrophyDisplayModels({
+        adminEvaluations,
+        adminTrophies,
+        customSurgicalInterventions,
+        profile: selectedInternal,
+        savedInterventions,
+        trophyAwards,
+      });
+    },
+    [
+      adminEvaluations,
+      adminTrophies,
+      customSurgicalInterventions,
+      savedInterventions,
+      selectedInternal,
+      trophyAwards,
+    ]
   );
 
   if (!selectedInternal) {
@@ -84,16 +121,6 @@ export function TrophiesScreen() {
       </ScreenContainer>
     );
   }
-  const trophyDisplay = useMemo(
-    () =>
-      buildTrophyDisplayModels({
-        adminEvaluations,
-        adminTrophies,
-        profile: selectedInternal,
-        savedInterventions,
-      }),
-    [adminEvaluations, adminTrophies, savedInterventions, selectedInternal]
-  );
   const trophySections: Array<{
     filter: TrophySectionId;
     title: string;
@@ -103,26 +130,18 @@ export function TrophiesScreen() {
   }> = [
     {
       filter: 'earned',
-      title: 'Récemment débloqués',
+      title: 'Mes trophées remportées',
       items: trophyDisplay.earned,
       previewItems: trophyDisplay.earned.slice(0, 3),
       sheetDescription: 'Tous les trophées actifs obtenus au fil de ta progression.',
     },
     {
       filter: 'progress',
-      title: 'En cours',
+      title: isNativeApp ? 'Mes trophées en cours' : 'Trophées en cours ...',
       items: trophyDisplay.progress,
       previewItems: trophyDisplay.progress.slice(0, 3),
       sheetDescription:
         'Les trophées actifs visibles qui progressent encore vers leur prochain palier.',
-    },
-    {
-      filter: 'secret',
-      title: 'Secrets à découvrir',
-      items: trophyDisplay.secret,
-      previewItems: trophyDisplay.secret.slice(0, 3),
-      sheetDescription:
-        'Les trophées actifs surprise restent visibles, mais verrouillés avant leur obtention.',
     },
   ];
   const activeSheetSection = activeSectionSheet
@@ -130,8 +149,7 @@ export function TrophiesScreen() {
     : null;
   const hasAnyTrophies =
     trophyDisplay.earned.length > 0 ||
-    trophyDisplay.progress.length > 0 ||
-    trophyDisplay.secret.length > 0;
+    trophyDisplay.progress.length > 0;
 
   return (
     <>
@@ -183,15 +201,12 @@ export function TrophiesScreen() {
               </section>
             ))
         ) : (
-          <section className="trophy-empty-state" aria-label="Aucun trophée actif">
+          <section className="trophy-empty-state" aria-label="Aucun trophée remporté">
             <div className="trophy-empty-state__icon">
               <Trophy aria-hidden="true" strokeWidth={2.1} />
             </div>
-            <strong>Aucun trophée actif pour le moment</strong>
-            <p>
-              Les trophées apparaîtront ici dès qu’ils seront activés dans le
-              catalogue administrateur.
-            </p>
+            <strong>Aucun trophée remporté pour le moment</strong>
+            <p>Progresse pour remporter des trophées!</p>
           </section>
         )}
       </ScreenContainer>

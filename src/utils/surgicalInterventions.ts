@@ -183,34 +183,15 @@ function buildIndicationOptionsFromLegacy(
 }
 
 function buildApproachConfigsFromLegacy(
-  definition: SurgicalInterventionDefinition | CreateSurgicalInterventionInput
+  definition: SurgicalInterventionDefinition
 ) {
   return definition.allowedApproaches.map((approach) => {
     const needsEntryTechniques = PNEUMOPERITONEUM_APPROACHES.includes(approach);
     const entryTechniques = needsEntryTechniques
       ? createEntryTechniqueOptions(definition.allowedEntryTechniques)
       : [];
-    const legacyChecklistSteps =
-      'checklistSteps' in definition ? definition.checklistSteps : [];
-    const legacyKeyStepIds =
-      'keyStepIds' in definition ? new Set(definition.keyStepIds) : new Set<string>();
-    const legacyStepApproachLabels =
-      'stepApproachLabels' in definition ? definition.stepApproachLabels : {};
-    const legacyStepOrderLabels =
-      'stepOrderLabels' in definition ? definition.stepOrderLabels : [];
-    const legacyCustomSteps =
-      'customChecklistSteps' in definition ? definition.customChecklistSteps : [];
-    const resolvedLegacySteps =
-      legacyChecklistSteps.length > 0
-        ? legacyChecklistSteps
-        : [...legacyStepOrderLabels, ...legacyCustomSteps].map((label, index) => ({
-            id: `legacy-step-${index + 1}`,
-            label,
-            applicableApproaches:
-              legacyStepApproachLabels[label]?.length != null
-                ? legacyStepApproachLabels[label]
-                : [],
-          }));
+    const legacyKeyStepIds = new Set(definition.keyStepIds);
+    const resolvedLegacySteps = definition.checklistSteps;
     const steps = resolvedLegacySteps
       .filter((step) => {
         const applicableApproaches = step.applicableApproaches ?? [];
@@ -295,6 +276,20 @@ function deriveKeyStepIds(approachConfigs: InterventionApproachConfig[]) {
     });
 
   return Array.from(scoredIds);
+}
+
+function buildApproachConfigsFromInput(
+  input: CreateSurgicalInterventionInput
+) {
+  return input.allowedApproaches.map((approach) =>
+    createApproachConfig(approach, {
+      active: true,
+      entryTechniques: PNEUMOPERITONEUM_APPROACHES.includes(approach)
+        ? createEntryTechniqueOptions(input.allowedEntryTechniques)
+        : [],
+      steps: [],
+    })
+  );
 }
 
 export function ensureSurgicalInterventionDefinitionShape(
@@ -397,7 +392,7 @@ export function buildSurgicalInterventionDefinitionFromInput(
     approachConfigs:
       input.approachConfigs ??
       existingDefinition?.approachConfigs ??
-      buildApproachConfigsFromLegacy(input),
+      buildApproachConfigsFromInput(input),
     archivedAt:
       (forcedStatus ?? input.status ?? existingDefinition?.status) === 'archived'
         ? existingDefinition?.archivedAt ?? now
@@ -418,10 +413,6 @@ export function surgicalInterventionDefinitionToInput(
     allowedApproaches: normalizedDefinition.allowedApproaches,
     allowedEntryTechniques: normalizedDefinition.allowedEntryTechniques,
     requiresLaterality: normalizedDefinition.requiresLaterality,
-    customChecklistSteps: [],
-    keyStepLabels: [],
-    stepOrderLabels: [],
-    stepApproachLabels: {},
     status: normalizedDefinition.status,
     lateralityMode: normalizedDefinition.lateralityMode,
     indicationOptions: normalizedDefinition.indicationOptions,

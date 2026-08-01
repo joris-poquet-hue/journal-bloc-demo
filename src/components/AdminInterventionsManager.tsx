@@ -141,24 +141,22 @@ function updateApproachSteps(
 export function AdminInterventionsManager({
   interventions,
   savedInterventions,
-  onBack,
   createSurgicalIntervention,
   updateSurgicalIntervention,
   deleteCustomSurgicalIntervention,
 }: {
   interventions: SurgicalInterventionDefinition[];
   savedInterventions: SavedIntervention[];
-  onBack: () => void;
   createSurgicalIntervention: (
     input: CreateSurgicalInterventionInput
-  ) => { success: boolean; message: string; intervention?: SurgicalInterventionDefinition };
+  ) => Promise<{ success: boolean; message: string; intervention?: SurgicalInterventionDefinition }>;
   updateSurgicalIntervention: (
     interventionId: SurgicalInterventionDefinition['id'],
     input: CreateSurgicalInterventionInput
-  ) => { success: boolean; message: string; intervention?: SurgicalInterventionDefinition };
+  ) => Promise<{ success: boolean; message: string; intervention?: SurgicalInterventionDefinition }>;
   deleteCustomSurgicalIntervention: (
     interventionId: SurgicalInterventionDefinition['id']
-  ) => void;
+  ) => Promise<void>;
 }) {
   const [view, setView] = useState<InterventionManagerView>('list');
   useScrollResetOnChange([view]);
@@ -288,7 +286,9 @@ export function AdminInterventionsManager({
     openEditor(duplicateSurgicalInterventionDefinition(definition), 'duplicate');
   };
 
-  const handleToggleStatus = (definition: SurgicalInterventionDefinition) => {
+  const handleToggleStatus = async (
+    definition: SurgicalInterventionDefinition
+  ) => {
     const nextStatus: InterventionStatus =
       definition.status === 'active' ? 'inactive' : 'active';
     const updatedDefinition = ensureSurgicalInterventionDefinitionShape({
@@ -297,7 +297,7 @@ export function AdminInterventionsManager({
       archivedAt: null,
       updatedAt: new Date().toISOString(),
     });
-    const result = updateSurgicalIntervention(
+    const result = await updateSurgicalIntervention(
       updatedDefinition.id,
       surgicalInterventionDefinitionToInput(updatedDefinition)
     );
@@ -313,7 +313,7 @@ export function AdminInterventionsManager({
     setOpenCardMenuId(null);
   };
 
-  const handleArchive = (definition: SurgicalInterventionDefinition) => {
+  const handleArchive = async (definition: SurgicalInterventionDefinition) => {
     const confirmationMessage =
       getUsedCount(definition, savedInterventions) > 0
         ? 'Cette intervention a déjà été utilisée dans des journaux opératoires. Elle ne peut pas être supprimée définitivement afin de préserver l’historique des données. Vous pouvez l’archiver pour la masquer côté interne.'
@@ -330,7 +330,7 @@ export function AdminInterventionsManager({
       archivedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
-    const result = updateSurgicalIntervention(
+    const result = await updateSurgicalIntervention(
       archivedDefinition.id,
       surgicalInterventionDefinitionToInput(archivedDefinition)
     );
@@ -344,7 +344,7 @@ export function AdminInterventionsManager({
     setOpenCardMenuId(null);
   };
 
-  const handleDelete = (definition: SurgicalInterventionDefinition) => {
+  const handleDelete = async (definition: SurgicalInterventionDefinition) => {
     if (getUsedCount(definition, savedInterventions) > 0 || !definition.isCustom) {
       return;
     }
@@ -357,11 +357,19 @@ export function AdminInterventionsManager({
       return;
     }
 
-    deleteCustomSurgicalIntervention(definition.id);
-    setFeedback({
-      kind: 'success',
-      message: `L’intervention ${definition.name} a été supprimée définitivement.`,
-    });
+    try {
+      await deleteCustomSurgicalIntervention(definition.id);
+      setFeedback({
+        kind: 'success',
+        message: `L’intervention ${definition.name} a été supprimée définitivement.`,
+      });
+    } catch (error) {
+      setFeedback({
+        kind: 'error',
+        message:
+          error instanceof Error ? error.message : 'Suppression impossible.',
+      });
+    }
     setOpenCardMenuId(null);
   };
 
@@ -393,7 +401,7 @@ export function AdminInterventionsManager({
     setPreviewApproach(previewApproachOptions[0] ?? '');
   }, [draft, previewApproach, previewApproachOptions]);
 
-  const handleSave = (nextStatus: InterventionStatus) => {
+  const handleSave = async (nextStatus: InterventionStatus) => {
     if (!draft) {
       return;
     }
@@ -423,8 +431,8 @@ export function AdminInterventionsManager({
       (intervention) => intervention.id === preparedDraft.id
     );
     const result = exists
-      ? updateSurgicalIntervention(preparedDraft.id, input)
-      : createSurgicalIntervention(input);
+      ? await updateSurgicalIntervention(preparedDraft.id, input)
+      : await createSurgicalIntervention(input);
 
     setFeedback({
       kind: result.success ? 'success' : 'error',
@@ -1177,20 +1185,7 @@ export function AdminInterventionsManager({
   return (
     <>
       <div className="admin-page-toolbar">
-        <button className="admin-breadcrumb-button" onClick={onBack} type="button">
-          <ChevronLeft aria-hidden="true" />
-          <span>Retour à l’accueil administrateur</span>
-        </button>
-      </div>
-
-      <div className="admin-title-row">
-        <div>
-          <h2 className="admin-intervention-editor-title">Création des interventions</h2>
-          <p className="admin-intervention-editor-subtitle">
-            Configurer les interventions, leurs voies d’abord et les étapes
-            opératoires évaluables.
-          </p>
-        </div>
+        <div />
         <button className="app-button app-button--primary" onClick={handleCreate} type="button">
           <Plus aria-hidden="true" />
           <span>Nouvelle intervention</span>

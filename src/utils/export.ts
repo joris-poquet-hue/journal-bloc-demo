@@ -5,15 +5,16 @@ import {
   formatComplexityRating,
   formatDisplayName,
   formatSeniorDisplayName,
-  getChecklistStepsForIntervention,
+  getHistoricalChecklistSteps,
+  getHistoricalProcedureLabel,
   getChoiceLabel,
   getInternalById,
-  getProcedureOptions,
   getSurgicalInterventionDefinition,
   indicationOptions,
   lateralityOptions,
   roleOptions,
 } from '../data/mockData';
+import { getClinicalContextSummaryRows } from '../data/contextVariables';
 import {
   AdminInterventionEvaluation,
   InternalProfile,
@@ -22,6 +23,8 @@ import {
   SurgicalInterventionDefinition,
 } from '../types';
 import { calculateAutonomyScore } from './autonomyScore';
+import { getAuthoritativeChecklist } from './evaluationChecklist';
+import { buildSeniorInstitutionExportScope } from './seniorExportScope';
 
 type WorksheetData = {
   name: string;
@@ -49,7 +52,7 @@ type InterventionExportContext = {
   delayBeforeEvaluationHours: string;
   delayBeforeEvaluationDays: string;
   currentWaitingHours: string;
-  checklistSteps: ReturnType<typeof getChecklistStepsForIntervention>;
+  checklistSteps: ReturnType<typeof getHistoricalChecklistSteps>;
   adminEvaluation: AdminInterventionEvaluation | undefined;
 };
 
@@ -80,8 +83,12 @@ function escapeXmlCell(value: string) {
     .replace(/'/g, '&apos;');
 }
 
-function getChecklistValue(intervention: SavedIntervention, stepId: string) {
-  const value = intervention.checklist[stepId];
+function getChecklistValue(
+  intervention: SavedIntervention,
+  stepId: string,
+  evaluation?: AdminInterventionEvaluation
+) {
+  const value = getAuthoritativeChecklist(intervention, evaluation)[stepId];
 
   if (!value) {
     return '';
@@ -104,7 +111,8 @@ function formatKeyStepAutonomyScore(value: number | null) {
 
 function getKeyStepAutonomyScore(
   intervention: SavedIntervention,
-  customInterventions: SurgicalInterventionDefinition[]
+  customInterventions: SurgicalInterventionDefinition[],
+  evaluation?: AdminInterventionEvaluation
 ) {
   const interventionDefinition = getSurgicalInterventionDefinition(
     intervention.procedure,
@@ -116,16 +124,16 @@ function getKeyStepAutonomyScore(
   }
 
   const keyStepIdSet = new Set(interventionDefinition.keyStepIds);
-  const checklistSteps = getChecklistStepsForIntervention(
-    intervention.procedure,
-    intervention.indication,
-    intervention.approach,
-    intervention.entryTechnique,
+  const checklistSteps = getHistoricalChecklistSteps(
+    intervention,
     customInterventions
   );
+  const checklist = getAuthoritativeChecklist(intervention, evaluation);
   const keyScores = checklistSteps
-    .filter((step) => keyStepIdSet.has(step.id))
-    .map((step) => intervention.checklist[step.id])
+    .filter((step) =>
+      'scored' in step ? Boolean(step.scored) : keyStepIdSet.has(step.id)
+    )
+    .map((step) => checklist[step.id])
     .filter((level): level is '0' | '1' | '2' | '3' | '4' =>
       ['0', '1', '2', '3', '4'].includes(level ?? '')
     )
@@ -225,16 +233,12 @@ function buildInterventionContext(
   adminEvaluations: Record<string, AdminInterventionEvaluation>,
   selectableSeniors: Senior[]
 ): InterventionExportContext {
-  const procedureOptions = getProcedureOptions(customInterventions);
   const internal = getInternalById(intervention.internalId, internalProfiles);
   const senior =
     selectableSeniors.find((item) => item.id === intervention.seniorId) ?? null;
   const adminEvaluation = adminEvaluations[intervention.id];
-  const checklistSteps = getChecklistStepsForIntervention(
-    intervention.procedure,
-    intervention.indication,
-    intervention.approach,
-    intervention.entryTechnique,
+  const checklistSteps = getHistoricalChecklistSteps(
+    intervention,
     customInterventions
   );
   const evaluationTimestamp = adminEvaluation?.updatedAt ?? '';
@@ -259,9 +263,9 @@ function buildInterventionContext(
       ? formatDisplayName(internal.firstName, internal.lastName)
       : 'Interne non retrouvé',
     seniorLabel: senior ? formatSeniorDisplayName(senior) : 'Non renseigné',
-    procedureLabel: getChoiceLabel(
-      procedureOptions,
-      intervention.procedure,
+    procedureLabel: getHistoricalProcedureLabel(
+      intervention,
+      customInterventions,
       intervention.procedure
     ),
     indicationLabel:
@@ -293,13 +297,17 @@ function buildInterventionContext(
       adminEvaluation?.globalPerformance && adminEvaluation.categoryDifficulty
         ? 'Évaluée'
         : 'En attente',
-    keyStepAutonomyScore: getKeyStepAutonomyScore(intervention, customInterventions),
+    keyStepAutonomyScore: getKeyStepAutonomyScore(
+      intervention,
+      customInterventions,
+      adminEvaluation
+    ),
     autonomyScore:
       calculateAutonomyScore(
         intervention,
         customInterventions,
         adminEvaluation
-      ) ?? intervention.autonomyScore,
+      ),
     delayBeforeEvaluationHours,
     delayBeforeEvaluationDays,
     currentWaitingHours,
@@ -320,6 +328,8 @@ function createSummaryWorksheet(
     headers: [
       'ID intervention',
       'Date du bloc',
+      'Heure de début du bloc',
+      'Durée opératoire en minutes',
       'Date et heure d’enregistrement par l’interne',
       'Date et heure d’évaluation par le senior',
       'Délai avant évaluation senior en heures',
@@ -334,6 +344,7 @@ function createSummaryWorksheet(
       'Score d’autonomie final',
       'Score autonomie temps opératoires clés',
       'Difficulté ressentie interne',
+      'Variables de contexte clinique',
       'Difficulté senior',
       'Performance senior',
     ],
@@ -349,6 +360,10 @@ function createSummaryWorksheet(
       return [
         intervention.id,
         intervention.date,
+        intervention.startTime ?? '',
+        intervention.operativeDurationMinutes == null
+          ? ''
+          : `${intervention.operativeDurationMinutes}`,
         intervention.savedAt,
         context.evaluationTimestamp || 'Non évaluée',
         context.delayBeforeEvaluationHours || 'En attente',
@@ -363,6 +378,9 @@ function createSummaryWorksheet(
         context.autonomyScore == null ? '' : `${context.autonomyScore}`,
         context.keyStepAutonomyScore,
         context.internalDifficultyLabel,
+        getClinicalContextSummaryRows(intervention.contextVariables)
+          .map((row) => `${row.label} : ${row.value}`)
+          .join(' | '),
         context.seniorDifficultyLabel,
         context.seniorPerformanceLabel,
       ];
@@ -373,7 +391,8 @@ function createSummaryWorksheet(
 function createInternalDataWorksheet(
   interventions: SavedIntervention[],
   internalProfiles: InternalProfile[],
-  customInterventions: SurgicalInterventionDefinition[]
+  customInterventions: SurgicalInterventionDefinition[],
+  adminEvaluations: Record<string, AdminInterventionEvaluation>
 ): WorksheetData {
   return {
     name: 'Donnees internes',
@@ -384,28 +403,28 @@ function createInternalDataWorksheet(
       'Date du bloc',
       'Difficulté ressentie',
       'Étape opératoire',
-      'Score interne',
+      'Niveau autonomie Senior',
     ],
     rows: interventions.flatMap((intervention) => {
       const internal = getInternalById(intervention.internalId, internalProfiles);
       const internalLabel = internal
         ? formatDisplayName(internal.firstName, internal.lastName)
         : 'Interne non retrouvé';
-      const procedureLabel = getChoiceLabel(
-        getProcedureOptions(customInterventions),
-        intervention.procedure,
+      const procedureLabel = getHistoricalProcedureLabel(
+        intervention,
+        customInterventions,
         intervention.procedure
       );
-      const checklistSteps = getChecklistStepsForIntervention(
-        intervention.procedure,
-        intervention.indication,
-        intervention.approach,
-        intervention.entryTechnique,
+      const checklistSteps = getHistoricalChecklistSteps(
+        intervention,
         customInterventions
       );
 
       return checklistSteps.map((step) => {
-        const level = intervention.checklist[step.id];
+        const level = getAuthoritativeChecklist(
+          intervention,
+          adminEvaluations[intervention.id]
+        )[step.id];
 
         return [
           intervention.id,
@@ -414,7 +433,11 @@ function createInternalDataWorksheet(
           intervention.date,
           formatComplexityRating(intervention.complexity, ''),
           step.label,
-          getChecklistValue(intervention, step.id),
+          getChecklistValue(
+            intervention,
+            step.id,
+            adminEvaluations[intervention.id]
+          ),
         ];
       });
     }),
@@ -465,7 +488,8 @@ function createSeniorDataWorksheet(
 
 function createStepDetailWorksheet(
   interventions: SavedIntervention[],
-  customInterventions: SurgicalInterventionDefinition[]
+  customInterventions: SurgicalInterventionDefinition[],
+  adminEvaluations: Record<string, AdminInterventionEvaluation>
 ): WorksheetData {
   return {
     name: 'Etapes operatoires',
@@ -474,38 +498,42 @@ function createStepDetailWorksheet(
       'Intervention',
       'Ordre de l’étape',
       'Nom de l’étape',
-      'Score interne',
+      'Niveau autonomie Senior',
     ],
     rows: interventions.flatMap((intervention) => {
-      const procedureLabel = getChoiceLabel(
-        getProcedureOptions(customInterventions),
-        intervention.procedure,
+      const procedureLabel = getHistoricalProcedureLabel(
+        intervention,
+        customInterventions,
         intervention.procedure
       );
-      const checklistSteps = getChecklistStepsForIntervention(
-        intervention.procedure,
-        intervention.indication,
-        intervention.approach,
-        intervention.entryTechnique,
+      const checklistSteps = getHistoricalChecklistSteps(
+        intervention,
         customInterventions
       );
 
       return checklistSteps.map((step, index) => {
-        const level = intervention.checklist[step.id];
+        const level = getAuthoritativeChecklist(
+          intervention,
+          adminEvaluations[intervention.id]
+        )[step.id];
 
         return [
           intervention.id,
           procedureLabel,
           `${index + 1}`,
           step.label,
-          getChecklistValue(intervention, step.id),
+          getChecklistValue(
+            intervention,
+            step.id,
+            adminEvaluations[intervention.id]
+          ),
         ];
       });
     }),
   };
 }
 
-export function downloadInterventionsExcel(
+export function buildInterventionsWorkbookXml(
   interventions: SavedIntervention[],
   internalProfiles: InternalProfile[],
   customInterventions: SurgicalInterventionDefinition[] = [],
@@ -513,7 +541,7 @@ export function downloadInterventionsExcel(
   selectableSeniors: Senior[] = []
 ) {
   if (interventions.length === 0) {
-    return;
+    return '';
   }
 
   const worksheets: WorksheetData[] = [
@@ -527,7 +555,8 @@ export function downloadInterventionsExcel(
     createInternalDataWorksheet(
       interventions,
       internalProfiles,
-      customInterventions
+      customInterventions,
+      adminEvaluations
     ),
     createSeniorDataWorksheet(
       interventions,
@@ -536,10 +565,21 @@ export function downloadInterventionsExcel(
       adminEvaluations,
       selectableSeniors
     ),
-    createStepDetailWorksheet(interventions, customInterventions),
+    createStepDetailWorksheet(
+      interventions,
+      customInterventions,
+      adminEvaluations
+    ),
   ];
 
-  const workbookXml = buildWorkbookXml(worksheets);
+  return buildWorkbookXml(worksheets);
+}
+
+function downloadWorkbookXml(workbookXml: string) {
+  if (!workbookXml) {
+    return;
+  }
+
   const blob = new Blob([`\uFEFF${workbookXml}`], {
     type: 'application/vnd.ms-excel;charset=utf-8;',
   });
@@ -553,4 +593,48 @@ export function downloadInterventionsExcel(
   link.click();
   document.body.removeChild(link);
   window.URL.revokeObjectURL(url);
+}
+
+export function downloadInterventionsExcel(
+  interventions: SavedIntervention[],
+  internalProfiles: InternalProfile[],
+  customInterventions: SurgicalInterventionDefinition[] = [],
+  adminEvaluations: Record<string, AdminInterventionEvaluation> = {},
+  selectableSeniors: Senior[] = []
+) {
+  downloadWorkbookXml(
+    buildInterventionsWorkbookXml(
+      interventions,
+      internalProfiles,
+      customInterventions,
+      adminEvaluations,
+      selectableSeniors
+    )
+  );
+}
+
+export function downloadSeniorInstitutionInterventionsExcel(
+  senior: Senior,
+  interventions: SavedIntervention[],
+  internalProfiles: InternalProfile[],
+  customInterventions: SurgicalInterventionDefinition[] = [],
+  adminEvaluations: Record<string, AdminInterventionEvaluation> = {},
+  selectableSeniors: Senior[] = []
+) {
+  const scope = buildSeniorInstitutionExportScope(
+    senior,
+    interventions,
+    internalProfiles,
+    selectableSeniors
+  );
+
+  downloadInterventionsExcel(
+    scope.interventions,
+    scope.internalProfiles,
+    customInterventions,
+    adminEvaluations,
+    scope.selectableSeniors
+  );
+
+  return scope.interventions.length;
 }

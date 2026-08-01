@@ -1,7 +1,5 @@
 import {
-  AdminCategoryDifficultyRating,
   AdminInterventionEvaluation,
-  AdminPerformanceRating,
   ChecklistLevel,
   ChecklistStep,
   ChoiceOption,
@@ -9,12 +7,9 @@ import {
   EntryTechnique,
   GlobalRole,
   Indication,
-  BadgeMetricKey,
-  BadgeCatalogItem,
   InternalProfile,
   InterventionType,
   Laterality,
-  ProgressBadge,
   SavedIntervention,
   Senior,
   SurgicalApproach,
@@ -25,7 +20,6 @@ import {
 import { ensureSurgicalInterventionDefinitionShape } from '../utils/surgicalInterventions';
 
 export const ADMIN_LOGIN_ID = 'adminbeta';
-export const ADMIN_PASSWORD = 'Fred3132848002!';
 
 export const internalProfiles: InternalProfile[] = [];
 
@@ -36,6 +30,7 @@ export const selectableSeniors: Senior[] = [
   {
     id: 'sen-other',
     firstName: 'Autre',
+    institution: '',
     lastName: '',
   },
 ];
@@ -58,6 +53,7 @@ export function getSelectableSeniors(customSeniors: Senior[] = []) {
     {
       id: 'sen-other',
       firstName: 'Autre',
+      institution: '',
       lastName: '',
     },
   ];
@@ -117,6 +113,18 @@ export const lateralityOptions: ChoiceOption<Laterality>[] = [
   { value: 'droite', label: 'Droite' },
 ];
 
+export const surgeryContextOptions: ChoiceOption<SurgeryContext>[] = [
+  { value: 'programme', label: 'Bloc programmé' },
+  { value: 'urgence', label: 'Urgence' },
+];
+
+export function formatSurgeryContext(
+  context: SurgeryContext | null,
+  fallback = 'Non renseigné'
+) {
+  return getChoiceLabel(surgeryContextOptions, context, fallback);
+}
+
 export function formatDisplayName(firstName: string, lastName: string) {
   return [firstName, lastName].filter((value) => value.trim().length > 0).join(' ');
 }
@@ -134,25 +142,6 @@ export function formatSeniorDisplayName(senior: Senior) {
   }
 
   return formatDisplayName(senior.firstName, senior.lastName);
-}
-
-export function getFixedContextForIntervention(
-  procedure: InterventionType | null,
-  indication: Indication | null
-): SurgeryContext | null {
-  if (procedure === 'colpoclesis') {
-    return 'programme';
-  }
-
-  if (procedure === 'salpingectomie' && indication === 'geu') {
-    return 'urgence';
-  }
-
-  if (procedure === 'salpingectomie' && indication === 'ligature_tubaire') {
-    return 'programme';
-  }
-
-  return null;
 }
 
 export function normalizeComplexityRating(
@@ -277,42 +266,140 @@ export const salpingectomyChecklistSteps: ChecklistStep[] = [
   { id: 'step-15', label: 'Fermeture cutanée' },
 ];
 
-export const colpoclesisChecklistSteps: ChecklistStep[] = [
-  { id: 'colpo-step-1', label: commonChecklistStepLabels[0] },
-  { id: 'colpo-step-2', label: commonChecklistStepLabels[1] },
-  {
-    id: 'colpo-step-3',
-    label: 'Colpectomie antérieure et postérieure',
-  },
-  {
-    id: 'colpo-step-4',
-    label: 'Colporraphie antéro-postérieure',
-  },
-  { id: 'colpo-step-5', label: 'Fermeture vaginale' },
-];
-
 export const allChecklistSteps: ChecklistStep[] = [
   ...salpingectomyChecklistSteps,
-  ...colpoclesisChecklistSteps,
 ];
 
-export const builtInSurgicalInterventions: SurgicalInterventionDefinition[] = [];
+const nativeSurgicalInterventions: SurgicalInterventionDefinition[] = [
+  {
+    id: 'salpingectomie',
+    name: 'Salpingectomie',
+    indications: ['geu', 'ligature_tubaire'],
+    indicationOptions: [
+      {
+        id: 'native-salpingectomie-geu',
+        label: 'Grossesse extra-utérine',
+        active: true,
+        isDefault: true,
+      },
+      {
+        id: 'native-salpingectomie-ligature',
+        label: 'Ligature tubaire',
+        active: true,
+      },
+      {
+        id: 'native-salpingectomie-autre',
+        label: 'Autre',
+        active: true,
+        isOther: true,
+      },
+    ],
+    allowedApproaches: ['coelioscopie', 'laparotomie', 'voie_vaginale', 'vnotes'],
+    allowedEntryTechniques: ['trocart_direct', 'open', 'veress'],
+    requiresLaterality: true,
+    checklistSteps: salpingectomyChecklistSteps,
+    keyStepIds: [
+      'step-3',
+      'step-4',
+      'step-5',
+      'step-7',
+      'step-9',
+      'step-10',
+      'step-12',
+    ],
+    status: 'active',
+    lateralityMode: 'right_left_bilateral',
+    isCustom: false,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  },
+];
 
 export function getSurgicalInterventionDefinitions(
   customInterventions: SurgicalInterventionDefinition[] = []
 ) {
-  return customInterventions.map((intervention) =>
-    ensureSurgicalInterventionDefinitionShape(intervention)
-  );
+  const definitionsById = new Map<InterventionType, SurgicalInterventionDefinition>();
+  const definitionIdByName = new Map<string, InterventionType>();
+
+  [...nativeSurgicalInterventions, ...customInterventions].forEach((intervention) => {
+    const normalizedIntervention =
+      ensureSurgicalInterventionDefinitionShape(intervention);
+    const nameKey = normalizeProcedureOptionName(normalizedIntervention.name);
+    const existingId = nameKey ? definitionIdByName.get(nameKey) : undefined;
+    const existingDefinition = existingId
+      ? definitionsById.get(existingId)
+      : undefined;
+
+    if (
+      existingDefinition &&
+      existingDefinition.id !== normalizedIntervention.id
+    ) {
+      const shouldReplaceExisting =
+        normalizedIntervention.isCustom && !existingDefinition.isCustom;
+
+      if (!shouldReplaceExisting) {
+        return;
+      }
+
+      definitionsById.delete(existingDefinition.id);
+    }
+
+    definitionsById.set(normalizedIntervention.id, normalizedIntervention);
+
+    if (nameKey) {
+      definitionIdByName.set(nameKey, normalizedIntervention.id);
+    }
+  });
+
+  return Array.from(definitionsById.values());
+}
+
+function normalizeProcedureOptionName(name: string) {
+  return name
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLocaleLowerCase('fr-FR')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
 }
 
 export function getProcedureOptions(
   customInterventions: SurgicalInterventionDefinition[] = []
 ): ChoiceOption<InterventionType>[] {
-  return getSurgicalInterventionDefinitions(customInterventions).map((intervention) => ({
-    value: intervention.id,
-    label: intervention.name,
-  }));
+  const optionsByName = new Map<string, ChoiceOption<InterventionType>>();
+
+  getSurgicalInterventionDefinitions(customInterventions).forEach((intervention) => {
+    const normalizedName = normalizeProcedureOptionName(intervention.name);
+    const optionKey = normalizedName || intervention.id;
+
+    if (optionsByName.has(optionKey)) {
+      return;
+    }
+
+    optionsByName.set(optionKey, {
+      value: intervention.id,
+      label: intervention.name,
+    });
+  });
+
+  return Array.from(optionsByName.values());
+}
+
+export function getProcedureLabel(
+  procedure: InterventionType | null | undefined,
+  customInterventions: SurgicalInterventionDefinition[] = [],
+  fallback = 'Non renseigné'
+) {
+  if (!procedure) {
+    return fallback;
+  }
+
+  const definition = getSurgicalInterventionDefinition(
+    procedure,
+    customInterventions
+  );
+
+  return definition?.name.trim() || fallback;
 }
 
 export function getSurgicalInterventionDefinition(
@@ -401,569 +488,53 @@ export function getChecklistStepsForIntervention(
     });
   }
 
-  if (procedure === 'colpoclesis') {
-    return colpoclesisChecklistSteps;
-  }
-
   return [];
 }
 
-export function isSeededDemoInterventionId(interventionId: string) {
-  return (
-    interventionId.startsWith('seed-int2-') ||
-    interventionId.startsWith('seed-int3-') ||
-    interventionId.startsWith('seed-internet-')
-  );
-}
-
-type SeedInterventionCase = {
-  approach: SurgicalApproach | null;
-  categoryDifficulty: AdminCategoryDifficultyRating;
-  complexity: Complexity;
-  date: string;
-  entryTechnique: EntryTechnique | null;
-  globalPerformance: AdminPerformanceRating;
-  indication: Indication | null;
-  keyLevels: [ChecklistLevel, ChecklistLevel, ChecklistLevel];
-  laterality: Laterality | null;
-  procedure: InterventionType;
-  savedAt: string;
-};
-
-const seedDifficultyCoefficients: Record<AdminCategoryDifficultyRating, number> = {
-  '1': 0.95,
-  '2': 1,
-  '3': 1.05,
-};
-
-const seedInterventionCases: SeedInterventionCase[] = [
-  {
-    date: '2025-11-06',
-    savedAt: '2025-11-06T07:20:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'geu',
-    approach: 'coelioscopie',
-    entryTechnique: 'open',
-    laterality: 'droite',
-    complexity: 8,
-    keyLevels: ['1', '1', '1'],
-    globalPerformance: '2',
-    categoryDifficulty: '3',
-  },
-  {
-    date: '2025-11-18',
-    savedAt: '2025-11-18T08:05:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'ligature_tubaire',
-    approach: 'coelioscopie',
-    entryTechnique: 'veress',
-    laterality: 'bilateral',
-    complexity: 4,
-    keyLevels: ['1', '1', '2'],
-    globalPerformance: '2',
-    categoryDifficulty: '1',
-  },
-  {
-    date: '2025-12-02',
-    savedAt: '2025-12-02T12:40:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'ligature_tubaire',
-    approach: 'coelioscopie',
-    entryTechnique: 'trocart_direct',
-    laterality: 'bilateral',
-    complexity: 5,
-    keyLevels: ['2', '1', '2'],
-    globalPerformance: '2',
-    categoryDifficulty: '2',
-  },
-  {
-    date: '2025-12-16',
-    savedAt: '2025-12-16T06:55:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'geu',
-    approach: 'coelioscopie',
-    entryTechnique: 'open',
-    laterality: 'gauche',
-    complexity: 7,
-    keyLevels: ['2', '2', '2'],
-    globalPerformance: '2',
-    categoryDifficulty: '3',
-  },
-  {
-    date: '2025-12-29',
-    savedAt: '2025-12-29T10:15:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'ligature_tubaire',
-    approach: 'vnotes',
-    entryTechnique: 'open',
-    laterality: 'bilateral',
-    complexity: 5,
-    keyLevels: ['2', '2', '2'],
-    globalPerformance: '3',
-    categoryDifficulty: '2',
-  },
-  {
-    date: '2026-01-08',
-    savedAt: '2026-01-08T08:30:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'ligature_tubaire',
-    approach: 'coelioscopie',
-    entryTechnique: 'open',
-    laterality: 'bilateral',
-    complexity: 4,
-    keyLevels: ['2', '2', '3'],
-    globalPerformance: '3',
-    categoryDifficulty: '1',
-  },
-  {
-    date: '2026-01-22',
-    savedAt: '2026-01-22T13:10:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'ligature_tubaire',
-    approach: 'coelioscopie',
-    entryTechnique: 'veress',
-    laterality: 'bilateral',
-    complexity: 5,
-    keyLevels: ['2', '3', '3'],
-    globalPerformance: '3',
-    categoryDifficulty: '2',
-  },
-  {
-    date: '2026-01-30',
-    savedAt: '2026-01-30T06:45:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'geu',
-    approach: 'laparotomie',
-    entryTechnique: null,
-    laterality: 'droite',
-    complexity: 8,
-    keyLevels: ['2', '2', '3'],
-    globalPerformance: '3',
-    categoryDifficulty: '3',
-  },
-  {
-    date: '2026-02-09',
-    savedAt: '2026-02-09T09:00:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'ligature_tubaire',
-    approach: 'coelioscopie',
-    entryTechnique: 'trocart_direct',
-    laterality: 'bilateral',
-    complexity: 4,
-    keyLevels: ['3', '3', '3'],
-    globalPerformance: '3',
-    categoryDifficulty: '1',
-  },
-  {
-    date: '2026-02-24',
-    savedAt: '2026-02-24T11:25:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'ligature_tubaire',
-    approach: 'coelioscopie',
-    entryTechnique: 'open',
-    laterality: 'bilateral',
-    complexity: 5,
-    keyLevels: ['3', '3', '3'],
-    globalPerformance: '3',
-    categoryDifficulty: '2',
-  },
-  {
-    date: '2026-02-27',
-    savedAt: '2026-02-27T13:35:00.000Z',
-    procedure: 'colpoclesis',
-    indication: 'autre',
-    approach: null,
-    entryTechnique: null,
-    laterality: null,
-    complexity: 6,
-    keyLevels: ['1', '1', '2'],
-    globalPerformance: '2',
-    categoryDifficulty: '2',
-  },
-  {
-    date: '2026-03-10',
-    savedAt: '2026-03-10T08:45:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'ligature_tubaire',
-    approach: 'coelioscopie',
-    entryTechnique: 'veress',
-    laterality: 'bilateral',
-    complexity: 5,
-    keyLevels: ['3', '3', '4'],
-    globalPerformance: '4',
-    categoryDifficulty: '2',
-  },
-  {
-    date: '2026-03-17',
-    savedAt: '2026-03-17T06:50:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'geu',
-    approach: 'coelioscopie',
-    entryTechnique: 'open',
-    laterality: 'gauche',
-    complexity: 7,
-    keyLevels: ['3', '3', '3'],
-    globalPerformance: '3',
-    categoryDifficulty: '3',
-  },
-  {
-    date: '2026-03-26',
-    savedAt: '2026-03-26T12:05:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'ligature_tubaire',
-    approach: 'vnotes',
-    entryTechnique: 'open',
-    laterality: 'bilateral',
-    complexity: 5,
-    keyLevels: ['3', '4', '3'],
-    globalPerformance: '4',
-    categoryDifficulty: '2',
-  },
-  {
-    date: '2026-04-03',
-    savedAt: '2026-04-03T09:35:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'ligature_tubaire',
-    approach: 'coelioscopie',
-    entryTechnique: 'trocart_direct',
-    laterality: 'bilateral',
-    complexity: 4,
-    keyLevels: ['4', '3', '4'],
-    globalPerformance: '4',
-    categoryDifficulty: '1',
-  },
-  {
-    date: '2026-04-09',
-    savedAt: '2026-04-09T13:20:00.000Z',
-    procedure: 'colpoclesis',
-    indication: 'autre',
-    approach: null,
-    entryTechnique: null,
-    laterality: null,
-    complexity: 6,
-    keyLevels: ['2', '2', '3'],
-    globalPerformance: '3',
-    categoryDifficulty: '2',
-  },
-  {
-    date: '2026-04-21',
-    savedAt: '2026-04-21T07:55:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'ligature_tubaire',
-    approach: 'coelioscopie',
-    entryTechnique: 'open',
-    laterality: 'bilateral',
-    complexity: 4,
-    keyLevels: ['4', '4', '4'],
-    globalPerformance: '4',
-    categoryDifficulty: '2',
-  },
-  {
-    date: '2026-04-29',
-    savedAt: '2026-04-29T11:10:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'ligature_tubaire',
-    approach: 'coelioscopie',
-    entryTechnique: 'veress',
-    laterality: 'bilateral',
-    complexity: 3,
-    keyLevels: ['4', '4', '4'],
-    globalPerformance: '4',
-    categoryDifficulty: '1',
-  },
-  {
-    date: '2026-05-05',
-    savedAt: '2026-05-05T06:35:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'geu',
-    approach: 'coelioscopie',
-    entryTechnique: 'open',
-    laterality: 'droite',
-    complexity: 7,
-    keyLevels: ['3', '4', '4'],
-    globalPerformance: '4',
-    categoryDifficulty: '3',
-  },
-  {
-    date: '2026-05-14',
-    savedAt: '2026-05-14T08:20:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'ligature_tubaire',
-    approach: 'vnotes',
-    entryTechnique: 'open',
-    laterality: 'bilateral',
-    complexity: 5,
-    keyLevels: ['4', '4', '4'],
-    globalPerformance: '4',
-    categoryDifficulty: '2',
-  },
-  {
-    date: '2026-05-28',
-    savedAt: '2026-05-28T12:30:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'ligature_tubaire',
-    approach: 'coelioscopie',
-    entryTechnique: 'trocart_direct',
-    laterality: 'bilateral',
-    complexity: 4,
-    keyLevels: ['4', '4', '4'],
-    globalPerformance: '5',
-    categoryDifficulty: '2',
-  },
-  {
-    date: '2026-06-09',
-    savedAt: '2026-06-09T13:00:00.000Z',
-    procedure: 'colpoclesis',
-    indication: 'autre',
-    approach: null,
-    entryTechnique: null,
-    laterality: null,
-    complexity: 7,
-    keyLevels: ['3', '3', '4'],
-    globalPerformance: '4',
-    categoryDifficulty: '3',
-  },
-  {
-    date: '2026-06-18',
-    savedAt: '2026-06-18T07:15:00.000Z',
-    procedure: 'salpingectomie',
-    indication: 'ligature_tubaire',
-    approach: 'coelioscopie',
-    entryTechnique: 'open',
-    laterality: 'bilateral',
-    complexity: 4,
-    keyLevels: ['4', '4', '4'],
-    globalPerformance: '5',
-    categoryDifficulty: '2',
-  },
-];
-
-function getSeedContext(procedure: InterventionType, indication: Indication | null) {
-  return getFixedContextForIntervention(procedure, indication) ?? 'programme';
-}
-
-function calculateSeedAutonomyScore(
-  keyLevels: [ChecklistLevel, ChecklistLevel, ChecklistLevel],
-  globalPerformance: AdminPerformanceRating,
-  categoryDifficulty: AdminCategoryDifficultyRating
+export function getHistoricalChecklistSteps(
+  intervention: SavedIntervention,
+  fallbackDefinitions: SurgicalInterventionDefinition[] = []
 ) {
-  const keyStepAverage =
-    keyLevels.reduce((total, level) => total + Number(level), 0) /
-    keyLevels.length;
-  const autonomyComponent = (keyStepAverage / 4) * 100;
-  const performanceComponent = ((Number(globalPerformance) - 1) / 4) * 100;
-  const score =
-    (0.4 * autonomyComponent + 0.6 * performanceComponent) *
-    seedDifficultyCoefficients[categoryDifficulty];
+  const snapshotSteps =
+    intervention.definitionSnapshot?.applicableChecklistSteps ?? [];
 
-  return Math.min(100, Math.max(0, Math.round(score)));
-}
+  if (snapshotSteps.length > 0) {
+    return [...snapshotSteps].sort((left, right) => left.order - right.order);
+  }
 
-function createSeedChecklist(caseItem: SeedInterventionCase) {
-  const checklistSteps =
-    caseItem.procedure === 'colpoclesis'
-      ? colpoclesisChecklistSteps
-      : salpingectomyChecklistSteps;
-  const keyStepIds =
-    caseItem.procedure === 'colpoclesis'
-      ? ['colpo-step-3', 'colpo-step-4', 'colpo-step-5']
-      : ['step-9', 'step-10', 'step-12'];
-  const keyLevelsById = new Map(
-    keyStepIds.map((stepId, index) => [stepId, caseItem.keyLevels[index]])
+  return getChecklistStepsForIntervention(
+    intervention.procedure,
+    intervention.indication,
+    intervention.approach,
+    intervention.entryTechnique,
+    fallbackDefinitions
   );
-  const lowestKeyLevel = Math.min(...caseItem.keyLevels.map(Number));
-  const defaultLevel = `${Math.max(1, lowestKeyLevel)}` as ChecklistLevel;
-
-  return Object.fromEntries(
-    checklistSteps.map((step) => [
-      step.id,
-      keyLevelsById.get(step.id) ?? defaultLevel,
-    ])
-  ) as Record<string, ChecklistLevel>;
 }
 
-export const seededSavedInterventions: SavedIntervention[] = [];
-
-export const seededAdminInterventionEvaluations: Record<
-  string,
-  AdminInterventionEvaluation
-> = {};
+export function getHistoricalProcedureLabel(
+  intervention: SavedIntervention,
+  fallbackDefinitions: SurgicalInterventionDefinition[] = [],
+  fallback = 'Non renseigné'
+) {
+  return (
+    intervention.definitionSnapshot?.source.name?.trim() ||
+    getProcedureLabel(intervention.procedure, fallbackDefinitions, fallback)
+  );
+}
 
 export function hydrateAdminInterventionEvaluations(
   evaluations: Record<string, AdminInterventionEvaluation> = {}
 ) {
   return Object.fromEntries(
-    Object.entries(evaluations)
-      .filter(([interventionId]) => !isSeededDemoInterventionId(interventionId))
-      .map(([interventionId, evaluation]) => [
-        interventionId,
-        {
-          ...evaluation,
-          seniorComment: evaluation.seniorComment ?? '',
-        },
-      ])
+    Object.entries(evaluations).map(([interventionId, evaluation]) => [
+      interventionId,
+      {
+        ...evaluation,
+        seniorComment: evaluation.seniorComment ?? '',
+      },
+    ])
   ) as Record<string, AdminInterventionEvaluation>;
 }
-
-const salpingectomyPrimaryBadgeMilestones = [
-  {
-    id: 'milestone-salpingectomie-as',
-    metricKey: 'master_salpingectomy' as const,
-    title: 'As de la salpingectomie',
-    tier: 'diamond' as const,
-    target: salpingectomyChecklistSteps.length,
-    imageSrc: '/images/badges/salpingectomie-as.png',
-  },
-  {
-    id: 'milestone-salpingectomie-20',
-    metricKey: 'primary_salpingectomy' as const,
-    title: 'Vingt salpingectomies en tant qu’opérateur principal',
-    tier: 'gold' as const,
-    target: 20,
-    imageSrc: '/images/badges/salpingectomie-operateur-principal-20.png',
-  },
-  {
-    id: 'milestone-salpingectomie-10',
-    metricKey: 'primary_salpingectomy' as const,
-    title: 'Dix salpingectomies en tant qu’opérateur principal',
-    tier: 'silver' as const,
-    target: 10,
-    imageSrc: '/images/badges/salpingectomie-operateur-principal-10.png',
-  },
-  {
-    id: 'milestone-salpingectomie-1',
-    metricKey: 'primary_salpingectomy' as const,
-    title: 'Première salpingectomie en tant qu’opérateur principal',
-    tier: 'bronze' as const,
-    target: 1,
-    imageSrc: '/images/badges/salpingectomie-operateur-principal-1.png',
-  },
-] as const;
-
-const colpocleisisAceMilestone = {
-  id: 'milestone-colpocleisis-as',
-  metricKey: 'master_colpocleisis' as const,
-  title: 'As du colpoclésis',
-  tier: 'diamond' as const,
-  target: colpoclesisChecklistSteps.length,
-  imageSrc: '/images/badges/colpocleisis-as.png',
-} as const;
-
-const colpocleisisPrimaryBadgeMilestones = [
-  {
-    id: 'milestone-colpocleisis-10',
-    metricKey: 'primary_colpocleisis' as const,
-    title: 'Dix colpoclésis en tant qu’opérateur principal',
-    tier: 'gold' as const,
-    target: 10,
-    imageSrc: '/images/badges/colpocleisis-operateur-principal-10.png',
-  },
-  {
-    id: 'milestone-colpocleisis-5',
-    metricKey: 'primary_colpocleisis' as const,
-    title: 'Cinq colpoclésis en tant qu’opérateur principal',
-    tier: 'silver' as const,
-    target: 5,
-    imageSrc: '/images/badges/colpocleisis-operateur-principal-5.png',
-  },
-  {
-    id: 'milestone-colpocleisis-1',
-    metricKey: 'primary_colpocleisis' as const,
-    title: 'Premier colpoclésis en tant qu’opérateur principal',
-    tier: 'bronze' as const,
-    target: 1,
-    imageSrc: '/images/badges/colpocleisis-operateur-principal-1.png',
-  },
-] as const;
-
-export const badgeCatalog: BadgeCatalogItem[] = [];
-
-const legacyBadgeCatalog: BadgeCatalogItem[] = [
-  {
-    id: 'catalog-salpingectomie-as',
-    title: 'As de la salpingectomie',
-    tier: 'diamond',
-    metricKey: 'master_salpingectomy',
-    target: 14,
-    imageSrc: '/images/badges/salpingectomie-as.png',
-    criteria:
-      'Obtenu lorsqu’une salpingectomie pour GEU est validée avec le niveau 4 sur l’ensemble de la checklist technique.',
-  },
-  {
-    id: 'catalog-colpocleisis-as',
-    title: 'As du colpoclésis',
-    tier: 'diamond',
-    metricKey: 'master_colpocleisis',
-    target: 5,
-    imageSrc: '/images/badges/colpocleisis-as.png',
-    criteria:
-      'Obtenu lorsqu’un colpoclésis est validé avec le niveau 4 sur l’ensemble de la checklist technique.',
-  },
-  {
-    id: 'catalog-salpingectomie-1',
-    title: 'Première salpingectomie en tant qu’opérateur principal',
-    tier: 'bronze',
-    metricKey: 'primary_salpingectomy',
-    target: 1,
-    imageSrc: '/images/badges/salpingectomie-operateur-principal-1.png',
-    criteria:
-      'Obtenu après 1 salpingectomie enregistrée en tant qu’opérateur principal.',
-  },
-  {
-    id: 'catalog-salpingectomie-10',
-    title: 'Dix salpingectomies en tant qu’opérateur principal',
-    tier: 'silver',
-    metricKey: 'primary_salpingectomy',
-    target: 10,
-    imageSrc: '/images/badges/salpingectomie-operateur-principal-10.png',
-    criteria:
-      'Obtenu après 10 salpingectomies enregistrées en tant qu’opérateur principal. Déverrouillé seulement après obtention du trophée précédent.',
-    prerequisiteTitle: 'Première salpingectomie en tant qu’opérateur principal',
-  },
-  {
-    id: 'catalog-salpingectomie-20',
-    title: 'Vingt salpingectomies en tant qu’opérateur principal',
-    tier: 'gold',
-    metricKey: 'primary_salpingectomy',
-    target: 20,
-    imageSrc: '/images/badges/salpingectomie-operateur-principal-20.png',
-    criteria:
-      'Obtenu après 20 salpingectomies enregistrées en tant qu’opérateur principal. Déverrouillé seulement après obtention du trophée précédent.',
-    prerequisiteTitle: 'Dix salpingectomies en tant qu’opérateur principal',
-  },
-  {
-    id: 'catalog-colpocleisis-1',
-    title: 'Premier colpoclésis en tant qu’opérateur principal',
-    tier: 'bronze',
-    metricKey: 'primary_colpocleisis',
-    target: 1,
-    imageSrc: '/images/badges/colpocleisis-operateur-principal-1.png',
-    criteria:
-      'Obtenu après 1 colpoclésis enregistré en tant qu’opérateur principal.',
-  },
-  {
-    id: 'catalog-colpocleisis-5',
-    title: 'Cinq colpoclésis en tant qu’opérateur principal',
-    tier: 'silver',
-    metricKey: 'primary_colpocleisis',
-    target: 5,
-    imageSrc: '/images/badges/colpocleisis-operateur-principal-5.png',
-    criteria:
-      'Obtenu après 5 colpoclésis enregistrés en tant qu’opérateur principal. Déverrouillé seulement après obtention du trophée précédent.',
-    prerequisiteTitle: 'Premier colpoclésis en tant qu’opérateur principal',
-  },
-  {
-    id: 'catalog-colpocleisis-10',
-    title: 'Dix colpoclésis en tant qu’opérateur principal',
-    tier: 'gold',
-    metricKey: 'primary_colpocleisis',
-    target: 10,
-    imageSrc: '/images/badges/colpocleisis-operateur-principal-10.png',
-    criteria:
-      'Obtenu après 10 colpoclésis enregistrés en tant qu’opérateur principal. Déverrouillé seulement après obtention du trophée précédent.',
-    prerequisiteTitle: 'Cinq colpoclésis en tant qu’opérateur principal',
-  },
-];
 
 export const techniqueGuides: TechniqueGuide[] = [
   {
@@ -1186,7 +757,7 @@ export const techniqueGuides: TechniqueGuide[] = [
   {
     id: 'guide-colpocleisis',
     kind: 'custom',
-    title: 'Colpoclésis',
+    title: 'Colpocléisis',
     category: 'Prolapsus génital',
     approach: 'Voie vaginale',
     intro:
@@ -1249,8 +820,7 @@ export const techniqueGuides: TechniqueGuide[] = [
               'Colpectomie antérieure : rectangle dont la limite inférieure est située à 3 cm au-dessus de l’orifice externe du col et la limite supérieure à 3 cm sous le méat urétral ; hauteur habituelle 5 à 6 cm.',
               'Colpectomie postérieure : rectangle de taille et forme similaires, s’étendant d’environ 3 cm sous l’orifice externe du col jusqu’à environ 3 cm de la fourchette vulvaire.',
             ],
-            imageSrc:
-              '/images/colpocleisis/colpectomie-premiere-etape.png',
+            imageSrc: '/images/colpocleisis/colpectomie-premiere-etape.png',
             textStyle: {
               fontFamily: 'sans',
               color: 'primary',
@@ -1289,20 +859,7 @@ export const techniqueGuides: TechniqueGuide[] = [
               'Points simples au Vicryl 2-0 rapprochant le bord inférieur du rectangle antérieur du bord supérieur du rectangle postérieur.',
               'La suture progresse surtout sur la largeur, de l’orifice externe du col vers les orifices des gouttières, en recouvrant le col et le prolapsus.',
             ],
-            textStyle: {
-              fontFamily: 'sans',
-              color: 'primary',
-              size: 'md',
-              bold: false,
-              italic: false,
-            },
-          },
-          {
-            id: 'colpo-subsection-5-image-1',
-            title: '',
-            paragraphs: [],
-            imageSrc:
-              '/images/colpocleisis/colporraphie-etape-1.png',
+            imageSrc: '/images/colpocleisis/colporraphie-etape-1.png',
             textStyle: {
               fontFamily: 'sans',
               color: 'primary',
@@ -1315,8 +872,7 @@ export const techniqueGuides: TechniqueGuide[] = [
             id: 'colpo-subsection-5-image-2',
             title: '',
             paragraphs: [],
-            imageSrc:
-              '/images/colpocleisis/colporraphie-etape-2.png',
+            imageSrc: '/images/colpocleisis/colporraphie-etape-2.png',
             textStyle: {
               fontFamily: 'sans',
               color: 'primary',
@@ -1335,20 +891,7 @@ export const techniqueGuides: TechniqueGuide[] = [
               'En fin de geste, le vagin est totalement fermé.',
               'Des points simples peuvent être réalisés tous les 1 cm entre le fascia de Halban et le fascia pré-rectal pour renforcer le montage.',
             ],
-            textStyle: {
-              fontFamily: 'sans',
-              color: 'primary',
-              size: 'md',
-              bold: false,
-              italic: false,
-            },
-          },
-          {
-            id: 'colpo-subsection-6-image-1',
-            title: '',
-            paragraphs: [],
-            imageSrc:
-              '/images/colpocleisis/fermeture-vaginale-final.png',
+            imageSrc: '/images/colpocleisis/fermeture-vaginale-final.png',
             textStyle: {
               fontFamily: 'sans',
               color: 'primary',
@@ -1421,338 +964,12 @@ export function getInternalById(
   return profiles.find((profile) => profile.id === id) ?? null;
 }
 
-function getPrimarySalpingectomyInterventions(
-  profileId: string,
-  savedInterventions: SavedIntervention[]
-) {
-  return savedInterventions
-    .filter(
-      (intervention) =>
-        intervention.internalId === profileId &&
-        intervention.procedure === 'salpingectomie' &&
-        intervention.role === 'operateur_principal'
-    )
-    .sort((left, right) => left.savedAt.localeCompare(right.savedAt));
-}
-
-function getPrimaryColpoclesisInterventions(
-  profileId: string,
-  savedInterventions: SavedIntervention[]
-) {
-  return savedInterventions
-    .filter(
-      (intervention) =>
-        intervention.internalId === profileId &&
-        intervention.procedure === 'colpoclesis' &&
-        intervention.role === 'operateur_principal'
-    )
-    .sort((left, right) => left.savedAt.localeCompare(right.savedAt));
-}
-
-function getAllFourChecklistInterventions(
-  profileId: string,
-  savedInterventions: SavedIntervention[]
-) {
-  return savedInterventions
-    .filter(
-      (intervention) =>
-        intervention.internalId === profileId &&
-        intervention.procedure === 'salpingectomie' &&
-        intervention.indication === 'geu'
-    )
-    .sort((left, right) => left.savedAt.localeCompare(right.savedAt));
-}
-
-function getColpoclesisChecklistInterventions(
-  profileId: string,
-  savedInterventions: SavedIntervention[]
-) {
-  return savedInterventions
-    .filter(
-      (intervention) =>
-        intervention.internalId === profileId &&
-        intervention.procedure === 'colpoclesis'
-    )
-    .sort((left, right) => left.savedAt.localeCompare(right.savedAt));
-}
-
-function buildSequentialProgressBadges<T extends BadgeMetricKey>({
-  metricKey,
-  milestones,
-  currentCount,
-  profile,
-  awardedAtByTarget,
-}: {
-  metricKey: T;
-  milestones: ReadonlyArray<{
-    id: string;
-    metricKey: T;
-    title: string;
-    tier: ProgressBadge['tier'];
-    target: number;
-    imageSrc: string;
-  }>;
-  currentCount: number;
-  profile: InternalProfile;
-  awardedAtByTarget?: Map<number, string>;
-}) {
-  const milestonesAscending = [...milestones].sort((left, right) => left.target - right.target);
-  const badgesAscending: ProgressBadge[] = [];
-
-  milestonesAscending.forEach((milestone, index) => {
-    const earnedBadge =
-      profile.achievementBadges?.find(
-        (badge) =>
-          badge.metricKey === milestone.metricKey && badge.target === milestone.target
-      ) ?? null;
-    const previousBadge = badgesAscending[index - 1];
-    const isLocked = Boolean(previousBadge && !previousBadge.isEarned);
-    const isEarned = !isLocked && currentCount >= milestone.target;
-    const awardedAt =
-      earnedBadge?.awardedAt ??
-      (isEarned ? awardedAtByTarget?.get(milestone.target) ?? null : null);
-
-    badgesAscending.push({
-      ...milestone,
-      current: currentCount,
-      awardedAt,
-      isEarned,
-      isLocked,
-      progressLabel: `${Math.min(currentCount, milestone.target)}/${milestone.target}`,
-    });
-  });
-
-  return badgesAscending.sort((left, right) => right.target - left.target);
-}
-
-export function getProgressBadgesForInternal(
-  profile: InternalProfile,
-  savedInterventions: SavedIntervention[] = []
-): ProgressBadge[] {
-  void profile;
-  void savedInterventions;
-
-  return [];
-
-  const basePrimaryCount = profile.badgeMetrics?.primarySalpingectomyCount ?? 0;
-  const primaryInterventions = getPrimarySalpingectomyInterventions(
-    profile.id,
-    savedInterventions
-  );
-  const currentPrimaryCount = basePrimaryCount + primaryInterventions.length;
-  const baseColpocleisisCount = profile.badgeMetrics?.primaryColpocleisisCount ?? 0;
-  const primaryColpoclesisInterventions = getPrimaryColpoclesisInterventions(
-    profile.id,
-    savedInterventions
-  );
-  const colpocleisisCount =
-    baseColpocleisisCount + primaryColpoclesisInterventions.length;
-  const checklistInterventions = getAllFourChecklistInterventions(
-    profile.id,
-    savedInterventions
-  );
-  const colpoclesisChecklistInterventions = getColpoclesisChecklistInterventions(
-    profile.id,
-    savedInterventions
-  );
-  const primaryAwardedAtByTarget = new Map<number, string>();
-  const colpocleisisAwardedAtByTarget = new Map<number, string>();
-  let runningPrimaryCount = basePrimaryCount;
-  let runningColpocleisisCount = baseColpocleisisCount;
-
-  for (const intervention of primaryInterventions) {
-    runningPrimaryCount += 1;
-
-    if (!primaryAwardedAtByTarget.has(1) && runningPrimaryCount >= 1) {
-      primaryAwardedAtByTarget.set(1, intervention.savedAt);
-    }
-
-    if (!primaryAwardedAtByTarget.has(10) && runningPrimaryCount >= 10) {
-      primaryAwardedAtByTarget.set(10, intervention.savedAt);
-    }
-
-    if (!primaryAwardedAtByTarget.has(20) && runningPrimaryCount >= 20) {
-      primaryAwardedAtByTarget.set(20, intervention.savedAt);
-    }
-  }
-
-  for (const intervention of primaryColpoclesisInterventions) {
-    runningColpocleisisCount += 1;
-
-    if (!colpocleisisAwardedAtByTarget.has(1) && runningColpocleisisCount >= 1) {
-      colpocleisisAwardedAtByTarget.set(1, intervention.savedAt);
-    }
-
-    if (!colpocleisisAwardedAtByTarget.has(5) && runningColpocleisisCount >= 5) {
-      colpocleisisAwardedAtByTarget.set(5, intervention.savedAt);
-    }
-
-    if (!colpocleisisAwardedAtByTarget.has(10) && runningColpocleisisCount >= 10) {
-      colpocleisisAwardedAtByTarget.set(10, intervention.savedAt);
-    }
-  }
-
-  const aceBadge: ProgressBadge = (() => {
-    const aceMilestone = salpingectomyPrimaryBadgeMilestones[0];
-    const earnedBadge =
-      profile.achievementBadges?.find(
-        (badge) =>
-          badge.metricKey === aceMilestone.metricKey && badge.target === aceMilestone.target
-      ) ?? null;
-    const bestChecklistCount = checklistInterventions.reduce((bestCount, intervention) => {
-      const applicableSteps = getChecklistStepsForIntervention(
-        intervention.procedure,
-        intervention.indication,
-        intervention.approach,
-        intervention.entryTechnique
-      );
-      const completedAtLevelFour = applicableSteps.reduce(
-        (count, step) => count + (intervention.checklist[step.id] === '4' ? 1 : 0),
-        0
-      );
-
-      return Math.max(bestCount, completedAtLevelFour);
-    }, 0);
-    const awardedIntervention = checklistInterventions.find((intervention) => {
-      const applicableSteps = getChecklistStepsForIntervention(
-        intervention.procedure,
-        intervention.indication,
-        intervention.approach,
-        intervention.entryTechnique
-      );
-
-      return (
-        applicableSteps.length > 0 &&
-        applicableSteps.every((step) => intervention.checklist[step.id] === '4')
-      );
-    });
-
-    return {
-      ...aceMilestone,
-      current: bestChecklistCount,
-      awardedAt: earnedBadge?.awardedAt ?? awardedIntervention?.savedAt ?? null,
-      isEarned:
-        bestChecklistCount >= aceMilestone.target ||
-        earnedBadge !== null ||
-        Boolean(awardedIntervention),
-      isBinary: true,
-      progressLabel: `${bestChecklistCount}/${aceMilestone.target}`,
-    };
-  })();
-
-  const colpocleisisAceBadge: ProgressBadge = (() => {
-    const earnedBadge =
-      profile.achievementBadges?.find(
-        (badge) =>
-          badge.metricKey === colpocleisisAceMilestone.metricKey &&
-          badge.target === colpocleisisAceMilestone.target
-      ) ?? null;
-    const bestChecklistCount = colpoclesisChecklistInterventions.reduce(
-      (bestCount, intervention) => {
-        const completedAtLevelFour = colpoclesisChecklistSteps.reduce(
-          (count, step) => count + (intervention.checklist[step.id] === '4' ? 1 : 0),
-          0
-        );
-
-        return Math.max(bestCount, completedAtLevelFour);
-      },
-      0
-    );
-    const awardedIntervention = colpoclesisChecklistInterventions.find((intervention) =>
-      colpoclesisChecklistSteps.every((step) => intervention.checklist[step.id] === '4')
-    );
-
-    return {
-      ...colpocleisisAceMilestone,
-      current: bestChecklistCount,
-      awardedAt: earnedBadge?.awardedAt ?? awardedIntervention?.savedAt ?? null,
-      isEarned:
-        bestChecklistCount >= colpocleisisAceMilestone.target ||
-        earnedBadge !== null ||
-        Boolean(awardedIntervention),
-      isBinary: true,
-      progressLabel: `${bestChecklistCount}/${colpocleisisAceMilestone.target}`,
-    };
-  })();
-
-  const salpingectomyPrimaryBadges = buildSequentialProgressBadges({
-    metricKey: 'primary_salpingectomy',
-    milestones: salpingectomyPrimaryBadgeMilestones.filter(
-      (milestone) => milestone.metricKey === 'primary_salpingectomy'
-    ),
-    currentCount: currentPrimaryCount,
-    profile,
-    awardedAtByTarget: primaryAwardedAtByTarget,
-  });
-
-  const colpocleisisPrimaryBadges = buildSequentialProgressBadges({
-    metricKey: 'primary_colpocleisis',
-    milestones: colpocleisisPrimaryBadgeMilestones,
-    currentCount: colpocleisisCount,
-    profile,
-    awardedAtByTarget: colpocleisisAwardedAtByTarget,
-  });
-
-  return [
-    aceBadge,
-    colpocleisisAceBadge,
-    ...salpingectomyPrimaryBadges,
-    ...colpocleisisPrimaryBadges,
-  ];
-}
-
 export function normalizeCredentialValue(value: string) {
   return value
     .trim()
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
-}
-
-export function getInternalByCredentials(
-  loginId: string,
-  password: string,
-  profiles: InternalProfile[] = internalProfiles
-) {
-  const normalizedLoginId = normalizeCredentialValue(loginId);
-  const normalizedPassword = normalizeCredentialValue(password);
-
-  return (
-    profiles.find(
-      (profile) =>
-        normalizeCredentialValue(profile.loginId) === normalizedLoginId &&
-        normalizeCredentialValue(profile.password) === normalizedPassword
-    ) ?? null
-  );
-}
-
-export function isAdminCredentials(loginId: string, password: string) {
-  const normalizedLoginId = normalizeCredentialValue(loginId);
-  const normalizedPassword = normalizeCredentialValue(password);
-
-  return (
-    normalizedLoginId === normalizeCredentialValue(ADMIN_LOGIN_ID) &&
-    normalizedPassword === normalizeCredentialValue(ADMIN_PASSWORD)
-  );
-}
-
-export function getSeniorByCredentials(
-  loginId: string,
-  password: string,
-  customSeniors: Senior[] = []
-) {
-  const normalizedLoginId = normalizeCredentialValue(loginId);
-  const normalizedPassword = normalizeCredentialValue(password);
-
-  return (
-    [...seniors, ...customSeniors].find(
-      (senior) =>
-        senior.loginId &&
-        senior.password &&
-        normalizeCredentialValue(senior.loginId) === normalizedLoginId &&
-        normalizeCredentialValue(senior.password) === normalizedPassword
-    ) ?? null
-  );
 }
 
 export function getSeniorById(

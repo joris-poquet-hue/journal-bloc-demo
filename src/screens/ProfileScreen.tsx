@@ -8,6 +8,8 @@ import {
   LockKeyhole,
   LogOut,
   MessageCircle,
+  ShieldCheck,
+  Trash2,
   X,
 } from 'lucide-react';
 import { ChangeEvent, FormEvent, ReactNode, useRef, useState } from 'react';
@@ -15,18 +17,35 @@ import { ChangeEvent, FormEvent, ReactNode, useRef, useState } from 'react';
 import packageJson from '../../package.json';
 import { InternalAvatar } from '../components/InternalAvatar';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { buildSupportMailto } from '../supportConfig';
 import { useAppContext } from '../context/AppContext';
-import { formatDisplayName } from '../data/mockData';
+import { PASSWORD_POLICY_HELP, validatePasswordStrength } from '../utils/passwordPolicy';
+import {
+  formatDisplayName,
+  formatSeniorDisplayName,
+  getProcedureLabel,
+} from '../data/mockData';
 import { downloadInterventionsExcel } from '../utils/export';
+import { formatIsoDate } from '../utils/date';
+import type { Senior } from '../types';
 
 type AccountSheet =
   | 'training'
   | 'photo'
   | 'password'
   | 'export'
-  | 'support'
+  | 'pending-interventions'
   | 'about'
   | null;
+
+const accountSheetLabels = {
+  about: 'À propos de Mon Journal de Bloc',
+  export: 'Exporter mes statistiques',
+  password: 'Mot de passe',
+  'pending-interventions': 'Interventions en attente',
+  photo: 'Photo de profil',
+  training: 'Formation',
+} satisfies Record<Exclude<AccountSheet, null>, string>;
 
 type FeedbackState = {
   tone: 'success' | 'error';
@@ -48,12 +67,14 @@ const semesterOptions = Array.from({ length: 12 }, (_, index) => ({
   value: `S${index + 1}`,
 }));
 
-const rotationOptions = [
-  { label: 'Chirurgie', value: 'Stage de chirurgie' },
-  { label: 'Pool obstétrical', value: 'Pool obstétrical' },
-  { label: 'UGOMPS', value: 'UGOMPS' },
-  { label: 'DAN', value: 'DAN' },
-];
+function getPendingInterventionSeniorLabel(
+  seniorId: string | null,
+  selectableSeniors: Senior[]
+) {
+  const senior = selectableSeniors.find((candidate) => candidate.id === seniorId);
+
+  return senior ? formatSeniorDisplayName(senior) : 'Senior non renseigné';
+}
 
 async function readImageDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
@@ -116,7 +137,7 @@ async function createAvatarDataUrl(crop: PhotoCropState) {
   const context = canvas.getContext('2d');
 
   if (!context) {
-    throw new Error('Impossible de preparer cette image.');
+    throw new Error('Impossible de préparer cette image.');
   }
 
   canvas.width = size;
@@ -146,32 +167,36 @@ async function createAvatarDataUrl(crop: PhotoCropState) {
 
 export function ProfileScreen() {
   const {
+    adminEvaluations,
+    deletePendingIntervention,
     selectedInternal,
     internalProfiles,
     savedInterventions,
     customSurgicalInterventions,
     selectableSeniors,
     logout,
+    startNewIntervention,
     updateInternalCredentials,
     updateInternalProfileSettings,
   } = useAppContext();
   const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [activeSheet, setActiveSheet] = useState<AccountSheet>(null);
   const [feedback, setFeedback] = useState<FeedbackState>(null);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [photoCrop, setPhotoCrop] = useState<PhotoCropState | null>(null);
   const [trainingForm, setTrainingForm] = useState({
     semester: selectedInternal?.semester ?? '',
-    currentRotation: selectedInternal?.currentRotation ?? '',
   });
   const [passwordForm, setPasswordForm] = useState({
     currentPassword: '',
     nextPassword: '',
     confirmPassword: '',
   });
-  const [supportForm, setSupportForm] = useState({
-    subject: '',
-    message: '',
-  });
+  const [pendingDeletionCandidateId, setPendingDeletionCandidateId] =
+    useState<string | null>(null);
+  const [pendingDeletionError, setPendingDeletionError] = useState('');
+  const [isDeletingPendingIntervention, setIsDeletingPendingIntervention] =
+    useState(false);
 
   if (!selectedInternal) {
     return null;
@@ -185,6 +210,14 @@ export function ProfileScreen() {
   const internalInterventions = savedInterventions.filter(
     (intervention) => intervention.internalId === selectedInternal.id
   );
+  const pendingInterventions = internalInterventions
+    .filter((intervention) => !adminEvaluations[intervention.id])
+    .sort((left, right) => right.savedAt.localeCompare(left.savedAt));
+  const pendingDeletionCandidate = pendingDeletionCandidateId
+    ? pendingInterventions.find(
+        (intervention) => intervention.id === pendingDeletionCandidateId
+      ) ?? null
+    : null;
 
   const openSheet = (sheet: Exclude<AccountSheet, null>) => {
     setFeedback(null);
@@ -192,7 +225,6 @@ export function ProfileScreen() {
     if (sheet === 'training') {
       setTrainingForm({
         semester: selectedInternal.semester,
-        currentRotation: selectedInternal.currentRotation,
       });
     }
 
@@ -204,11 +236,9 @@ export function ProfileScreen() {
       });
     }
 
-    if (sheet === 'support') {
-      setSupportForm({
-        subject: '',
-        message: '',
-      });
+    if (sheet === 'pending-interventions') {
+      setPendingDeletionCandidateId(null);
+      setPendingDeletionError('');
     }
 
     setActiveSheet(sheet);
@@ -217,12 +247,17 @@ export function ProfileScreen() {
   const closeSheet = () => {
     setActiveSheet(null);
     setPhotoCrop(null);
+    setPendingDeletionCandidateId(null);
+    setPendingDeletionError('');
   };
 
-  const handleTrainingSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handleTrainingSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    const result = updateInternalProfileSettings(selectedInternal.id, trainingForm);
+    const result = await updateInternalProfileSettings(
+      selectedInternal.id,
+      trainingForm
+    );
 
     setFeedback({
       tone: result.success ? 'success' : 'error',
@@ -234,21 +269,23 @@ export function ProfileScreen() {
     }
   };
 
-  const handlePasswordSubmit = (event: FormEvent<HTMLFormElement>) => {
+  const handlePasswordSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (passwordForm.currentPassword.trim() !== selectedInternal.password) {
+    if (!passwordForm.currentPassword) {
       setFeedback({
         tone: 'error',
-        message: 'Le mot de passe actuel est incorrect.',
+        message: 'Renseigne ton mot de passe actuel.',
       });
       return;
     }
 
-    if (passwordForm.nextPassword.trim().length < 4) {
+    const passwordValidation = validatePasswordStrength(passwordForm.nextPassword);
+
+    if (!passwordValidation.isValid) {
       setFeedback({
         tone: 'error',
-        message: 'Le nouveau mot de passe doit contenir au moins 4 caractères.',
+        message: passwordValidation.message,
       });
       return;
     }
@@ -261,7 +298,8 @@ export function ProfileScreen() {
       return;
     }
 
-    const result = updateInternalCredentials(selectedInternal.id, {
+    const result = await updateInternalCredentials(selectedInternal.id, {
+      currentPassword: passwordForm.currentPassword,
       loginId: selectedInternal.loginId,
       mustChangePassword: false,
       password: passwordForm.nextPassword,
@@ -300,34 +338,66 @@ export function ProfileScreen() {
     closeSheet();
   };
 
-  const handleSupportSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const handleDeletePendingIntervention = async () => {
+    if (!pendingDeletionCandidate || isDeletingPendingIntervention) {
+      return;
+    }
 
-    const subject = supportForm.subject.trim() || 'Support Mon Journal de Bloc';
-    const message = supportForm.message.trim();
-    const body = [
-      `Nom : ${fullName}`,
-      `Semestre : ${selectedInternal.semester}`,
-      `Stage : ${selectedInternal.currentRotation}`,
-      '',
-      message,
-    ]
-      .filter(Boolean)
-      .join('\n');
+    setPendingDeletionError('');
+    setIsDeletingPendingIntervention(true);
 
-    window.location.href = `mailto:joris-poquet@hotmail.fr?subject=${encodeURIComponent(
-      subject
-    )}&body=${encodeURIComponent(body)}`;
-    setFeedback({
-      tone: 'success',
-      message: 'Ton client mail a été préparé pour contacter le support.',
-    });
-    closeSheet();
+    try {
+      await deletePendingIntervention(pendingDeletionCandidate.id);
+      closeSheet();
+      startNewIntervention();
+    } catch (error) {
+      setPendingDeletionError(
+        error instanceof Error
+          ? error.message
+          : 'La suppression n’a pas pu être confirmée par Supabase.'
+      );
+    } finally {
+      setIsDeletingPendingIntervention(false);
+    }
   };
 
-  const handleLogout = () => {
-    closeSheet();
-    logout();
+  const handleSupportClick = () => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.location.href = buildSupportMailto({
+      body: [
+        'Bonjour,',
+        '',
+        'Je rencontre le problème suivant :',
+        '',
+        '[Décrivez votre demande ici]',
+        '',
+        `Nom : ${fullName}`,
+        `Semestre : ${selectedInternal.semester}`,
+        `Établissement : ${selectedInternal.institution}`,
+        'Espace : Interne',
+      ].join('\n'),
+      subject: 'Support espace interne',
+    });
+  };
+
+  const handleLogout = async () => {
+    setFeedback(null);
+    setIsLoggingOut(true);
+
+    try {
+      await logout();
+      closeSheet();
+    } catch {
+      setFeedback({
+        tone: 'error',
+        message:
+          'La déconnexion globale n’a pas pu être confirmée. Vérifie le réseau puis réessaie.',
+      });
+      setIsLoggingOut(false);
+    }
   };
 
   const handlePhotoAction = () => {
@@ -393,7 +463,7 @@ export function ProfileScreen() {
 
     try {
       const avatarImageSrc = await createAvatarDataUrl(photoCrop);
-      const result = updateInternalProfileSettings(selectedInternal.id, {
+      const result = await updateInternalProfileSettings(selectedInternal.id, {
         avatarImageSrc,
       });
 
@@ -459,8 +529,7 @@ export function ProfileScreen() {
             Interne – {semesterLabel}
           </p>
           <div className="account-profile-card__meta">
-            <span>{selectedInternal.currentRotation}</span>
-            <span>CHU de Nantes</span>
+            <span>{selectedInternal.institution}</span>
           </div>
         </div>
         <InternalAvatar
@@ -471,10 +540,10 @@ export function ProfileScreen() {
         />
       </section>
 
-      <AccountSection title="PARAMÈTRES">
+      <AccountSection title="Mon profil">
         <div className="account-list-card">
           <AccountActionRow
-            description="Modifier mon semestre et mon stage"
+            description="Modifier mon semestre"
             icon={<GraduationCap strokeWidth={2.05} />}
             label="Formation"
             onClick={() => openSheet('training')}
@@ -497,6 +566,18 @@ export function ProfileScreen() {
       <AccountSection title="MES DONNÉES">
         <div className="account-list-card">
           <AccountActionRow
+            description={
+              pendingInterventions.length > 0
+                ? `${pendingInterventions.length} intervention${
+                    pendingInterventions.length > 1 ? 's' : ''
+                  } en attente d’évaluation`
+                : 'Aucune intervention en attente d’évaluation'
+            }
+            icon={<Trash2 strokeWidth={2.05} />}
+            label="Interventions en attente"
+            onClick={() => openSheet('pending-interventions')}
+          />
+          <AccountActionRow
             description="Télécharger mes données de bloc"
             icon={<FileSpreadsheet strokeWidth={2.05} />}
             label="Exporter mes statistiques"
@@ -511,7 +592,7 @@ export function ProfileScreen() {
             description="Signaler un bug ou proposer une amélioration"
             icon={<MessageCircle strokeWidth={2.05} />}
             label="Contacter le support"
-            onClick={() => openSheet('support')}
+            onClick={handleSupportClick}
           />
         </div>
       </AccountSection>
@@ -529,28 +610,31 @@ export function ProfileScreen() {
 
       <button
         className="account-logout-button"
+        disabled={isLoggingOut}
         onClick={handleLogout}
         type="button"
       >
         <LogOut aria-hidden="true" />
-        <span>Se déconnecter</span>
+        <span>{isLoggingOut ? 'Déconnexion…' : 'Se déconnecter'}</span>
       </button>
 
       {activeSheet ? (
         <div
-          aria-hidden="true"
           className="account-sheet-backdrop"
           onClick={closeSheet}
         >
           <div
+            aria-label={accountSheetLabels[activeSheet]}
             aria-modal="true"
-            className="account-sheet"
+            className={`account-sheet account-sheet--${activeSheet}`}
             onClick={(event) => event.stopPropagation()}
             role="dialog"
           >
             {activeSheet === 'training' ? (
               <AccountSheetFrame
                 description="Mets à jour tes informations profil."
+                eyebrow="Mon profil"
+                icon={<GraduationCap strokeWidth={2} />}
                 title="Formation"
                 onClose={closeSheet}
               >
@@ -566,17 +650,6 @@ export function ProfileScreen() {
                       }))
                     }
                   />
-                  <SheetSelect
-                    label="Stage actuel"
-                    options={rotationOptions}
-                    value={trainingForm.currentRotation}
-                    onChange={(event) =>
-                      setTrainingForm((current) => ({
-                        ...current,
-                        currentRotation: event.target.value,
-                      }))
-                    }
-                  />
                   <div className="account-sheet__actions">
                     <button className="flow-button flow-button--primary" type="submit">
                       Enregistrer
@@ -589,6 +662,8 @@ export function ProfileScreen() {
             {activeSheet === 'photo' && photoCrop && photoPreview ? (
               <AccountSheetFrame
                 description="Recadre ta photo avant de l’enregistrer."
+                eyebrow="Mon profil"
+                icon={<Camera strokeWidth={2} />}
                 title="Photo de profil"
                 onClose={closeSheet}
               >
@@ -682,6 +757,8 @@ export function ProfileScreen() {
             {activeSheet === 'password' ? (
               <AccountSheetFrame
                 description="Modifie ton mot de passe à tout moment."
+                eyebrow="Mon profil"
+                icon={<LockKeyhole strokeWidth={2} />}
                 title="Mot de passe"
                 onClose={closeSheet}
               >
@@ -697,6 +774,10 @@ export function ProfileScreen() {
                       }))
                     }
                   />
+                  <div className="account-password-policy">
+                    <ShieldCheck aria-hidden="true" />
+                    <p>{PASSWORD_POLICY_HELP}</p>
+                  </div>
                   <SheetField
                     label="Nouveau mot de passe"
                     type="password"
@@ -731,6 +812,8 @@ export function ProfileScreen() {
             {activeSheet === 'export' ? (
               <AccountSheetFrame
                 description="Exporte tes données personnelles dans un format compatible Excel."
+                eyebrow="Mes données"
+                icon={<FileSpreadsheet strokeWidth={2} />}
                 title="Exporter mes statistiques"
                 onClose={closeSheet}
               >
@@ -753,44 +836,127 @@ export function ProfileScreen() {
               </AccountSheetFrame>
             ) : null}
 
-            {activeSheet === 'support' ? (
+            {activeSheet === 'pending-interventions' ? (
               <AccountSheetFrame
-                title="Contacter le support"
+                description="Supprime une saisie non évaluée pour la recommencer depuis le début."
+                eyebrow="Mes données"
+                icon={<Trash2 strokeWidth={2.05} />}
+                title="Interventions en attente"
                 onClose={closeSheet}
               >
-                <form className="account-sheet__form" onSubmit={handleSupportSubmit}>
-                  <SheetField
-                    label="Objet"
-                    value={supportForm.subject}
-                    onChange={(event) =>
-                      setSupportForm((current) => ({
-                        ...current,
-                        subject: event.target.value,
-                      }))
-                    }
-                  />
-                  <SheetTextArea
-                    label="Message"
-                    value={supportForm.message}
-                    onChange={(event) =>
-                      setSupportForm((current) => ({
-                        ...current,
-                        message: event.target.value,
-                      }))
-                    }
-                  />
-                  <div className="account-sheet__actions">
-                    <button className="flow-button flow-button--primary" type="submit">
-                      Envoyer
-                    </button>
-                  </div>
-                </form>
+                <div className="account-sheet__stack">
+                  {pendingDeletionCandidate ? (
+                    <div className="account-pending-confirmation">
+                      <div className="account-pending-confirmation__heading">
+                        <strong>Supprimer cette intervention ?</strong>
+                        <span>
+                          {getProcedureLabel(
+                            pendingDeletionCandidate.procedure,
+                            customSurgicalInterventions
+                          )}
+                        </span>
+                        <span>
+                          {formatIsoDate(pendingDeletionCandidate.date)} ·{' '}
+                          {getPendingInterventionSeniorLabel(
+                            pendingDeletionCandidate.seniorId,
+                            selectableSeniors
+                          )}
+                        </span>
+                      </div>
+                      <p>
+                        L’intervention et sa demande d’évaluation seront supprimées.
+                        Cette action est définitive et une nouvelle saisie vierge
+                        s’ouvrira ensuite.
+                      </p>
+                      {pendingDeletionError ? (
+                        <div className="auth-error" role="alert">
+                          {pendingDeletionError}
+                        </div>
+                      ) : null}
+                      <div className="account-sheet__actions account-sheet__actions--split">
+                        <button
+                          className="account-button"
+                          disabled={isDeletingPendingIntervention}
+                          onClick={() => {
+                            setPendingDeletionCandidateId(null);
+                            setPendingDeletionError('');
+                          }}
+                          type="button"
+                        >
+                          Annuler
+                        </button>
+                        <button
+                          className="account-button account-button--danger"
+                          disabled={isDeletingPendingIntervention}
+                          onClick={() => void handleDeletePendingIntervention()}
+                          type="button"
+                        >
+                          {isDeletingPendingIntervention
+                            ? 'Suppression…'
+                            : 'Supprimer et recommencer'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : pendingInterventions.length > 0 ? (
+                    <div className="account-pending-list" role="list">
+                      {pendingInterventions.map((intervention) => (
+                        <article
+                          className="account-pending-row"
+                          key={intervention.id}
+                          role="listitem"
+                        >
+                          <div className="account-pending-row__copy">
+                            <strong>
+                              {getProcedureLabel(
+                                intervention.procedure,
+                                customSurgicalInterventions
+                              )}
+                            </strong>
+                            <span>
+                              {formatIsoDate(intervention.date)} ·{' '}
+                              {getPendingInterventionSeniorLabel(
+                                intervention.seniorId,
+                                selectableSeniors
+                              )}
+                            </span>
+                          </div>
+                          <button
+                            aria-label={`Supprimer ${getProcedureLabel(
+                              intervention.procedure,
+                              customSurgicalInterventions
+                            )} du ${formatIsoDate(intervention.date)}`}
+                            className="account-pending-row__delete"
+                            onClick={() => {
+                              setPendingDeletionError('');
+                              setPendingDeletionCandidateId(intervention.id);
+                            }}
+                            type="button"
+                          >
+                            <Trash2 aria-hidden="true" />
+                            <span>Supprimer</span>
+                          </button>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="account-pending-empty">
+                      <LockKeyhole aria-hidden="true" />
+                      <strong>Aucune intervention en attente</strong>
+                      <p>
+                        Les interventions déjà évaluées restent définitivement
+                        protégées dans ton historique.
+                      </p>
+                    </div>
+                  )}
+                </div>
               </AccountSheetFrame>
             ) : null}
 
             {activeSheet === 'about' ? (
               <AccountSheetFrame
                 description="Les contenus détaillés seront complétés ensuite."
+                eyebrow="À propos"
+                icon={<Info strokeWidth={2} />}
                 title="À propos de Mon Journal de Bloc"
                 onClose={closeSheet}
               >
@@ -863,20 +1029,34 @@ function AccountActionRow({
 function AccountSheetFrame({
   title,
   description,
+  eyebrow,
+  icon,
   onClose,
   children,
 }: {
   title: string;
   description?: string;
+  eyebrow?: string;
+  icon?: ReactNode;
   onClose: () => void;
   children: ReactNode;
 }) {
   return (
     <>
       <div className="account-sheet__header">
-        <div className="account-sheet__heading">
-          <h3>{title}</h3>
-          {description ? <p>{description}</p> : null}
+        <div className="account-sheet__heading-group">
+          {icon ? (
+            <span className="account-sheet__heading-icon" aria-hidden="true">
+              {icon}
+            </span>
+          ) : null}
+          <div className="account-sheet__heading">
+            {eyebrow ? (
+              <span className="account-sheet__eyebrow">{eyebrow}</span>
+            ) : null}
+            <h3>{title}</h3>
+            {description ? <p>{description}</p> : null}
+          </div>
         </div>
         <button
           aria-label="Fermer"
@@ -981,28 +1161,6 @@ function SheetSelect({
         </select>
         <ChevronDown aria-hidden="true" className="account-sheet__select-icon" />
       </span>
-    </label>
-  );
-}
-
-function SheetTextArea({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  onChange: (event: ChangeEvent<HTMLTextAreaElement>) => void;
-}) {
-  return (
-    <label className="account-sheet__field">
-      <span>{label}</span>
-      <textarea
-        className="account-sheet__textarea"
-        onChange={onChange}
-        rows={5}
-        value={value}
-      />
     </label>
   );
 }

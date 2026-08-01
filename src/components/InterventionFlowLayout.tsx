@@ -1,24 +1,54 @@
 import { ArrowLeft } from 'lucide-react';
-import { ReactNode } from 'react';
+import { MouseEvent, ReactNode } from 'react';
 
 type InterventionFlowLayoutProps = {
   step: 1 | 2 | 3;
   title: string;
+  eyebrow?: string;
+  className?: string;
   subtitle?: string;
   onBack?: () => void;
+  onTrackInteraction?: () => void;
   children: ReactNode;
 };
+
+function isTrackableInteractionTarget(target: EventTarget | null) {
+  return (
+    target instanceof Element &&
+    Boolean(
+      target.closest('button, input, select, textarea, label, [role="button"]')
+    )
+  );
+}
 
 export function InterventionFlowLayout({
   step,
   title,
+  eyebrow,
+  className,
   subtitle,
   onBack,
+  onTrackInteraction,
   children,
 }: InterventionFlowLayoutProps) {
+  const handleInteractionCapture = (event: MouseEvent<HTMLElement>) => {
+    if (!onTrackInteraction || !isTrackableInteractionTarget(event.target)) {
+      return;
+    }
+
+    onTrackInteraction();
+  };
+
   return (
-    <main className="screen-shell intervention-flow">
-      <div className="screen-shell__frame intervention-flow__frame">
+    <main
+      className={['screen-shell', 'intervention-flow', className]
+        .filter(Boolean)
+        .join(' ')}
+    >
+      <div
+        className="screen-shell__frame intervention-flow__frame"
+        onClickCapture={handleInteractionCapture}
+      >
         <header className="intervention-flow__header">
           {onBack ? (
             <button
@@ -29,6 +59,9 @@ export function InterventionFlowLayout({
             >
               <ArrowLeft aria-hidden="true" strokeWidth={2.4} />
             </button>
+          ) : null}
+          {eyebrow ? (
+            <span className="intervention-flow__eyebrow">{eyebrow}</span>
           ) : null}
           <h1 className="intervention-flow__title">{title}</h1>
           {subtitle ? <p className="intervention-flow__subtitle">{subtitle}</p> : null}

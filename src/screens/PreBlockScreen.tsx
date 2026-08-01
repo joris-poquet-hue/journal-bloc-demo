@@ -1,4 +1,8 @@
-import { ChevronRight, Sparkles } from 'lucide-react';
+import {
+  ArrowRight,
+  ChevronRight,
+  Sparkles,
+} from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { PrimaryButton } from '../components/PrimaryButton';
@@ -93,8 +97,14 @@ export function PreBlockScreen() {
   if (view === 'menu') {
     return (
       <ScreenContainer
+        shellClassName="guide-menu-screen"
         title="Fiches techniques"
         subtitle="Consulte une fiche de rappel avant l’intervention."
+        headerAction={
+          <span className="guide-menu-web-count">
+            {sortedGuides.length} fiches disponibles
+          </span>
+        }
       >
         {sortedGuides.length ? (
           <div className="guide-menu-list">
@@ -371,10 +381,24 @@ function GuideMenuCard({
   guide: TechniqueGuide;
   onPress: () => void;
 }) {
+  const isGeuGuide = guide.kind === 'geu';
+  const category = isGeuGuide ? 'Urgences gynécologiques' : guide.category;
+
   return (
-    <button className="guide-menu-card" onClick={onPress} type="button">
+    <button
+      className={`guide-menu-card ${
+        isGeuGuide ? 'guide-menu-card--geu' : 'guide-menu-card--custom'
+      }`}
+      onClick={onPress}
+      type="button"
+    >
       <span className="guide-menu-card__content">
+        <span className="guide-menu-card__category">{category}</span>
         <strong>{guide.title}</strong>
+        <span className="guide-menu-card__cta">
+          Consulter la fiche
+          <ArrowRight aria-hidden="true" />
+        </span>
       </span>
       <ChevronRight aria-hidden="true" className="guide-menu-card__chevron" />
     </button>

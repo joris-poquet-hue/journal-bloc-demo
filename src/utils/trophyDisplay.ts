@@ -1,19 +1,16 @@
-import { hydrateAdminInterventionEvaluations } from '../data/mockData';
 import {
   AdminInterventionEvaluation,
   AdminTrophyDefinition,
   BadgeTier,
   InternalProfile,
   SavedIntervention,
+  SurgicalInterventionDefinition,
+  TrophyAward,
 } from '../types';
 import {
   buildTrophyRuleSummary,
-  ensureTrophyDefinitionShape,
   getTrophyProgressSnapshotForProfile,
 } from './adminTrophies';
-
-const ADMIN_EVALUATIONS_STORAGE_KEY = 'journal-bord:admin-intervention-evaluations:v1';
-const ADMIN_TROPHIES_STORAGE_KEY = 'journal-bord:admin-trophies:v1';
 
 export type TrophyDisplayStatus = 'earned' | 'progress' | 'secret';
 export type TrophyDisplayAccent =
@@ -24,10 +21,17 @@ export type TrophyDisplayAccent =
   | 'gold'
   | 'lavender';
 
+export type TrophyEarnedTierVisual = {
+  awardedAt: string;
+  imageSrc: string | null;
+  tier: BadgeTier | null;
+};
+
 export type TrophyDisplayModel = {
   accent: TrophyDisplayAccent;
   awardedAt: string | null;
   description: string;
+  earnedTiers: TrophyEarnedTierVisual[];
   id: string;
   imageSrc: string | null;
   isSecret: boolean;
@@ -135,129 +139,171 @@ function toTimestamp(value: string | null) {
   return Number.isNaN(timestamp) ? 0 : timestamp;
 }
 
-export function loadStoredAdminEvaluations() {
-  if (typeof window === 'undefined') {
-    return hydrateAdminInterventionEvaluations();
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(ADMIN_EVALUATIONS_STORAGE_KEY);
-
-    if (!rawValue) {
-      return hydrateAdminInterventionEvaluations();
-    }
-
-    const parsedValue = JSON.parse(rawValue);
-
-    return parsedValue && typeof parsedValue === 'object'
-      ? hydrateAdminInterventionEvaluations(
-          parsedValue as Record<string, AdminInterventionEvaluation>
-        )
-      : hydrateAdminInterventionEvaluations();
-  } catch {
-    return hydrateAdminInterventionEvaluations();
-  }
-}
-
-export function loadStoredAdminTrophies() {
-  if (typeof window === 'undefined') {
-    return [] as AdminTrophyDefinition[];
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(ADMIN_TROPHIES_STORAGE_KEY);
-
-    if (!rawValue) {
-      return [] as AdminTrophyDefinition[];
-    }
-
-    const parsedValue = JSON.parse(rawValue);
-
-    return Array.isArray(parsedValue)
-      ? parsedValue.map((item) => ensureTrophyDefinitionShape(item))
-      : ([] as AdminTrophyDefinition[]);
-  } catch {
-    return [] as AdminTrophyDefinition[];
-  }
-}
+const TROPHY_TIER_RANK: Record<BadgeTier, number> = {
+  bronze: 0,
+  silver: 1,
+  gold: 2,
+  diamond: 3,
+};
 
 export function buildTrophyDisplayModels({
   adminEvaluations,
   adminTrophies,
+  customSurgicalInterventions,
   profile,
   savedInterventions,
+  trophyAwards,
 }: {
   adminEvaluations: Record<string, AdminInterventionEvaluation>;
   adminTrophies: AdminTrophyDefinition[];
+  customSurgicalInterventions: SurgicalInterventionDefinition[];
   profile: InternalProfile;
   savedInterventions: SavedIntervention[];
+  trophyAwards: TrophyAward[];
 }) {
   const activeTrophies = adminTrophies.filter((trophy) => trophy.status === 'active');
-  const displayModels = activeTrophies
-    .map((trophy) => {
+  const profileAwards = trophyAwards.filter(
+    (award) => award.profileId === profile.id
+  );
+  const displayGroups = activeTrophies
+    .map<{
+      earned: TrophyDisplayModel | null;
+      progress: TrophyDisplayModel | null;
+    } | null>((trophy) => {
       const snapshot = getTrophyProgressSnapshotForProfile(
         trophy,
         profile,
         savedInterventions,
-        adminEvaluations
+        adminEvaluations,
+        customSurgicalInterventions
       );
-      const unlockedTier = snapshot.unlockedTier;
-      const isEarned = unlockedTier != null;
-      const isSecret = trophy.visibility === 'surprise' && !isEarned;
-      const section: TrophyDisplayStatus = isEarned
-        ? 'earned'
-        : isSecret
-          ? 'secret'
-          : 'progress';
-      const accent =
-        section === 'secret'
-          ? 'lavender'
-          : trophy.format === 'levels'
-            ? getAccentForTier(unlockedTier ?? snapshot.nextTier)
-            : isEarned
-              ? 'green'
-              : 'blue';
-      const subtitle =
-        section === 'secret'
-          ? 'Continue à progresser pour découvrir ce trophée.'
-          : isEarned
-            ? trophy.format === 'levels' && unlockedTier
-              ? `Niveau ${getTierLabel(unlockedTier)}`
-              : trophy.description || 'Trophée débloqué'
-            : trophy.format === 'levels' && snapshot.nextTier
-              ? `Prochain palier : ${getTierLabel(snapshot.nextTier)}`
-              : trophy.description || buildTrophyRuleSummary(trophy);
+      const definitionAwards = profileAwards.filter(
+        (award) => award.trophyId === trophy.id
+      );
+      const highestAward = [...definitionAwards].sort(
+        (left, right) =>
+          TROPHY_TIER_RANK[right.tier ?? 'bronze'] -
+            TROPHY_TIER_RANK[left.tier ?? 'bronze'] ||
+          toTimestamp(right.awardedAt) - toTimestamp(left.awardedAt)
+      )[0];
+      const sortedDefinitionAwards = [...definitionAwards].sort(
+        (left, right) =>
+          TROPHY_TIER_RANK[right.tier ?? 'bronze'] -
+            TROPHY_TIER_RANK[left.tier ?? 'bronze'] ||
+          toTimestamp(right.awardedAt) - toTimestamp(left.awardedAt)
+      );
+      const earnedTierKeys = new Set<string>();
+      const earnedTiers = sortedDefinitionAwards
+        .filter((award) => {
+          const tierKey =
+            trophy.format === 'levels' ? award.tier ?? 'bronze' : 'single';
+
+          if (earnedTierKeys.has(tierKey)) {
+            return false;
+          }
+
+          earnedTierKeys.add(tierKey);
+          return true;
+        })
+        .map((award) => ({
+          awardedAt: award.awardedAt,
+          imageSrc: getImageForDefinition(
+            trophy,
+            trophy.format === 'levels' ? award.tier ?? 'bronze' : null,
+            null
+          ),
+          tier: trophy.format === 'levels' ? award.tier ?? 'bronze' : null,
+        }));
+      const unlockedTier = highestAward?.tier ?? null;
+      const isEarned = Boolean(highestAward);
+      const hasStartedProgress =
+        snapshot.hasStarted;
+
+      if (trophy.visibility === 'surprise' && !isEarned) {
+        return null;
+      }
+
+      if (!isEarned && !hasStartedProgress) {
+        return null;
+      }
 
       return {
-        accent,
-        awardedAt: snapshot.awardedAt,
-        description: trophy.description,
-        id: trophy.id,
-        imageSrc: isEarned
-          ? getImageForDefinition(trophy, unlockedTier, snapshot.nextTier)
+        earned: isEarned
+          ? {
+              accent:
+                trophy.format === 'levels'
+                  ? getAccentForTier(unlockedTier)
+                  : 'green',
+              awardedAt: highestAward?.awardedAt ?? null,
+              description: trophy.description,
+              earnedTiers,
+              id: `${trophy.id}:earned`,
+              imageSrc: getImageForDefinition(
+                trophy,
+                unlockedTier,
+                snapshot.nextTier
+              ),
+              isSecret: false,
+              isUnlocked: true,
+              progressCurrent: null,
+              progressTarget: null,
+              section: 'earned',
+              statusLabel: null,
+              subtitle:
+                trophy.format === 'levels' && unlockedTier
+                  ? `Niveau ${getTierLabel(unlockedTier)}`
+                  : trophy.description || 'Trophée débloqué',
+              title: trophy.title || 'Trophée sans titre',
+            }
           : null,
-        isSecret,
-        isUnlocked: isEarned,
-        progressCurrent: section === 'progress' ? snapshot.progressCurrent : null,
-        progressTarget: section === 'progress' ? snapshot.progressTarget : null,
-        section,
-        statusLabel: isEarned ? 'Débloqué' : null,
-        subtitle,
-        title:
-          isSecret && !isEarned
-            ? 'Trophée secret'
-            : trophy.title || 'Trophée sans titre',
-      } satisfies TrophyDisplayModel;
+        progress:
+          hasStartedProgress &&
+          (!isEarned ||
+            (trophy.format === 'levels' && snapshot.nextTier != null))
+            ? {
+                accent:
+                  trophy.format === 'levels'
+                    ? getAccentForTier(snapshot.nextTier)
+                    : 'blue',
+                awardedAt: null,
+                description: trophy.description,
+                earnedTiers: [],
+                id: `${trophy.id}:progress:${snapshot.nextTier ?? 'current'}`,
+                imageSrc: null,
+                isSecret: false,
+                isUnlocked: false,
+                progressCurrent: snapshot.progressCurrent,
+                progressTarget: snapshot.progressTarget,
+                section: 'progress',
+                statusLabel: null,
+                subtitle:
+                  trophy.format === 'levels' && snapshot.nextTier
+                    ? `Prochain palier : ${getTierLabel(snapshot.nextTier)}`
+                    : trophy.description || buildTrophyRuleSummary(trophy),
+                title: trophy.title || 'Trophée sans titre',
+              }
+            : null,
+      };
     })
+    .filter((group): group is NonNullable<typeof group> => group !== null);
+  const displayModels = displayGroups
+    .flatMap((group) => [group.earned, group.progress])
+    .filter((item): item is TrophyDisplayModel => item !== null)
     .sort((left, right) => toTimestamp(right.awardedAt) - toTimestamp(left.awardedAt));
 
   const earned = displayModels.filter((item) => item.section === 'earned');
   const progress = displayModels.filter((item) => item.section === 'progress');
   const secret = displayModels.filter((item) => item.section === 'secret');
+  const activeTrophyIds = new Set(activeTrophies.map((trophy) => trophy.id));
+  const earnedLevelKeys = new Set(
+    profileAwards
+      .filter((award) => activeTrophyIds.has(award.trophyId))
+      .map((award) => `${award.trophyId}:${award.tier ?? 'bronze'}`)
+  );
 
   return {
     counts: {
-      earned: earned.length,
+      earned: earnedLevelKeys.size,
       progress: progress.length,
     },
     earned,

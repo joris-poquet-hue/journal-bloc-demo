@@ -1,104 +1,258 @@
-import type { CSSProperties } from 'react';
+import { ChevronRight, Target, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import {
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react';
 
-import { Check } from 'lucide-react';
-
+import { formatIsoDate } from '../utils/date';
 import { TrophyDisplayModel } from '../utils/trophyDisplay';
 
-function clampProgressRatio(progressCurrent: number | null, progressTarget: number | null) {
-  if (typeof progressCurrent !== 'number' || typeof progressTarget !== 'number' || progressTarget <= 0) {
-    return 0;
-  }
-
-  return Math.max(0, Math.min(1, progressCurrent / progressTarget));
-}
-
-function mixChannel(start: number, end: number, ratio: number) {
-  return Math.round(start + (end - start) * ratio);
-}
-
-function mixColor(startHex: string, endHex: string, ratio: number) {
-  const normalizedRatio = Math.max(0, Math.min(1, ratio));
-  const start = startHex.replace('#', '');
-  const end = endHex.replace('#', '');
-  const startRgb = [
-    Number.parseInt(start.slice(0, 2), 16),
-    Number.parseInt(start.slice(2, 4), 16),
-    Number.parseInt(start.slice(4, 6), 16),
-  ];
-  const endRgb = [
-    Number.parseInt(end.slice(0, 2), 16),
-    Number.parseInt(end.slice(2, 4), 16),
-    Number.parseInt(end.slice(4, 6), 16),
-  ];
-  const rgb = startRgb.map((channel, index) =>
-    mixChannel(channel, endRgb[index], normalizedRatio)
-  );
-
-  return `rgb(${rgb[0]}, ${rgb[1]}, ${rgb[2]})`;
-}
-
-function getProgressFillStyle(progressRatio: number): CSSProperties {
-  const startColor = mixColor('#0f2954', '#0f6a87', progressRatio);
-  const endColor = mixColor('#1a4f7a', '#47c9d0', progressRatio);
-
-  return {
-    width: `${progressRatio * 100}%`,
-    minWidth: progressRatio > 0 ? '12px' : '0',
-    background: `linear-gradient(90deg, ${startColor} 0%, ${endColor} 100%)`,
-  };
-}
+type InternalTrophyCardProps = {
+  actionLabel?: string;
+  item: TrophyDisplayModel;
+  kicker?: string;
+  onOpenDetails?: (trigger: HTMLButtonElement) => void;
+  presentation?: 'default' | 'feature' | 'wide';
+  supportingText?: string;
+};
 
 export function InternalTrophyCard({
+  actionLabel,
   item,
-  compact = false,
-}: {
-  item: TrophyDisplayModel;
-  compact?: boolean;
-}) {
-  const progressRatio = clampProgressRatio(item.progressCurrent, item.progressTarget);
+  kicker,
+  onOpenDetails,
+  presentation = 'default',
+  supportingText,
+}: InternalTrophyCardProps) {
+  const [isDetailsOpen, setIsDetailsOpen] = useState(false);
+  const dialogDescriptionId = useId();
+  const dialogTitleId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const detailDescription = item.isSecret
+    ? item.subtitle
+    : item.description || item.subtitle || 'Aucune description disponible.';
+  const isNativeApp =
+    typeof window !== 'undefined' &&
+    Boolean(
+      (window as Window & { __MONJDB_NATIVE_APP__?: boolean })
+        .__MONJDB_NATIVE_APP__
+    );
+  const hasNumericProgress =
+    item.progressCurrent != null &&
+    item.progressTarget != null &&
+    item.progressTarget > 0;
+  const progressPercentage = hasNumericProgress
+    ? Math.min(
+        100,
+        Math.max(0, Math.round((item.progressCurrent! / item.progressTarget!) * 100))
+      )
+    : null;
   const className = [
     'internal-trophy-card',
-    compact ? 'internal-trophy-card--compact' : '',
     item.isUnlocked ? 'internal-trophy-card--unlocked' : 'internal-trophy-card--locked',
     item.isSecret ? 'internal-trophy-card--secret' : '',
+    presentation !== 'default'
+      ? `internal-trophy-card--${presentation}`
+      : '',
   ]
     .filter(Boolean)
     .join(' ');
+  const showShowcaseProgress =
+    item.section === 'progress' && (isNativeApp || presentation !== 'default');
+
+  const closeDetails = () => {
+    setIsDetailsOpen(false);
+    window.requestAnimationFrame(() => triggerRef.current?.focus());
+  };
+  const openDetails = (trigger: HTMLButtonElement) => {
+    if (onOpenDetails) {
+      onOpenDetails(trigger);
+      return;
+    }
+
+    setIsDetailsOpen(true);
+  };
+
+  useEffect(() => {
+    if (!isDetailsOpen || onOpenDetails) {
+      return;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setIsDetailsOpen(false);
+        window.requestAnimationFrame(() => triggerRef.current?.focus());
+      }
+
+      if (event.key === 'Tab') {
+        event.preventDefault();
+        closeButtonRef.current?.focus();
+      }
+    };
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', handleKeyDown);
+    closeButtonRef.current?.focus();
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isDetailsOpen, onOpenDetails]);
 
   return (
-    <article className={className}>
-      <div className="internal-trophy-card__visual">
-        {item.imageSrc ? (
-          <img alt={item.title} className="internal-trophy-card__image" src={item.imageSrc} />
-        ) : (
-          <div aria-hidden="true" className="internal-trophy-card__mystery">
-            ?
-          </div>
-        )}
-      </div>
+    <>
+      <article className={className}>
+        <button
+          aria-expanded={onOpenDetails ? undefined : isDetailsOpen}
+          aria-haspopup="dialog"
+          aria-label={`Voir le détail du trophée ${item.title}`}
+          className="internal-trophy-card__trigger"
+          onClick={(event) => openDetails(event.currentTarget)}
+          ref={triggerRef}
+          type="button"
+        />
 
-      <div className="internal-trophy-card__copy">
-        <strong>{item.title}</strong>
-        <span>{item.subtitle}</span>
-      </div>
-
-      {!item.isUnlocked && item.section === 'progress' ? (
-        <div className="internal-trophy-card__progress" aria-hidden="true">
-          <div className="internal-trophy-card__progress-track">
-            <div
-              className="internal-trophy-card__progress-fill"
-              style={getProgressFillStyle(progressRatio)}
+        <div className="internal-trophy-card__visual">
+          {item.imageSrc ? (
+            <img
+              alt={item.title}
+              className="internal-trophy-card__image"
+              src={item.imageSrc}
             />
-          </div>
+          ) : item.section === 'progress' && presentation !== 'default' ? (
+            <div
+              aria-hidden="true"
+              className="internal-trophy-card__target"
+            >
+              <Target strokeWidth={1.9} />
+            </div>
+          ) : (
+            <div aria-hidden="true" className="internal-trophy-card__mystery">
+              ?
+            </div>
+          )}
         </div>
-      ) : null}
 
-      {item.isUnlocked && item.statusLabel ? (
-        <div className="internal-trophy-card__status">
-          <Check aria-hidden="true" strokeWidth={2.25} />
-          <span>{item.statusLabel}</span>
+        <div className="internal-trophy-card__copy">
+          {kicker ? (
+            <span className="internal-trophy-card__kicker">{kicker}</span>
+          ) : null}
+          <strong>{item.title}</strong>
+          {supportingText ? (
+            <p className="internal-trophy-card__supporting-text">
+              {supportingText}
+            </p>
+          ) : null}
+          {showShowcaseProgress ? (
+            <div
+              aria-label={
+                hasNumericProgress
+                  ? `${item.progressCurrent} sur ${item.progressTarget}`
+                  : 'Progression en cours'
+              }
+              aria-valuemax={hasNumericProgress ? item.progressTarget! : undefined}
+              aria-valuemin={hasNumericProgress ? 0 : undefined}
+              aria-valuenow={hasNumericProgress ? item.progressCurrent! : undefined}
+              className={`internal-trophy-card__progress${
+                progressPercentage == null
+                  ? ' internal-trophy-card__progress--indeterminate'
+                  : ''
+              }`}
+              role="progressbar"
+            >
+              <span
+                style={
+                  progressPercentage == null
+                    ? undefined
+                    : { width: `${progressPercentage}%` }
+                }
+              />
+            </div>
+          ) : null}
+          {presentation === 'feature' && item.awardedAt ? (
+            <time
+              className="internal-trophy-card__earned-date"
+              dateTime={item.awardedAt}
+            >
+              Obtenu le {formatIsoDate(item.awardedAt)}
+            </time>
+          ) : null}
+          {actionLabel ? (
+            <span className="internal-trophy-card__action">
+              {actionLabel}
+              <ChevronRight aria-hidden="true" />
+            </span>
+          ) : null}
         </div>
-      ) : null}
-    </article>
+
+      </article>
+
+      {isDetailsOpen && !onOpenDetails && typeof document !== 'undefined'
+        ? createPortal(
+            <div className="trophy-detail-backdrop" onClick={closeDetails}>
+              <section
+                aria-describedby={dialogDescriptionId}
+                aria-labelledby={dialogTitleId}
+                aria-modal="true"
+                className="trophy-detail-dialog"
+                onClick={(event) => event.stopPropagation()}
+                role="dialog"
+              >
+                <button
+                  aria-label="Fermer le détail du trophée"
+                  className="trophy-detail-dialog__close"
+                  onClick={closeDetails}
+                  ref={closeButtonRef}
+                  type="button"
+                >
+                  <X aria-hidden="true" />
+                </button>
+
+                <div className="trophy-detail-dialog__visual">
+                  {item.imageSrc ? (
+                    <img alt="" src={item.imageSrc} />
+                  ) : item.section === 'progress' ? (
+                    <div
+                      aria-hidden="true"
+                      className="internal-trophy-card__target internal-trophy-card__target--dialog"
+                    >
+                      <Target strokeWidth={1.9} />
+                    </div>
+                  ) : (
+                    <div
+                      aria-hidden="true"
+                      className="internal-trophy-card__mystery"
+                    >
+                      ?
+                    </div>
+                  )}
+                </div>
+
+                <div className="trophy-detail-dialog__copy">
+                  <h2 id={dialogTitleId}>{item.title}</h2>
+                  <p id={dialogDescriptionId}>{detailDescription}</p>
+                  {item.isUnlocked && item.awardedAt ? (
+                    <time
+                      aria-label={`Obtenu le ${formatIsoDate(item.awardedAt)}`}
+                      className="trophy-detail-dialog__date"
+                      dateTime={item.awardedAt}
+                    >
+                      {formatIsoDate(item.awardedAt)}
+                    </time>
+                  ) : null}
+                </div>
+              </section>
+            </div>,
+            document.body
+          )
+        : null}
+    </>
   );
 }

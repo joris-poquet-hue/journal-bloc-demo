@@ -1,34 +1,44 @@
 import {
+  Archive,
   BarChart3,
+  Building2,
   CalendarDays,
   Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Clock3,
   FolderOpen,
   Info,
   LogOut,
   Pencil,
-  Settings,
   Search,
   Star,
   Trophy,
-  UserRound,
   Users,
   X,
 } from 'lucide-react';
-import { FormEvent, Fragment, ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  FormEvent,
+  Fragment,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import {
   ApproachIcon,
   getInterventionApproachLabel,
 } from '../components/ApproachIcon';
+import { InternalTrophyCard } from '../components/InternalTrophyCard';
 import { InternalAvatar } from '../components/InternalAvatar';
-import { ProgressBadgeCard } from '../components/ProgressBadgeCard';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionCard } from '../components/SectionCard';
 import { AdminInterventionsManager } from '../components/AdminInterventionsManager';
+import { buildSupportMailto } from '../supportConfig';
 import { useAppContext } from '../context/AppContext';
 import {
   allChecklistSteps,
@@ -38,20 +48,23 @@ import {
   formatComplexityRating,
   formatDisplayName,
   formatSeniorDisplayName,
-  getChecklistStepsForIntervention,
+  getHistoricalChecklistSteps,
+  getHistoricalProcedureLabel,
   getChoiceLabel,
   getInternalById,
-  getProgressBadgesForInternal,
   getSurgicalInterventionDefinition,
   getSurgicalInterventionDefinitions,
   indicationOptions,
   roleOptions,
 } from '../data/mockData';
 import {
+  SENIOR_DIFFICULTY_LABELS,
+  SENIOR_PERFORMANCE_LABELS,
+} from '../data/seniorEvaluationLabels';
+import { getClinicalContextSummaryRows } from '../data/contextVariables';
+import {
   CreateInternalProfileInput,
   CreateSeniorProfileInput,
-  CreateSurgicalInterventionInput,
-  EntryTechnique,
   ChecklistLevel,
   AdminCategoryDifficultyRating,
   AdminInterventionEvaluation,
@@ -64,7 +77,6 @@ import {
   Senior,
   SurgicalApproach,
   SurgicalInterventionDefinition,
-  TestFeedback,
   TrophyCondition,
   TrophyConditionType,
   TrophyLevelDefinition,
@@ -74,11 +86,14 @@ import {
   TrophyType,
   TrophyVisibility,
   UpdateInternalCredentialsInput,
-  UpdateSeniorCredentialsResult,
   UpdateSeniorCredentialsInput,
 } from '../types';
 import { formatIsoDate } from '../utils/date';
-import { calculateAutonomyScore } from '../utils/autonomyScore';
+import {
+  calculateAutonomyScore,
+  INSUFFICIENT_KEY_STEP_COVERAGE_MESSAGE,
+} from '../utils/autonomyScore';
+import { getAuthoritativeChecklist } from '../utils/evaluationChecklist';
 import { useScrollResetOnChange } from '../utils/useScrollResetOnChange';
 import {
   buildConditionSummary,
@@ -93,12 +108,30 @@ import {
   getUnlockedTrophyTierForProfile,
   validateTrophyDefinition,
 } from '../utils/adminTrophies';
-import { downloadInterventionsExcel } from '../utils/export';
 import {
-  loadPersistentArray,
-  savePersistentArray,
-} from '../services/persistentStorage';
-import { uploadTrophyImage } from '../services/trophyImageStorage';
+  buildTrophyDisplayModels,
+  type TrophyDisplayModel,
+} from '../utils/trophyDisplay';
+import { downloadAnalyticsExcel } from '../utils/analyticsExport';
+import { downloadInterventionsExcel } from '../utils/export';
+import { loadBackendDisabledProfiles } from '../services/backendRepository';
+import type { BackendProfile } from '../shared/backendTypes';
+import {
+  cleanupTrophyImages,
+  uploadTrophyImage,
+} from '../services/trophyImageStorage';
+import {
+  formatLongFrenchDate,
+  formatSeniorInterventionLabel,
+  getSeniorStepTone,
+} from './admin/seniorDashboardModel';
+import { SeniorDashboard } from './admin/SeniorDashboard';
+import { AdminPageShell } from './admin/AdminPageShell';
+import { hasCompleteAdminEvaluation } from './admin/adminEvaluationModel';
+import {
+  AdminFeedbackMessage as FeedbackMessage,
+  type AdminFeedback as FeedbackState,
+} from './admin/AdminFeedbackMessage';
 
 type AdminView =
   | 'home'
@@ -110,22 +143,39 @@ type AdminView =
   | 'account'
   | 'profile'
   | 'profiles'
+  | 'institutions'
   | 'interventions';
-type FeedbackState =
-  | {
-      kind: 'success' | 'error';
-      message: string;
-    }
-  | null;
-
 type AdminActivityRange = 'day' | 'week' | 'month';
+type AdminActivityAnalyticsPeriod = '7d' | '30d' | '6m' | '1y';
 type AdminInterventionStatusFilter = 'all' | 'evaluated' | 'pending';
+type AdminRelanceWindow = '14d' | '1m' | '3m';
 type AdminUserConnection = {
   id: string;
   actorRole: 'internal' | 'senior';
   name: string;
   role: 'Interne' | 'Senior';
   lastLoginAt: string;
+};
+type AdminActivityAnalyticsBucket = {
+  id: string;
+  label: string;
+  internalCount: number;
+  seniorCount: number;
+  totalCount: number;
+};
+type AdminRelanceProfile = {
+  id: string;
+  name: string;
+  roleLabel: string;
+  contactEmail: string | null;
+  lastLoginAt: string | null;
+  inactiveDays: number | null;
+};
+type AdminLeaderboardItem = {
+  id: string;
+  label: string;
+  value: number;
+  detail: string;
 };
 type AdminTrophyFilter =
   | 'all'
@@ -141,7 +191,6 @@ type AdminTrophyCardItem = AdminTrophyDefinition & {
     tier: TrophyLevelDefinition['tier'];
   }>;
   obtainedCount: number;
-  unlockedTier: ReturnType<typeof getUnlockedTrophyTierForProfile>;
   ruleSummary: string;
 };
 type TrophyFormFeedback = {
@@ -154,32 +203,36 @@ type ProfileAccountTab = 'internal' | 'senior';
 type ProfileStatsTab = 'history' | 'progress';
 type ProfileHistoryStatusFilter = 'all' | 'evaluated' | 'pending';
 type ProfileProgressPeriod = '3m' | '6m' | '12m' | 'all';
-type OperativeBucketId =
-  | 'installation'
-  | 'ouverture'
-  | 'exposition'
-  | 'gestes'
-  | 'hemostase'
-  | 'fermeture'
-  | 'autres';
+type ProfileProgressProcedureOption = {
+  indicationLabel: string;
+  indicationToken: string;
+  key: string;
+  label: string;
+  procedure: InterventionType;
+  procedureLabel: string;
+};
 type ProfileHistoryCardStatus = Exclude<ProfileHistoryStatusFilter, 'all'>;
 
-const MASKED_PASSWORD = '••••••••';
 const PROFILE_HISTORY_PAGE_SIZE_OPTIONS = [4, 8, 12];
-
-function FeedbackMessage({ feedback }: { feedback: FeedbackState }) {
-  if (!feedback) {
-    return null;
-  }
-
-  return (
-    <p
-      className={feedback.kind === 'success' ? 'auth-success' : 'auth-error'}
-    >
-      {feedback.message}
-    </p>
-  );
-}
+const ADMIN_ACTIVITY_ANALYTICS_PERIOD_OPTIONS: Array<{
+  value: AdminActivityAnalyticsPeriod;
+  label: string;
+}> = [
+  { value: '7d', label: '7 jours' },
+  { value: '30d', label: '30 jours' },
+  { value: '6m', label: '6 mois' },
+  { value: '1y', label: '1 an' },
+];
+const ADMIN_RELANCE_WINDOW_OPTIONS: Array<{
+  value: AdminRelanceWindow;
+  label: string;
+}> = [
+  { value: '14d', label: '14 jours' },
+  { value: '1m', label: '1 mois' },
+  { value: '3m', label: '3 mois' },
+];
+const ADMIN_DETAILED_ACTIVITY_PAGE_SIZE = 10;
+const ADMIN_PROFILE_LOGIN_ACTION = 'Connexion au profil';
 
 type AdminInterventionFilters = {
   internalId: string;
@@ -193,12 +246,11 @@ type AdminInterventionFilters = {
 
 const EMPTY_CREATE_FORM: CreateInternalProfileInput = {
   firstName: '',
+  institutionId: '',
   lastName: '',
   loginId: '',
-  password: '',
   promotion: '',
   semester: '',
-  currentRotation: '',
 };
 
 const EMPTY_UPDATE_INTERNAL_CREDENTIALS_FORM: UpdateInternalCredentialsInput = {
@@ -208,9 +260,9 @@ const EMPTY_UPDATE_INTERNAL_CREDENTIALS_FORM: UpdateInternalCredentialsInput = {
 
 const EMPTY_CREATE_SENIOR_FORM: CreateSeniorProfileInput = {
   firstName: '',
+  institutionId: '',
   lastName: '',
   loginId: '',
-  password: '',
 };
 
 const EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM: UpdateSeniorCredentialsInput = {
@@ -227,10 +279,6 @@ const EMPTY_INTERVENTION_FILTERS: AdminInterventionFilters = {
   dateFrom: '',
   dateTo: '',
 };
-
-const ADMIN_EVALUATIONS_STORAGE_KEY =
-  'journal-bord:admin-intervention-evaluations:v1';
-const TEST_FEEDBACK_STORAGE_KEY = 'journal-bord:test-feedback:v1';
 
 const ADMIN_ACTIVITY_RANGE_OPTIONS: Array<{
   value: AdminActivityRange;
@@ -276,6 +324,7 @@ const TROPHY_CONDITION_OPTIONS: Array<{
   { value: 'first_recorded', label: 'Première intervention enregistrée' },
   { value: 'total_recorded', label: 'Nombre total d’interventions enregistrées' },
   { value: 'total_evaluated', label: 'Nombre total d’interventions évaluées' },
+  { value: 'profile_login_count', label: 'Nombre de connexions au profil' },
   {
     value: 'procedure_count',
     label: 'Nombre d’interventions selon une intervention précise',
@@ -352,25 +401,6 @@ const TROPHY_IMAGE_FIELDS: Array<{
   { key: 'diamond', label: 'Diamant' },
 ];
 
-const EMPTY_SURGICAL_INTERVENTION_FORM: CreateSurgicalInterventionInput = {
-  name: '',
-  indications: [''],
-  allowedApproaches: [],
-  allowedEntryTechniques: [],
-  requiresLaterality: false,
-  customChecklistSteps: [''],
-  keyStepLabels: [],
-  stepOrderLabels: [],
-  stepApproachLabels: {},
-};
-
-const ROTATION_SUGGESTIONS = [
-  'Chirurgie',
-  'DAN',
-  'Pool obstétrical',
-  'UGOMPS',
-];
-
 const PROMOTION_OPTIONS = [
   'Promo 2020',
   'Promo 2021',
@@ -381,16 +411,6 @@ const PROMOTION_OPTIONS = [
 ];
 
 const SEMESTER_OPTIONS = Array.from({ length: 12 }, (_, index) => `S${index + 1}`);
-const DEFAULT_NEW_INTERVENTION_STEP_LABELS = [
-  'Installation de la patiente',
-  'Préparation du matériel et vérification de l’installation',
-];
-const LAPAROSCOPIC_NEW_INTERVENTION_STEP_LABELS = [
-  'Voie d’abord du pneumopéritoine',
-  'Mise en place des trocarts',
-  'Exsufflation et retrait des trocarts',
-];
-const PNEUMOPERITONEUM_ENTRY_STEP_LABEL = 'Voie d’abord du pneumopéritoine';
 
 const ADMIN_PERFORMANCE_OPTIONS: Array<{
   value: AdminPerformanceRating;
@@ -454,20 +474,6 @@ const ADMIN_CATEGORY_DIFFICULTY_OPTIONS: Array<{
   },
 ];
 
-const SENIOR_PERFORMANCE_SHORT_LABELS: Record<AdminPerformanceRating, string> = {
-  '1': 'Interne non préparé',
-  '2': 'Connaissance insuffisante',
-  '3': 'Performance intermédiaire',
-  '4': 'Compatible autonomie supervisée',
-  '5': 'Performance exceptionnelle',
-};
-
-const SENIOR_DIFFICULTY_SHORT_LABELS: Record<AdminCategoryDifficultyRating, string> = {
-  '1': 'Simple',
-  '2': 'Intermédiaire',
-  '3': 'Difficile',
-};
-
 function getSemesterTone(semester: string) {
   const semesterNumber = Number(semester.replace('S', ''));
 
@@ -512,117 +518,6 @@ function getProfileInitials(profile: { firstName: string; lastName: string }) {
     .toUpperCase();
 }
 
-function normalizeLabels(labels: string[]) {
-  const seenLabels = new Set<string>();
-
-  return labels
-    .map((label) => label.trim())
-    .filter((label) => {
-      if (!label) {
-        return false;
-      }
-
-      const normalizedLabel = label.toLocaleLowerCase('fr-FR');
-
-      if (seenLabels.has(normalizedLabel)) {
-        return false;
-      }
-
-      seenLabels.add(normalizedLabel);
-      return true;
-    });
-}
-
-function getAutomaticChecklistStepLabels(approaches: SurgicalApproach[]) {
-  const needsEntryTechnique =
-    approaches.includes('coelioscopie') || approaches.includes('robot');
-
-  return [
-    ...DEFAULT_NEW_INTERVENTION_STEP_LABELS,
-    ...(needsEntryTechnique ? LAPAROSCOPIC_NEW_INTERVENTION_STEP_LABELS : []),
-  ];
-}
-
-function getDefaultStepApproachLabels(
-  stepLabel: string,
-  allowedApproaches: SurgicalApproach[]
-) {
-  if (stepLabel === PNEUMOPERITONEUM_ENTRY_STEP_LABEL) {
-    return allowedApproaches.filter((approach) =>
-      approach === 'coelioscopie' ||
-      approach === 'robot' ||
-      approach === 'vnotes'
-    );
-  }
-
-  return LAPAROSCOPIC_NEW_INTERVENTION_STEP_LABELS.includes(stepLabel)
-    ? allowedApproaches.filter((approach) =>
-        approach === 'coelioscopie' || approach === 'robot'
-      )
-    : [];
-}
-
-function getStepApproachLabels(
-  stepLabel: string,
-  form: CreateSurgicalInterventionInput
-) {
-  const hasExplicitValue = Object.prototype.hasOwnProperty.call(
-    form.stepApproachLabels,
-    stepLabel
-  );
-
-  return hasExplicitValue
-    ? form.stepApproachLabels[stepLabel] ?? []
-    : getDefaultStepApproachLabels(stepLabel, form.allowedApproaches);
-}
-
-function getOrderedChecklistLabels(
-  availableLabels: string[],
-  requestedOrderLabels: string[]
-) {
-  const normalizedAvailableLabels = normalizeLabels(availableLabels);
-  const normalizedRequestedLabels = normalizeLabels(requestedOrderLabels);
-
-  return [
-    ...normalizedRequestedLabels.filter((label) =>
-      normalizedAvailableLabels.includes(label)
-    ),
-    ...normalizedAvailableLabels.filter(
-      (label) => !normalizedRequestedLabels.includes(label)
-    ),
-  ];
-}
-
-function getInterventionKeyStepLabels(
-  intervention: SurgicalInterventionDefinition
-) {
-  const keyStepIds = new Set(intervention.keyStepIds);
-
-  return intervention.checklistSteps
-    .filter((step) => keyStepIds.has(step.id))
-    .map((step) => step.label);
-}
-
-function loadStoredArray<T>(storageKey: string, fallbackValue: T[] = []) {
-  if (typeof window === 'undefined') {
-    return fallbackValue;
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(storageKey);
-
-    if (!rawValue) {
-      return fallbackValue;
-    }
-
-    const parsedValue = JSON.parse(rawValue);
-
-    return Array.isArray(parsedValue) ? (parsedValue as T[]) : fallbackValue;
-  } catch {
-    return fallbackValue;
-  }
-}
-
 function getInterventionIndicationLabel(intervention: SavedIntervention) {
   if (intervention.customIndication?.trim()) {
     return intervention.customIndication.trim();
@@ -646,17 +541,6 @@ function getChecklistLevelLabel(level: ChecklistLevel) {
   return description ? `${label} · ${description}` : label;
 }
 
-function getChecklistLevelDescription(level: ChecklistLevel | null | undefined) {
-  if (!level) {
-    return 'Non renseigné';
-  }
-
-  return (
-    checklistLevelOptions.find((option) => option.value === level)?.description ??
-    level
-  );
-}
-
 function getChecklistLevelBadgeLabel(level: ChecklistLevel | null | undefined) {
   if (!level) {
     return 'Non renseigné';
@@ -665,24 +549,219 @@ function getChecklistLevelBadgeLabel(level: ChecklistLevel | null | undefined) {
   return level === 'NA' ? 'NA' : `Niveau ${level}`;
 }
 
-function hasCompleteAdminEvaluation(
-  evaluation: AdminInterventionEvaluation | undefined
-) {
-  return Boolean(evaluation?.globalPerformance && evaluation.categoryDifficulty);
+const SENIOR_CHECKLIST_SLIDER_LEVELS = ['0', '1', '2', '3', '4'] as const;
+const SENIOR_CHECKLIST_SLIDER_COLORS = [
+  '#ef5a3c',
+  '#f1a31b',
+  '#a8c84a',
+  '#58ad72',
+  '#0a9da8',
+] as const;
+const SENIOR_CHECKLIST_DISPLAY_LABELS: Record<ChecklistLevel, string> = {
+  NA: 'Non applicable',
+  '0': 'Observé uniquement',
+  '1': 'Montré et expliqué',
+  '2': 'Assistance active du senior',
+  '3': 'Assistance passive du senior',
+  '4': 'Supervision seule',
+};
+
+type SeniorChecklistEditorProps = {
+  activeStepId: string | null;
+  onActiveStepChange: (stepId: string) => void;
+  onValueChange: (stepId: string, level: ChecklistLevel | null) => void;
+  steps: Array<{ id: string; label: string }>;
+  values: Record<string, ChecklistLevel | null>;
+};
+
+function SeniorChecklistEditor({
+  activeStepId,
+  onActiveStepChange,
+  onValueChange,
+  steps,
+  values,
+}: SeniorChecklistEditorProps) {
+  const resolvedActiveStepId =
+    steps.some((step) => step.id === activeStepId)
+      ? activeStepId
+      : steps.find((step) => values[step.id] == null)?.id ?? steps[0]?.id ?? null;
+
+  return (
+    <div className="senior-checklist-editor">
+      {steps.map((step) => {
+        const selectedLevel = values[step.id] ?? null;
+        const isExpanded = step.id === resolvedActiveStepId;
+
+        if (!isExpanded) {
+          return (
+            <button
+              aria-expanded="false"
+              className="senior-checklist-editor__collapsed-step"
+              key={step.id}
+              onClick={() => onActiveStepChange(step.id)}
+              type="button"
+            >
+              <strong>{step.label}</strong>
+              <span
+                className={`senior-checklist-editor__collapsed-value ${
+                  selectedLevel === 'NA'
+                    ? 'senior-checklist-editor__collapsed-value--na'
+                    : ''
+                }`.trim()}
+              >
+                {selectedLevel && selectedLevel !== 'NA' ? (
+                  <b>{selectedLevel}</b>
+                ) : null}
+                {selectedLevel
+                  ? SENIOR_CHECKLIST_DISPLAY_LABELS[selectedLevel]
+                  : 'À renseigner'}
+              </span>
+              <ChevronDown aria-hidden="true" />
+            </button>
+          );
+        }
+
+        const hasNumericValue =
+          selectedLevel != null && selectedLevel !== 'NA';
+        const sliderValue = hasNumericValue ? Number(selectedLevel) : 2;
+        const sliderPosition = `${sliderValue * 25}%`;
+        const sliderLabel = hasNumericValue
+          ? SENIOR_CHECKLIST_DISPLAY_LABELS[selectedLevel]
+          : selectedLevel == null
+            ? 'Déplacer le curseur'
+            : null;
+
+        return (
+          <div
+            aria-label={step.label}
+            className="senior-checklist-editor__expanded-step"
+            key={step.id}
+            role="group"
+          >
+            <div className="senior-checklist-editor__expanded-header">
+              <button
+                aria-expanded="true"
+                className="senior-checklist-editor__expanded-title"
+                onClick={() => onActiveStepChange(step.id)}
+                type="button"
+              >
+                <strong>{step.label}</strong>
+                <ChevronDown aria-hidden="true" />
+              </button>
+              <button
+                aria-label={
+                  selectedLevel === 'NA'
+                    ? `Désélectionner Non applicable pour ${step.label}`
+                    : `Sélectionner Non applicable pour ${step.label}`
+                }
+                aria-pressed={selectedLevel === 'NA'}
+                className={`senior-checklist-editor__na-button ${
+                  selectedLevel === 'NA'
+                    ? 'senior-checklist-editor__na-button--selected'
+                    : ''
+                }`.trim()}
+                onClick={() =>
+                  onValueChange(
+                    step.id,
+                    selectedLevel === 'NA' ? null : 'NA'
+                  )
+                }
+                type="button"
+              >
+                <b>NA</b>
+                <span>Non applicable</span>
+              </button>
+            </div>
+
+            <div
+              className={`senior-checklist-slider ${
+                selectedLevel === 'NA' ? 'senior-checklist-slider--na' : ''
+              }`.trim()}
+              style={
+                {
+                  '--senior-slider-position': sliderPosition,
+                  '--senior-slider-thumb-color':
+                    selectedLevel === 'NA'
+                      ? '#b7cbd4'
+                      : SENIOR_CHECKLIST_SLIDER_COLORS[sliderValue],
+                } as CSSProperties
+              }
+            >
+              {sliderLabel ? (
+                <output className="senior-checklist-slider__label">
+                  {sliderLabel}
+                </output>
+              ) : null}
+              <input
+                aria-label={`Niveau d’autonomie pour ${step.label}`}
+                aria-valuetext={
+                  hasNumericValue
+                    ? SENIOR_CHECKLIST_DISPLAY_LABELS[selectedLevel]
+                    : undefined
+                }
+                max="4"
+                min="0"
+                onChange={(event) =>
+                  onValueChange(
+                    step.id,
+                    String(event.currentTarget.value) as ChecklistLevel
+                  )
+                }
+                step="1"
+                type="range"
+                value={sliderValue}
+              />
+              <div
+                aria-hidden="true"
+                className="senior-checklist-slider__ticks"
+              >
+                {SENIOR_CHECKLIST_SLIDER_LEVELS.map((level) => (
+                  <span key={level}>{level}</span>
+                ))}
+              </div>
+              <div className="senior-checklist-slider__endpoints">
+                <span>Observé uniquement</span>
+                <span>Supervision seule</span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
-function sortEarnedBadges(profile: InternalProfile, savedInterventions: ReturnType<typeof useAppContext>['savedInterventions']) {
-  return getProgressBadgesForInternal(profile, savedInterventions)
-    .filter((badge) => badge.isEarned)
-    .sort((left, right) => {
-      const tierDifference = getTierRank(right.tier) - getTierRank(left.tier);
+function normalizeProgressToken(value: string) {
+  return value.trim().toLocaleLowerCase('fr-FR');
+}
 
-      if (tierDifference !== 0) {
-        return tierDifference;
-      }
+function getInterventionIndicationToken(intervention: SavedIntervention) {
+  if (intervention.customIndication?.trim()) {
+    return `custom:${normalizeProgressToken(intervention.customIndication)}`;
+  }
 
-      return (right.awardedAt ?? '').localeCompare(left.awardedAt ?? '');
-    });
+  if (
+    intervention.indication === 'autre' &&
+    intervention.indicationComment.trim()
+  ) {
+    return `other:${normalizeProgressToken(intervention.indicationComment)}`;
+  }
+
+  return intervention.indication ? `preset:${intervention.indication}` : 'preset:unknown';
+}
+
+function matchesProfileProgressProcedureOption(
+  intervention: SavedIntervention,
+  option: ProfileProgressProcedureOption
+) {
+  return (
+    intervention.procedure === option.procedure &&
+    (
+      getInterventionIndicationToken(intervention) === option.indicationToken ||
+      normalizeProgressToken(getInterventionIndicationLabel(intervention)) ===
+        normalizeProgressToken(option.indicationLabel)
+    )
+  );
 }
 
 function averageNumbers(values: number[]) {
@@ -695,16 +774,6 @@ function averageNumbers(values: number[]) {
 
 function roundPercentage(value: number | null) {
   return value == null ? null : Math.round(value);
-}
-
-function generateTemporaryPassword(seed: string) {
-  const normalizedSeed = seed
-    .toLocaleLowerCase('fr-FR')
-    .replace(/[^a-z0-9]/g, '')
-    .slice(0, 6) || 'bloclog';
-  const dayLabel = new Date().getDate().toString().padStart(2, '0');
-
-  return `${normalizedSeed}${dayLabel}!`;
 }
 
 function getProfileHistoryStatus(
@@ -729,85 +798,6 @@ function getChecklistLevelNumericValue(level: ChecklistLevel | null | undefined)
   }
 
   return Number(level);
-}
-
-function getOperativeBucketId(stepLabel: string): OperativeBucketId {
-  const normalizedLabel = stepLabel.toLocaleLowerCase('fr-FR');
-
-  if (
-    normalizedLabel.includes('installation') ||
-    normalizedLabel.includes('matériel') ||
-    normalizedLabel.includes('materiel')
-  ) {
-    return 'installation';
-  }
-
-  if (
-    normalizedLabel.includes('voie d’abord') ||
-    normalizedLabel.includes("voie d'abord") ||
-    normalizedLabel.includes('trocart') ||
-    normalizedLabel.includes('incision')
-  ) {
-    return 'ouverture';
-  }
-
-  if (
-    normalizedLabel.includes('exposition') ||
-    normalizedLabel.includes('exploration') ||
-    normalizedLabel.includes('dissection')
-  ) {
-    return 'exposition';
-  }
-
-  if (
-    normalizedLabel.includes('geste') ||
-    normalizedLabel.includes('section') ||
-    normalizedLabel.includes('coagulation') ||
-    normalizedLabel.includes('suture') ||
-    normalizedLabel.includes('colpectomie') ||
-    normalizedLabel.includes('colporraphie') ||
-    normalizedLabel.includes('extraction')
-  ) {
-    return 'gestes';
-  }
-
-  if (normalizedLabel.includes('hémostase') || normalizedLabel.includes('hemostase')) {
-    return 'hemostase';
-  }
-
-  if (normalizedLabel.includes('fermeture') || normalizedLabel.includes('retrait')) {
-    return 'fermeture';
-  }
-
-  return 'autres';
-}
-
-function getOperativeBucketLabel(bucketId: OperativeBucketId) {
-  const labels: Record<OperativeBucketId, string> = {
-    installation: 'Installation',
-    ouverture: 'Ouverture',
-    exposition: 'Exposition',
-    gestes: 'Gestes principaux',
-    hemostase: 'Hémostase',
-    fermeture: 'Fermeture',
-    autres: 'Autres étapes',
-  };
-
-  return labels[bucketId];
-}
-
-function getOperativeBucketOrder(bucketId: OperativeBucketId) {
-  const order: Record<OperativeBucketId, number> = {
-    installation: 1,
-    ouverture: 2,
-    exposition: 3,
-    gestes: 4,
-    hemostase: 5,
-    fermeture: 6,
-    autres: 7,
-  };
-
-  return order[bucketId];
 }
 
 function parseIsoDateValue(value: string) {
@@ -887,6 +877,123 @@ function formatActivityLogEntrySummary(entry: ActivityLogEntry) {
     : entry.action;
 }
 
+function getDaysSinceTimestamp(value: string | null, referenceTime: number) {
+  if (!value) {
+    return null;
+  }
+
+  const timestamp = new Date(value).getTime();
+
+  if (Number.isNaN(timestamp)) {
+    return null;
+  }
+
+  return Math.max(0, Math.floor((referenceTime - timestamp) / (1000 * 60 * 60 * 24)));
+}
+
+function formatInactiveDaysLabel(days: number | null) {
+  if (days == null) {
+    return 'Jamais connecté';
+  }
+
+  if (days === 0) {
+    return 'Connexion aujourd’hui';
+  }
+
+  if (days === 1) {
+    return 'Dernière connexion hier';
+  }
+
+  return `Dernière connexion il y a ${days} jours`;
+}
+
+function formatAdminDelayLabel(valueInMs: number | null) {
+  if (valueInMs == null) {
+    return 'Non calculable';
+  }
+
+  const totalSeconds = Math.max(1, Math.round(valueInMs / 1000));
+
+  if (totalSeconds < 120) {
+    return `${totalSeconds} s`;
+  }
+
+  const totalMinutes = Math.max(1, Math.round(valueInMs / (1000 * 60)));
+
+  if (totalMinutes < 120) {
+    return `${totalMinutes} min`;
+  }
+
+  const totalHours = valueInMs / (1000 * 60 * 60);
+
+  if (totalHours < 24) {
+    const roundedHours = Math.max(1, Math.round(totalHours));
+
+    return `${roundedHours} h`;
+  }
+
+  const totalDays = totalHours / 24;
+
+  return totalDays >= 10
+    ? `${Math.round(totalDays)} j`
+    : `${totalDays.toFixed(1).replace('.', ',')} j`;
+}
+
+function formatAdminActivityBarTooltip(
+  count: number,
+  roleLabel: 'interne' | 'senior'
+) {
+  return `${count} activité${count > 1 ? 's' : ''} ${roleLabel}${count > 1 ? 's' : ''}`;
+}
+
+function isAnalyticsTrackingEntry(entry: ActivityLogEntry) {
+  return Boolean(entry.analyticsEvent);
+}
+
+function formatWorkflowDurationLabel(valueInMs: number | null) {
+  if (valueInMs == null) {
+    return 'Non calculable';
+  }
+
+  const totalSeconds = Math.max(1, Math.round(valueInMs / 1000));
+
+  if (totalSeconds < 120) {
+    return `${totalSeconds} s`;
+  }
+
+  const totalMinutes = Math.max(1, Math.round(valueInMs / (1000 * 60)));
+
+  if (totalMinutes < 60) {
+    return `${totalMinutes} min`;
+  }
+
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  return minutes > 0 ? `${hours} h ${minutes} min` : `${hours} h`;
+}
+
+function formatAverageClickCountLabel(value: number | null) {
+  if (value == null) {
+    return 'Non calculable';
+  }
+
+  if (value >= 10) {
+    return `${Math.round(value)} clics`;
+  }
+
+  return `${value.toFixed(1).replace('.', ',')} clics`;
+}
+
+function isAnalyticsInteractionTarget(target: EventTarget | null) {
+  return (
+    target instanceof Element &&
+    Boolean(
+      target.closest('button, input, select, textarea, label, [role="button"]')
+    )
+  );
+}
+
 function parseOptionalNumber(value: string) {
   if (value.trim() === '') {
     return null;
@@ -911,6 +1018,199 @@ type AdminActivityBucket = {
   recordedCount: number;
   evaluatedCount: number;
 };
+
+function getAdminAnalyticsPeriodLabel(period: AdminActivityAnalyticsPeriod) {
+  return (
+    ADMIN_ACTIVITY_ANALYTICS_PERIOD_OPTIONS.find((option) => option.value === period)
+      ?.label ?? '30 jours'
+  );
+}
+
+function getAdminAnalyticsPeriodStart(
+  period: AdminActivityAnalyticsPeriod,
+  referenceDate: Date
+) {
+  if (period === '7d') {
+    const start = addDays(referenceDate, -6);
+
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
+
+  if (period === '30d') {
+    const start = addDays(referenceDate, -29);
+
+    start.setHours(0, 0, 0, 0);
+    return start;
+  }
+
+  if (period === '6m') {
+    return startOfMonth(addMonths(referenceDate, -5));
+  }
+
+  return startOfMonth(addMonths(referenceDate, -11));
+}
+
+function buildAllTimeAdminCycleSummary(
+  activityLog: ActivityLogEntry[],
+  interventions: SavedIntervention[],
+  adminEvaluations: Record<string, AdminInterventionEvaluation>
+) {
+  const userActivityEntries = activityLog.filter(
+    (entry) => entry.actorRole === 'internal' || entry.actorRole === 'senior'
+  );
+  const completedInterventionFormEvents = userActivityEntries
+    .filter((entry) => entry.analyticsEvent?.kind === 'intervention_form')
+    .map((entry) => entry.analyticsEvent!);
+  const completedSeniorEvaluationEvents = userActivityEntries
+    .filter((entry) => entry.analyticsEvent?.kind === 'senior_evaluation')
+    .map((entry) => entry.analyticsEvent!);
+  const evaluatedInterventions = interventions.filter((intervention) =>
+    hasCompleteAdminEvaluation(adminEvaluations[intervention.id])
+  );
+  const recordingDelayValues = interventions
+    .map((intervention) => {
+      const delay =
+        new Date(intervention.savedAt).getTime() -
+        parseIsoDateValue(intervention.date).getTime();
+
+      return Number.isNaN(delay) || delay < 0 ? null : delay;
+    })
+    .filter((value): value is number => value != null);
+  const evaluationDelayValues = evaluatedInterventions
+    .map((intervention) => {
+      const updatedAt = adminEvaluations[intervention.id]?.updatedAt;
+
+      if (!updatedAt) return null;
+
+      const delay =
+        new Date(updatedAt).getTime() - new Date(intervention.savedAt).getTime();
+
+      return Number.isNaN(delay) || delay < 0 ? null : delay;
+    })
+    .filter((value): value is number => value != null);
+
+  return {
+    averageEvaluationDelayMs: averageNumbers(evaluationDelayValues),
+    averageInterventionFormClickCount: averageNumbers(
+      completedInterventionFormEvents.map((event) => event.clickCount)
+    ),
+    averageInterventionFormDurationMs: averageNumbers(
+      completedInterventionFormEvents.map((event) => event.durationMs)
+    ),
+    averageRecordingDelayMs: averageNumbers(recordingDelayValues),
+    averageSeniorEvaluationClickCount: averageNumbers(
+      completedSeniorEvaluationEvents.map((event) => event.clickCount)
+    ),
+    averageSeniorEvaluationDurationMs: averageNumbers(
+      completedSeniorEvaluationEvents.map((event) => event.durationMs)
+    ),
+    completedInterventionFormCount: completedInterventionFormEvents.length,
+    completedSeniorEvaluationCount: completedSeniorEvaluationEvents.length,
+    evaluatedCount: evaluatedInterventions.length,
+    recordedCount: interventions.length,
+  };
+}
+
+function getAdminRelanceThresholdDays(window: AdminRelanceWindow) {
+  if (window === '1m') {
+    return 30;
+  }
+
+  if (window === '3m') {
+    return 90;
+  }
+
+  return 14;
+}
+
+function buildAdminActivityAnalyticsBuckets(
+  activityLog: ActivityLogEntry[],
+  period: AdminActivityAnalyticsPeriod
+) {
+  const referenceDate = new Date();
+  const userEntries = activityLog.filter(
+    (entry) =>
+      (entry.actorRole === 'internal' || entry.actorRole === 'senior') &&
+      !isAnalyticsTrackingEntry(entry)
+  );
+  const bucketBlueprints =
+    period === '6m' || period === '1y'
+      ? Array.from({ length: period === '6m' ? 6 : 12 }, (_, index) => {
+          const monthDate = addMonths(
+            referenceDate,
+            index - (period === '6m' ? 5 : 11)
+          );
+          const start = startOfMonth(monthDate);
+          const end = endOfMonth(monthDate);
+
+          return {
+            id: start.toISOString(),
+            label: start.toLocaleDateString('fr-FR', {
+              month: 'short',
+              year: period === '1y' ? '2-digit' : undefined,
+            }),
+            start,
+            end,
+          };
+        })
+      : Array.from({ length: period === '7d' ? 7 : 30 }, (_, index) => {
+            const offset = period === '7d' ? 6 : 29;
+            const date = addDays(referenceDate, index - offset);
+            const start = new Date(date);
+
+            start.setHours(0, 0, 0, 0);
+
+            const end = new Date(date);
+
+            end.setHours(23, 59, 59, 999);
+
+            return {
+              id: start.toISOString(),
+              label: start.toLocaleDateString('fr-FR', {
+                day: 'numeric',
+                month: 'short',
+              }),
+              start,
+              end,
+            };
+          })
+        ;
+
+  return bucketBlueprints.map((bucket) => {
+    const counts = userEntries.reduce(
+      (current, entry) => {
+        const timestamp = new Date(entry.createdAt);
+
+        if (Number.isNaN(timestamp.getTime())) {
+          return current;
+        }
+
+        if (timestamp < bucket.start || timestamp > bucket.end) {
+          return current;
+        }
+
+        if (entry.actorRole === 'internal') {
+          current.internalCount += 1;
+        }
+
+        if (entry.actorRole === 'senior') {
+          current.seniorCount += 1;
+        }
+
+        current.totalCount += 1;
+        return current;
+      },
+      { internalCount: 0, seniorCount: 0, totalCount: 0 }
+    );
+
+    return {
+      id: bucket.id,
+      label: bucket.label,
+      ...counts,
+    };
+  });
+}
 
 function buildAdminActivityBuckets(
   savedInterventions: SavedIntervention[],
@@ -1010,526 +1310,11 @@ function buildAdminActivityBuckets(
   });
 }
 
-function AdminPageShell({
-  title,
-  subtitle,
-  children,
-  backLabel,
-  onBack,
-}: {
-  title: string;
-  subtitle: string;
-  children: ReactNode;
-  backLabel?: string;
-  onBack?: () => void;
-}) {
-  return (
-    <ScreenContainer
-      bodyClassName="admin-workspace__body"
-      frameClassName="admin-workspace__frame"
-      frameWidth="wide"
-      heroClassName="admin-workspace__hero"
-      heroTop={
-        onBack ? (
-          <button className="admin-breadcrumb-button" onClick={onBack} type="button">
-            <ChevronLeft aria-hidden="true" />
-            <span>{backLabel ?? 'Retour'}</span>
-          </button>
-        ) : undefined
-      }
-      hideBrandmark
-      shellClassName="admin-workspace"
-      subtitle={subtitle}
-      title={title}
-    >
-      {children}
-    </ScreenContainer>
-  );
-}
-
-type SeniorPopulationFilter = 'recent' | 'mine' | 'all';
-type SeniorInterventionFilterOption = {
-  key: string;
-  label: string;
-  procedure: InterventionType;
-  approach: SurgicalApproach | null;
-};
-type SeniorAutonomyPoint = {
-  id: string;
-  index: number;
-  score: number;
-};
-type SeniorStepStat = {
-  id: string;
-  label: string;
-  score: number;
-  sampleSize: number;
-  tone: 'positive' | 'warning' | 'critical';
-};
-
-const SENIOR_POPULATION_OPTIONS: Array<{
-  value: SeniorPopulationFilter;
-  label: string;
-}> = [
-  {
-    value: 'recent',
-    label: 'Internes avec relations récentes',
-  },
-  {
-    value: 'mine',
-    label: 'Mes internes',
-  },
-  {
-    value: 'all',
-    label: 'Tous les internes',
-  },
-];
-
-const SENIOR_FALLBACK_INTERVENTION_OPTION: SeniorInterventionFilterOption = {
-  key: 'salpingectomie::coelioscopie',
-  label: 'Salpingectomie cœlioscopique',
-  procedure: 'salpingectomie',
-  approach: 'coelioscopie',
-};
-
-const SENIOR_FALLBACK_AUTONOMY_SERIES: SeniorAutonomyPoint[] = [
-  { id: 'fallback-1', index: 1, score: 25 },
-  { id: 'fallback-3', index: 3, score: 35 },
-  { id: 'fallback-5', index: 5, score: 45 },
-  { id: 'fallback-8', index: 8, score: 58 },
-  { id: 'fallback-10', index: 10, score: 66 },
-  { id: 'fallback-13', index: 13, score: 72 },
-  { id: 'fallback-16', index: 16, score: 78 },
-  { id: 'fallback-20', index: 20, score: 85 },
-  { id: 'fallback-24', index: 24, score: 92 },
-];
-
-const SENIOR_FALLBACK_STEP_STATS: SeniorStepStat[] = [
-  {
-    id: 'installation',
-    label: 'Installation de la patiente',
-    score: 100,
-    sampleSize: 24,
-    tone: 'positive',
-  },
-  {
-    id: 'materiel',
-    label: 'Préparation du matériel',
-    score: 95,
-    sampleSize: 24,
-    tone: 'positive',
-  },
-  {
-    id: 'voie-abord',
-    label: 'Voie d’abord',
-    score: 100,
-    sampleSize: 24,
-    tone: 'positive',
-  },
-  {
-    id: 'exposition',
-    label: 'Exposition des annexes',
-    score: 72,
-    sampleSize: 18,
-    tone: 'warning',
-  },
-  {
-    id: 'mesosalpinx',
-    label: 'Section du mésosalpinx',
-    score: 65,
-    sampleSize: 15,
-    tone: 'warning',
-  },
-  {
-    id: 'hemostase',
-    label: 'Contrôle de l’hémostase',
-    score: 55,
-    sampleSize: 6,
-    tone: 'warning',
-  },
-  {
-    id: 'extraction',
-    label: 'Extraction de la pièce',
-    score: 80,
-    sampleSize: 20,
-    tone: 'positive',
-  },
-  {
-    id: 'fermeture',
-    label: 'Fermeture de la voie d’abord',
-    score: 90,
-    sampleSize: 22,
-    tone: 'positive',
-  },
-];
-
-const SENIOR_CHECKLIST_LEVELS = new Set<ChecklistLevel>(['0', '1', '2', '3', '4']);
-
-const SENIOR_CHECKLIST_STEP_META = new Map(
-  allChecklistSteps.map((step, index) => [
-    step.id,
-    {
-      label: step.label,
-      order: index,
-    },
-  ])
-);
-
-function formatSeniorStepFallbackLabel(stepId: string) {
-  return stepId
-    .replace(/[-_]+/g, ' ')
-    .replace(/\b\w/g, (character) => character.toUpperCase());
-}
-
-function formatLongFrenchDate(value: string) {
-  if (!value) {
-    return 'Date non renseignée';
-  }
-
-  return new Intl.DateTimeFormat('fr-FR', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  }).format(new Date(`${value}T00:00:00`));
-}
-
-function getSeniorSemesterTone(semester: string) {
-  const semesterNumber = Number(semester.replace('S', ''));
-
-  if (semesterNumber >= 1 && semesterNumber <= 2) {
-    return 'blue';
-  }
-
-  if (semesterNumber >= 3 && semesterNumber <= 8) {
-    return 'green';
-  }
-
-  return 'violet';
-}
-
-function getSeniorStepTone(score: number): SeniorStepStat['tone'] {
-  if (score >= 75) {
-    return 'positive';
-  }
-
-  if (score >= 50) {
-    return 'warning';
-  }
-
-  return 'critical';
-}
-
-function getSeniorProcedureApproachSuffix(
-  procedure: InterventionType,
-  approach: SurgicalApproach | null
-) {
-  if (approach === 'coelioscopie') {
-    return 'cœlioscopique';
-  }
-
-  if (approach === 'robot') {
-    return 'robot-assistée';
-  }
-
-  if (approach === 'hysteroscopie') {
-    return 'hystéroscopique';
-  }
-
-  if (approach === 'laparotomie') {
-    return 'par laparotomie';
-  }
-
-  if (approach === 'vnotes') {
-    return 'vNOTES';
-  }
-
-  if (procedure === 'colpoclesis') {
-    return 'par voie basse';
-  }
-
-  return '';
-}
-
-function formatSeniorInterventionLabel(
-  procedureLabel: string,
-  procedure: InterventionType,
-  approach: SurgicalApproach | null
-) {
-  const suffix = getSeniorProcedureApproachSuffix(procedure, approach);
-
-  return suffix ? `${procedureLabel} ${suffix}` : procedureLabel;
-}
-
-function buildSeniorInterventionOptions(
-  interventions: SavedIntervention[],
-  surgicalProcedureOptions: ReturnType<typeof useAppContext>['surgicalProcedureOptions']
-) {
-  const optionsMap = new Map<string, SeniorInterventionFilterOption>();
-  optionsMap.set(
-    SENIOR_FALLBACK_INTERVENTION_OPTION.key,
-    SENIOR_FALLBACK_INTERVENTION_OPTION
-  );
-
-  interventions.forEach((intervention) => {
-    const key = `${intervention.procedure}::${intervention.approach ?? 'none'}`;
-    const procedureLabel = getChoiceLabel(
-      surgicalProcedureOptions,
-      intervention.procedure
-    );
-    const label = formatSeniorInterventionLabel(
-      procedureLabel,
-      intervention.procedure,
-      intervention.approach
-    );
-
-    if (optionsMap.has(key)) {
-      return;
-    }
-
-    optionsMap.set(key, {
-      key,
-      label,
-      procedure: intervention.procedure,
-      approach: intervention.approach,
-    });
-  });
-
-  return Array.from(optionsMap.values()).sort((left, right) => {
-    if (left.key === SENIOR_FALLBACK_INTERVENTION_OPTION.key) {
-      return -1;
-    }
-
-    if (right.key === SENIOR_FALLBACK_INTERVENTION_OPTION.key) {
-      return 1;
-    }
-
-    return left.label.localeCompare(right.label, 'fr-FR', {
-      sensitivity: 'base',
-    });
-  });
-}
-
-function matchesSeniorInterventionOption(
-  intervention: SavedIntervention,
-  option: SeniorInterventionFilterOption
-) {
-  return (
-    intervention.procedure === option.procedure &&
-    (option.approach == null
-      ? intervention.approach == null
-      : intervention.approach === option.approach)
-  );
-}
-
-function buildFallbackAutonomySeries(totalCount: number) {
-  if (totalCount <= 0 || totalCount === 24) {
-    return SENIOR_FALLBACK_AUTONOMY_SERIES;
-  }
-
-  const usedIndexes = new Set<number>();
-
-  return SENIOR_FALLBACK_AUTONOMY_SERIES.map((point, index) => {
-    let scaledIndex = Math.max(
-      1,
-      Math.min(totalCount, Math.round((point.index / 24) * totalCount))
-    );
-
-    while (usedIndexes.has(scaledIndex) && scaledIndex < totalCount) {
-      scaledIndex += 1;
-    }
-
-    while (usedIndexes.has(scaledIndex) && scaledIndex > 1) {
-      scaledIndex -= 1;
-    }
-
-    usedIndexes.add(scaledIndex);
-
-    return {
-      id: `fallback-series-${index}`,
-      index: scaledIndex,
-      score: point.score,
-    };
-  }).sort((left, right) => left.index - right.index);
-}
-
-function buildSeniorAutonomySeries(
-  interventions: SavedIntervention[],
-  evaluations: Record<string, AdminInterventionEvaluation>,
-  customSurgicalInterventions: SurgicalInterventionDefinition[]
-) {
-  const scoredSeries = [...interventions]
-    .sort((left, right) => left.savedAt.localeCompare(right.savedAt))
-    .map((intervention, index) => {
-      const computedScore =
-        calculateAutonomyScore(
-          intervention,
-          customSurgicalInterventions,
-          evaluations[intervention.id]
-        ) ?? intervention.autonomyScore;
-
-      return computedScore == null
-        ? null
-        : {
-            id: intervention.id,
-            index: index + 1,
-            score: Math.round(computedScore),
-          };
-    })
-    .filter((point): point is SeniorAutonomyPoint => point != null);
-
-  if (scoredSeries.length >= 2) {
-    return scoredSeries;
-  }
-
-  if (scoredSeries.length === 1 && interventions.length <= 1) {
-    return scoredSeries;
-  }
-
-  return buildFallbackAutonomySeries(
-    interventions.length > 0 ? interventions.length : 24
-  );
-}
-
-function buildSeniorStepStats(
-  interventions: SavedIntervention[],
-  customSurgicalInterventions: SurgicalInterventionDefinition[]
-) {
-  if (!interventions.length) {
-    return SENIOR_FALLBACK_STEP_STATS;
-  }
-
-  const aggregates = new Map<
-    string,
-    {
-      label: string;
-      total: number;
-      count: number;
-      order: number;
-    }
-  >();
-
-  interventions.forEach((intervention) => {
-    const definedStepMeta = new Map(
-      getChecklistStepsForIntervention(
-        intervention.procedure,
-        intervention.indication,
-        intervention.approach,
-        intervention.entryTechnique,
-        customSurgicalInterventions
-      ).map((step, index) => {
-        const fallbackMeta = SENIOR_CHECKLIST_STEP_META.get(step.id);
-
-        return [
-          step.id,
-          {
-            label: step.label,
-            order: fallbackMeta?.order ?? index,
-          },
-        ];
-      })
-    );
-
-    Object.entries(intervention.checklist).forEach(([stepId, level]) => {
-      if (!level || !SENIOR_CHECKLIST_LEVELS.has(level)) {
-        return;
-      }
-
-      const stepMeta =
-        definedStepMeta.get(stepId) ??
-        SENIOR_CHECKLIST_STEP_META.get(stepId) ?? {
-          label: formatSeniorStepFallbackLabel(stepId),
-          order: Number.MAX_SAFE_INTEGER,
-        };
-
-      const current = aggregates.get(stepId) ?? {
-        label: stepMeta.label,
-        total: 0,
-        count: 0,
-        order: stepMeta.order,
-      };
-
-      current.total += (Number(level) / 4) * 100;
-      current.count += 1;
-      current.order = Math.min(current.order, stepMeta.order);
-
-      if (!current.label && stepMeta.label) {
-        current.label = stepMeta.label;
-      }
-
-      aggregates.set(stepId, current);
-    });
-  });
-
-  const rows = Array.from(aggregates.entries())
-    .sort((left, right) => {
-      const orderDifference = left[1].order - right[1].order;
-
-      if (orderDifference !== 0) {
-        return orderDifference;
-      }
-
-      return left[1].label.localeCompare(right[1].label, 'fr-FR', {
-        sensitivity: 'base',
-      });
-    })
-    .map(([id, aggregate]) => {
-      const score = Math.round(aggregate.total / aggregate.count);
-
-      return {
-        id,
-        label: aggregate.label,
-        score,
-        sampleSize: aggregate.count,
-        tone: getSeniorStepTone(score),
-      };
-    })
-    .filter((row) => row.sampleSize > 0)
-    .slice(0, 8);
-
-  return rows.length ? rows : SENIOR_FALLBACK_STEP_STATS;
-}
-
-function buildSeniorXAxisTicks(maxIndex: number) {
-  if (maxIndex <= 0) {
-    return [];
-  }
-
-  const ticks = new Set<number>();
-
-  if (maxIndex < 20) {
-    for (let value = 1; value <= maxIndex; value += 1) {
-      ticks.add(value);
-    }
-
-    return Array.from(ticks);
-  }
-
-  if (maxIndex < 30) {
-    ticks.add(1);
-
-    for (let value = 2; value <= maxIndex; value += 2) {
-      ticks.add(value);
-    }
-
-    ticks.add(maxIndex);
-
-    return Array.from(ticks).sort((left, right) => left - right);
-  }
-
-  ticks.add(1);
-
-  for (let value = 5; value <= maxIndex; value += 5) {
-    ticks.add(value);
-  }
-
-  ticks.add(maxIndex);
-
-  return Array.from(ticks).sort((left, right) => left - right);
-}
-
 export function AdminScreen() {
   const {
     adminEvaluations,
+    archiveInstitution,
+    createInstitution,
     createInternalProfile,
     createSeniorProfile,
     createSurgicalIntervention,
@@ -1538,18 +1323,24 @@ export function AdminScreen() {
     deleteCustomSurgicalIntervention,
     deleteInternalProfile,
     deleteSeniorProfile,
-    deleteSavedInterventions,
     activityLog,
     adminTrophies,
     adminTrophyStorageWarning: trophyStorageWarning,
     internalProfiles,
+    institutions,
     isAdmin,
     isSenior,
+    notebookDocuments,
     logout,
     recordActivity,
+    regenerateAccessKey,
+    refreshBackendData,
+    renameInstitution,
     savedInterventions,
-    setAdminEvaluations,
-    setAdminTrophies,
+    trophyAwards,
+    saveSeniorEvaluation,
+    saveAdminTrophy,
+    deleteAdminTrophy,
     selectableSeniors,
     selectedSenior,
     surgicalProcedureOptions,
@@ -1559,11 +1350,15 @@ export function AdminScreen() {
     updateSeniorManagedInternals,
     updateSeniorCredentials,
     updateSurgicalIntervention,
-    updateSavedInterventionAutonomyScore,
   } = useAppContext();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [view, setView] = useState<AdminView>('home');
   const [activityRange, setActivityRange] = useState<AdminActivityRange>('day');
+  const [activityAnalyticsPeriod, setActivityAnalyticsPeriod] =
+    useState<AdminActivityAnalyticsPeriod>('30d');
+  const [relanceWindow, setRelanceWindow] = useState<AdminRelanceWindow>('14d');
+  const [detailedActivitiesVisibleCount, setDetailedActivitiesVisibleCount] =
+    useState(ADMIN_DETAILED_ACTIVITY_PAGE_SIZE);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
   const [selectedProfileViewSource, setSelectedProfileViewSource] =
     useState<AdminProfileViewSource>('profiles');
@@ -1573,7 +1368,7 @@ export function AdminScreen() {
   const [profileSearch, setProfileSearch] = useState('');
   const [editingInternalProfileId, setEditingInternalProfileId] =
     useState<string | null>(null);
-  const [profileStatsTab, setProfileStatsTab] = useState<ProfileStatsTab>('history');
+  const [profileStatsTab, setProfileStatsTab] = useState<ProfileStatsTab>('progress');
   const [profileHistorySearch, setProfileHistorySearch] = useState('');
   const [profileHistorySeniorFilter, setProfileHistorySeniorFilter] = useState('all');
   const [profileHistoryStatusFilter, setProfileHistoryStatusFilter] =
@@ -1584,7 +1379,8 @@ export function AdminScreen() {
   const [profileHistoryPageSize, setProfileHistoryPageSize] = useState(
     PROFILE_HISTORY_PAGE_SIZE_OPTIONS[0]
   );
-  const [profileProgressKey, setProfileProgressKey] = useState('');
+  const [profileProgressProcedureKey, setProfileProgressProcedureKey] = useState('');
+  const [profileProgressApproach, setProfileProgressApproach] = useState('');
   const [profileProgressPeriod, setProfileProgressPeriod] =
     useState<ProfileProgressPeriod>('12m');
   const [expandedHistoryInterventionId, setExpandedHistoryInterventionId] =
@@ -1600,7 +1396,8 @@ export function AdminScreen() {
     TrophyImageKey[]
   >([]);
   const [isSavingTrophy, setIsSavingTrophy] = useState(false);
-  const hasAttemptedLegacyTrophyImageMigrationRef = useRef(false);
+  const homeActivityChartScrollRef = useRef<HTMLDivElement | null>(null);
+  const analyticsChartScrollRef = useRef<HTMLDivElement | null>(null);
   const [createForm, setCreateForm] =
     useState<CreateInternalProfileInput>(EMPTY_CREATE_FORM);
   const [editingInternalCredentialsProfileId, setEditingInternalCredentialsProfileId] =
@@ -1616,97 +1413,95 @@ export function AdminScreen() {
     useState<UpdateSeniorCredentialsInput>(
       EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM
     );
-  const [surgicalInterventionForm, setSurgicalInterventionForm] =
-    useState<CreateSurgicalInterventionInput>(EMPTY_SURGICAL_INTERVENTION_FORM);
   const [interventionFilters, setInterventionFilters] =
     useState<AdminInterventionFilters>(EMPTY_INTERVENTION_FILTERS);
   const [feedback, setFeedback] = useState<FeedbackState>(null);
+  const [analyticsFeedback, setAnalyticsFeedback] = useState<FeedbackState>(null);
   const [internalCredentialsFeedback, setInternalCredentialsFeedback] =
     useState<FeedbackState>(null);
   const [seniorFeedback, setSeniorFeedback] = useState<FeedbackState>(null);
   const [seniorAccountFeedback, setSeniorAccountFeedback] =
     useState<FeedbackState>(null);
-  const [surgicalInterventionFeedback, setSurgicalInterventionFeedback] =
-    useState<FeedbackState>(null);
-  const [profileToDelete, setProfileToDelete] = useState<InternalProfile | null>(null);
-  useScrollResetOnChange([view]);
-  const [showSurgicalInterventionList, setShowSurgicalInterventionList] =
+  const [disabledProfiles, setDisabledProfiles] = useState<BackendProfile[]>([]);
+  const [disabledProfilesError, setDisabledProfilesError] = useState<string | null>(
+    null
+  );
+  const [isLoadingDisabledProfiles, setIsLoadingDisabledProfiles] =
     useState(false);
-  const [editingSurgicalInterventionId, setEditingSurgicalInterventionId] =
-    useState<InterventionType | null>(null);
-  const [draggedStepLabel, setDraggedStepLabel] = useState<string | null>(null);
+  const [revealedAccessKey, setRevealedAccessKey] = useState<{
+    accessKey: string;
+    userLabel: string;
+  } | null>(null);
+  const [institutionName, setInstitutionName] = useState('');
+  const [editingInstitutionId, setEditingInstitutionId] =
+    useState<string | null>(null);
+  const [institutionFeedback, setInstitutionFeedback] =
+    useState<FeedbackState>(null);
+  useScrollResetOnChange([view]);
+
+  useEffect(() => {
+    if (view !== 'profiles') {
+      setRevealedAccessKey(null);
+    }
+  }, [view]);
+
+  useEffect(() => {
+    if (!isAdmin || view !== 'profiles') {
+      return;
+    }
+
+    const controller = new AbortController();
+
+    setIsLoadingDisabledProfiles(true);
+    setDisabledProfilesError(null);
+    void loadBackendDisabledProfiles(controller.signal)
+      .then((profiles) => {
+        if (!controller.signal.aborted) {
+          setDisabledProfiles(profiles);
+        }
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setDisabledProfilesError(
+            error instanceof Error
+              ? error.message
+              : 'Impossible de charger les comptes désactivés.'
+          );
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setIsLoadingDisabledProfiles(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [customSeniors.length, internalProfiles.length, isAdmin, view]);
   const [selectedEvaluationInterventionId, setSelectedEvaluationInterventionId] =
     useState<string | null>(null);
-  const [testFeedbackItems, setTestFeedbackItems] = useState<TestFeedback[]>(() =>
-    loadStoredArray<TestFeedback>(TEST_FEEDBACK_STORAGE_KEY)
-  );
-  const [hasLoadedPersistentTestFeedback, setHasLoadedPersistentTestFeedback] =
-    useState(false);
-  const [testFeedbackMessage, setTestFeedbackMessage] = useState('');
-  const [testFeedbackStatus, setTestFeedbackStatus] =
-    useState<FeedbackState>(null);
   const [evaluationFeedback, setEvaluationFeedback] =
     useState<FeedbackState>(null);
+  const [
+    activeEvaluationChecklistStepId,
+    setActiveEvaluationChecklistStepId,
+  ] = useState<string | null>(null);
   const [evaluationDraft, setEvaluationDraft] = useState<{
+    checklist: Record<string, ChecklistLevel | null>;
     globalPerformance: AdminPerformanceRating | null;
     categoryDifficulty: AdminCategoryDifficultyRating | null;
     seniorComment: string;
   }>({
+    checklist: {},
     globalPerformance: null,
     categoryDifficulty: null,
     seniorComment: '',
   });
-  const [isAutoEvaluationOpen, setIsAutoEvaluationOpen] = useState(false);
-
-  useEffect(() => {
-    let isCancelled = false;
-
-    async function loadPersistentTestFeedback() {
-      const persistentFeedback =
-        await loadPersistentArray<TestFeedback>('test_feedback');
-
-      if (isCancelled) {
-        return;
-      }
-
-      if (persistentFeedback) {
-        setTestFeedbackItems(persistentFeedback);
-      }
-
-      setHasLoadedPersistentTestFeedback(true);
-    }
-
-    void loadPersistentTestFeedback();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    window.localStorage.setItem(
-      TEST_FEEDBACK_STORAGE_KEY,
-      JSON.stringify(testFeedbackItems)
-    );
-
-    if (hasLoadedPersistentTestFeedback) {
-      void (async () => {
-        const isSaved = await savePersistentArray('test_feedback', testFeedbackItems);
-
-        if (!isSaved) {
-          setTestFeedbackStatus({
-            kind: 'error',
-            message:
-              'Les remarques de test sont bien visibles sur cet appareil, mais la synchronisation serveur a echoue. Verifie la connexion avant de recharger.',
-          });
-        }
-      })();
-    }
-  }, [testFeedbackItems, hasLoadedPersistentTestFeedback]);
+  const seniorEvaluationAnalyticsSessionRef = useRef<{
+    clickCount: number;
+    interventionId: string;
+    sessionId: string;
+    startedAt: string;
+  } | null>(null);
 
   const sortedInterventions = useMemo(
     () =>
@@ -1714,6 +1509,13 @@ export function AdminScreen() {
         right.savedAt.localeCompare(left.savedAt)
       ),
     [savedInterventions]
+  );
+  const activeInstitutions = useMemo(
+    () =>
+      institutions
+        .filter((institution) => institution.status === 'active')
+        .sort((left, right) => left.name.localeCompare(right.name, 'fr')),
+    [institutions]
   );
   const interventionsToEvaluate = useMemo(() => {
     if (isSenior) {
@@ -1828,26 +1630,32 @@ export function AdminScreen() {
   const trophyCards = useMemo<AdminTrophyCardItem[]>(
     () =>
       adminTrophies.map((trophy) => {
-        const obtainedCount = countProfilesWithTrophy(
-          trophy,
-          internalProfiles,
-          savedInterventions,
-          adminEvaluations
-        );
-        const previewProfile = internalProfiles[0] ?? null;
+        const authoritativeAwards =
+          trophy.status === 'active'
+            ? trophyAwards.filter((award) => award.trophyId === trophy.id)
+            : [];
+        const highestTierByProfile = new Map<
+          string,
+          TrophyLevelDefinition['tier']
+        >();
+
+        authoritativeAwards.forEach((award) => {
+          const awardedTier = award.tier ?? 'bronze';
+          const currentTier = highestTierByProfile.get(award.profileId);
+
+          if (!currentTier || getTierRank(awardedTier) > getTierRank(currentTier)) {
+            highestTierByProfile.set(award.profileId, awardedTier);
+          }
+        });
+        const obtainedCount = new Set(
+          authoritativeAwards.map((award) => award.profileId)
+        ).size;
         const levelObtainedCounts =
           trophy.format === 'levels'
             ? trophy.levels.map((level) => ({
-                count: internalProfiles.filter((profile) => {
-                  const unlockedTier = getUnlockedTrophyTierForProfile(
-                    trophy,
-                    profile,
-                    savedInterventions,
-                    adminEvaluations
-                  );
-
-                  return unlockedTier === level.tier;
-                }).length,
+                count: Array.from(highestTierByProfile.values()).filter(
+                  (tier) => tier === level.tier
+                ).length,
                 label: level.label,
                 tier: level.tier,
               }))
@@ -1857,18 +1665,13 @@ export function AdminScreen() {
           ...trophy,
           levelObtainedCounts,
           obtainedCount,
-          unlockedTier: previewProfile
-            ? getUnlockedTrophyTierForProfile(
-                trophy,
-                previewProfile,
-                savedInterventions,
-                adminEvaluations
-              )
-            : null,
           ruleSummary: buildTrophyRuleSummary(trophy),
         };
       }),
-    [adminEvaluations, adminTrophies, internalProfiles, savedInterventions]
+    [
+      adminTrophies,
+      trophyAwards,
+    ]
   );
   const activityBuckets = useMemo(
     () => buildAdminActivityBuckets(sortedInterventions, adminEvaluations, activityRange),
@@ -1906,6 +1709,11 @@ export function AdminScreen() {
       ),
     };
   }, [activityBuckets]);
+  const hasActivityChartData =
+    activityTotals.totalRecorded > 0 || activityTotals.totalEvaluated > 0;
+  const activeProfileCount =
+    internalProfiles.length +
+    selectableSeniors.filter((senior) => senior.id !== 'sen-other').length;
   const userConnections = useMemo(() => {
     const internalConnections: AdminUserConnection[] = internalProfiles
       .filter((profile) => profile.lastLoginAt)
@@ -1946,7 +1754,11 @@ export function AdminScreen() {
   }, [userConnections]);
   const recentActivitiesByActor = useMemo(() => {
     return activityLog.reduce<Record<string, ActivityLogEntry[]>>((accumulator, entry) => {
-      if (!entry.actorId || entry.actorRole === 'admin') {
+      if (
+        !entry.actorId ||
+        entry.actorRole === 'admin' ||
+        isAnalyticsTrackingEntry(entry)
+      ) {
         return accumulator;
       }
 
@@ -1959,6 +1771,362 @@ export function AdminScreen() {
       return accumulator;
     }, {});
   }, [activityLog]);
+  const activityAnalyticsBuckets = useMemo<AdminActivityAnalyticsBucket[]>(
+    () =>
+      buildAdminActivityAnalyticsBuckets(activityLog, activityAnalyticsPeriod),
+    [activityAnalyticsPeriod, activityLog]
+  );
+  const allTimeActivityCycleSummary = useMemo(
+    () =>
+      buildAllTimeAdminCycleSummary(
+        activityLog,
+        sortedInterventions,
+        adminEvaluations
+      ),
+    [activityLog, adminEvaluations, sortedInterventions]
+  );
+  const activityAnalyticsSummary = useMemo(() => {
+    const now = Date.now();
+    const referenceDate = new Date(now);
+    const analyticsPeriodStart = getAdminAnalyticsPeriodStart(
+      activityAnalyticsPeriod,
+      referenceDate
+    );
+    const analyticsPeriodStartIso = analyticsPeriodStart.toISOString();
+    const relanceThresholdDays = getAdminRelanceThresholdDays(relanceWindow);
+    const activityEntries = activityLog
+      .filter((entry) => entry.actorRole === 'internal' || entry.actorRole === 'senior')
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    const visibleActivityEntries = activityEntries.filter(
+      (entry) => !isAnalyticsTrackingEntry(entry)
+    );
+    const recentActivityEntries = visibleActivityEntries.filter(
+      (entry) => entry.createdAt >= analyticsPeriodStartIso
+    );
+    const completedInterventionFormEvents = activityEntries
+      .filter(
+        (entry) =>
+          entry.createdAt >= analyticsPeriodStartIso &&
+          entry.analyticsEvent?.kind === 'intervention_form'
+      )
+      .map((entry) => entry.analyticsEvent!);
+    const completedSeniorEvaluationEvents = activityEntries
+      .filter(
+        (entry) =>
+          entry.createdAt >= analyticsPeriodStartIso &&
+          entry.analyticsEvent?.kind === 'senior_evaluation'
+      )
+      .map((entry) => entry.analyticsEvent!);
+    const recentRecordedInterventions = sortedInterventions.filter(
+      (intervention) => intervention.savedAt >= analyticsPeriodStartIso
+    );
+    const evaluatedInterventions = sortedInterventions.filter((intervention) =>
+      hasCompleteAdminEvaluation(adminEvaluations[intervention.id])
+    );
+    const recentEvaluatedInterventions = evaluatedInterventions.filter((intervention) => {
+      const updatedAt = adminEvaluations[intervention.id]?.updatedAt;
+
+      return Boolean(updatedAt && updatedAt >= analyticsPeriodStartIso);
+    });
+    const evaluationDelayValues = recentEvaluatedInterventions
+      .map((intervention) => {
+        const updatedAt = adminEvaluations[intervention.id]?.updatedAt;
+
+        if (!updatedAt) {
+          return null;
+        }
+
+        const delay = new Date(updatedAt).getTime() - new Date(intervention.savedAt).getTime();
+
+        return Number.isNaN(delay) || delay < 0 ? null : delay;
+      })
+      .filter((value): value is number => value != null);
+    const recordingDelayValues = recentRecordedInterventions
+      .map((intervention) => {
+        const delay =
+          new Date(intervention.savedAt).getTime() -
+          parseIsoDateValue(intervention.date).getTime();
+
+        return Number.isNaN(delay) || delay < 0 ? null : delay;
+      })
+      .filter((value): value is number => value != null);
+    const interventionFormDurationValues = completedInterventionFormEvents.map(
+      (event) => event.durationMs
+    );
+    const interventionFormClickValues = completedInterventionFormEvents.map(
+      (event) => event.clickCount
+    );
+    const seniorEvaluationDurationValues = completedSeniorEvaluationEvents.map(
+      (event) => event.durationMs
+    );
+    const seniorEvaluationClickValues = completedSeniorEvaluationEvents.map(
+      (event) => event.clickCount
+    );
+    const relanceProfiles = [
+      ...internalProfiles.map<AdminRelanceProfile>((profile) => ({
+        contactEmail: profile.contactEmail ?? null,
+        id: `internal:${profile.id}`,
+        inactiveDays: getDaysSinceTimestamp(profile.lastLoginAt, now),
+        lastLoginAt: profile.lastLoginAt,
+        name: formatDisplayName(profile.firstName, profile.lastName),
+        roleLabel: 'Interne',
+      })),
+      ...selectableSeniors
+        .filter((senior) => senior.id !== 'sen-other')
+        .map<AdminRelanceProfile>((senior) => ({
+          contactEmail: senior.contactEmail ?? null,
+          id: `senior:${senior.id}`,
+          inactiveDays: getDaysSinceTimestamp(senior.lastLoginAt ?? null, now),
+          lastLoginAt: senior.lastLoginAt ?? null,
+          name: formatSeniorDisplayName(senior),
+          roleLabel: 'Senior',
+        })),
+    ]
+      .filter(
+        (profile) =>
+          profile.inactiveDays == null ||
+          profile.inactiveDays >= relanceThresholdDays
+      )
+      .sort((left, right) => {
+        if (left.inactiveDays == null && right.inactiveDays != null) {
+          return -1;
+        }
+
+        if (left.inactiveDays != null && right.inactiveDays == null) {
+          return 1;
+        }
+
+        return (right.inactiveDays ?? 0) - (left.inactiveDays ?? 0);
+      });
+    const actionCounts = recentActivityEntries.reduce<Map<string, number>>((accumulator, entry) => {
+      accumulator.set(entry.action, (accumulator.get(entry.action) ?? 0) + 1);
+      return accumulator;
+    }, new Map());
+    const topActions = Array.from(actionCounts.entries())
+      .map<AdminLeaderboardItem>(([label, value], index) => ({
+        detail: `${value} activité${value > 1 ? 's' : ''} sur ${getAdminAnalyticsPeriodLabel(
+          activityAnalyticsPeriod
+        ).toLocaleLowerCase('fr-FR')}`,
+        id: `${index}-${label}`,
+        label,
+        value,
+      }))
+      .sort((left, right) => right.value - left.value)
+      .slice(0, 5);
+    const recentLoginEntries = recentActivityEntries.filter(
+      (entry) => entry.action === ADMIN_PROFILE_LOGIN_ACTION
+    );
+    const internalConnectionEventCounts = recentLoginEntries.reduce<Map<string, number>>(
+      (accumulator, entry) => {
+        if (entry.actorRole !== 'internal' || !entry.actorId) {
+          return accumulator;
+        }
+
+        accumulator.set(entry.actorId, (accumulator.get(entry.actorId) ?? 0) + 1);
+        return accumulator;
+      },
+      new Map()
+    );
+    const internalConnectionCounts = internalProfiles.reduce<Map<string, number>>(
+      (accumulator, profile) => {
+        const fallbackConnectionCount =
+          profile.lastLoginAt &&
+          new Date(profile.lastLoginAt).getTime() >= analyticsPeriodStart.getTime()
+            ? 1
+            : 0;
+        const measuredConnectionCount = internalConnectionEventCounts.get(profile.id) ?? 0;
+        const value = Math.max(fallbackConnectionCount, measuredConnectionCount);
+
+        if (value > 0) {
+          accumulator.set(profile.id, value);
+        }
+
+        return accumulator;
+      },
+      new Map()
+    );
+    const topInternalConnections = Array.from(internalConnectionCounts.entries())
+      .map<AdminLeaderboardItem>(([internalId, value]) => {
+        const profile =
+          internalProfiles.find((candidate) => candidate.id === internalId) ?? null;
+
+        return {
+          detail: `${value} connexion${value > 1 ? 's' : ''} sur ${getAdminAnalyticsPeriodLabel(
+            activityAnalyticsPeriod
+          ).toLocaleLowerCase('fr-FR')}`,
+          id: internalId,
+          label: profile
+            ? formatDisplayName(profile.firstName, profile.lastName)
+            : 'Interne introuvable',
+          value,
+        };
+      })
+      .sort((left, right) => right.value - left.value)
+      .slice(0, 5);
+    const seniorConnectionEventCounts = recentLoginEntries.reduce<Map<string, number>>(
+      (accumulator, entry) => {
+        if (entry.actorRole !== 'senior' || !entry.actorId) {
+          return accumulator;
+        }
+
+        accumulator.set(entry.actorId, (accumulator.get(entry.actorId) ?? 0) + 1);
+        return accumulator;
+      },
+      new Map()
+    );
+    const seniorConnectionCounts = selectableSeniors.reduce<Map<string, number>>(
+      (accumulator, senior) => {
+        if (senior.id === 'sen-other') {
+          return accumulator;
+        }
+
+        const fallbackConnectionCount =
+          senior.lastLoginAt &&
+          new Date(senior.lastLoginAt).getTime() >= analyticsPeriodStart.getTime()
+            ? 1
+            : 0;
+        const measuredConnectionCount = seniorConnectionEventCounts.get(senior.id) ?? 0;
+        const value = Math.max(fallbackConnectionCount, measuredConnectionCount);
+
+        if (value > 0) {
+          accumulator.set(senior.id, value);
+        }
+
+        return accumulator;
+      },
+      new Map()
+    );
+    const topSeniorConnections = Array.from(seniorConnectionCounts.entries())
+      .map<AdminLeaderboardItem>(([seniorId, value]) => {
+        const senior =
+          selectableSeniors.find((candidate) => candidate.id === seniorId) ?? null;
+
+        return {
+          detail: `${value} connexion${value > 1 ? 's' : ''} sur ${getAdminAnalyticsPeriodLabel(
+            activityAnalyticsPeriod
+          ).toLocaleLowerCase('fr-FR')}`,
+          id: seniorId,
+          label: senior ? formatSeniorDisplayName(senior) : 'Senior introuvable',
+          value,
+        };
+      })
+      .sort((left, right) => right.value - left.value)
+      .slice(0, 5);
+
+    return {
+      activeInternalCount: internalProfiles.filter((profile) => {
+        const lastLoginTime = profile.lastLoginAt
+          ? new Date(profile.lastLoginAt).getTime()
+          : Number.NaN;
+
+        return !Number.isNaN(lastLoginTime) && lastLoginTime >= analyticsPeriodStart.getTime();
+      }).length,
+      activeSeniorCount: selectableSeniors.filter((senior) => {
+        if (senior.id === 'sen-other') {
+          return false;
+        }
+
+        const lastLoginTime = senior.lastLoginAt
+          ? new Date(senior.lastLoginAt).getTime()
+          : Number.NaN;
+
+        return !Number.isNaN(lastLoginTime) && lastLoginTime >= analyticsPeriodStart.getTime();
+      }).length,
+      averageEvaluationDelayMs: averageNumbers(evaluationDelayValues),
+      averageRecordingDelayMs: averageNumbers(recordingDelayValues),
+      chartMax: Math.max(
+        ...activityAnalyticsBuckets.flatMap((bucket) => [
+          bucket.internalCount,
+          bucket.seniorCount,
+        ]),
+        1
+      ),
+      evaluationRate:
+        recentRecordedInterventions.length > 0
+          ? Math.round(
+              (recentEvaluatedInterventions.length / recentRecordedInterventions.length) * 100
+            )
+          : 0,
+      neverConnectedCount: relanceProfiles.filter(
+        (profile) => profile.inactiveDays == null
+      ).length,
+      recentActivityCount: recentActivityEntries.length,
+      recentDetailedActivities: visibleActivityEntries.slice(0, 24),
+      recentEvaluatedCount: recentEvaluatedInterventions.length,
+      recentRecordedCount: recentRecordedInterventions.length,
+      averageInterventionFormDurationMs: averageNumbers(interventionFormDurationValues),
+      averageInterventionFormClickCount: averageNumbers(interventionFormClickValues),
+      averageSeniorEvaluationDurationMs: averageNumbers(seniorEvaluationDurationValues),
+      averageSeniorEvaluationClickCount: averageNumbers(seniorEvaluationClickValues),
+      completedInterventionFormCount: completedInterventionFormEvents.length,
+      completedSeniorEvaluationCount: completedSeniorEvaluationEvents.length,
+      relanceProfiles,
+      topActions,
+      topInternalConnections,
+      topSeniorConnections,
+    };
+  }, [
+    activityAnalyticsBuckets,
+    activityAnalyticsPeriod,
+    activityLog,
+    adminEvaluations,
+    internalProfiles,
+    relanceWindow,
+    selectableSeniors,
+    sortedInterventions,
+  ]);
+  const hasActivityAnalyticsChartData =
+    activityAnalyticsSummary.recentActivityCount > 0;
+  const analyticsPeriodLabel = getAdminAnalyticsPeriodLabel(activityAnalyticsPeriod);
+  const relanceThresholdDays = getAdminRelanceThresholdDays(relanceWindow);
+  const relanceInternalProfiles = activityAnalyticsSummary.relanceProfiles.filter(
+    (profile) => profile.roleLabel === 'Interne'
+  );
+  const relanceSeniorProfiles = activityAnalyticsSummary.relanceProfiles.filter(
+    (profile) => profile.roleLabel === 'Senior'
+  );
+  const visibleDetailedActivities = activityAnalyticsSummary.recentDetailedActivities.slice(
+    0,
+    detailedActivitiesVisibleCount
+  );
+  const hasMoreDetailedActivities =
+    activityAnalyticsSummary.recentDetailedActivities.length >
+    detailedActivitiesVisibleCount;
+  useEffect(() => {
+    const container = homeActivityChartScrollRef.current;
+
+    if (!container || typeof window === 'undefined') {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      container.scrollLeft = Math.max(
+        0,
+        container.scrollWidth - container.clientWidth
+      );
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [activityBuckets, activityRange]);
+  useEffect(() => {
+    const container = analyticsChartScrollRef.current;
+
+    if (!container || typeof window === 'undefined') {
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      container.scrollLeft = Math.max(
+        0,
+        container.scrollWidth - container.clientWidth
+      );
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [activityAnalyticsBuckets, activityAnalyticsPeriod]);
+  useEffect(() => {
+    setDetailedActivitiesVisibleCount(ADMIN_DETAILED_ACTIVITY_PAGE_SIZE);
+  }, [activityAnalyticsSummary.recentDetailedActivities.length, activityAnalyticsPeriod]);
   const customSeniorAccounts = useMemo(
     () => customSeniors.filter((senior) => senior.isCustom),
     [customSeniors]
@@ -2035,7 +2203,6 @@ export function AdminScreen() {
           formatDisplayName(profile.firstName, profile.lastName),
           profile.loginId,
           profile.promotion,
-          profile.currentRotation,
           profile.semester,
         ]
           .join(' ')
@@ -2078,10 +2245,29 @@ export function AdminScreen() {
         : [],
     [selectedProfile, sortedInterventions]
   );
-  const selectedProfileEarnedBadges = useMemo(
-    () => (selectedProfile ? sortEarnedBadges(selectedProfile, savedInterventions) : []),
-    [savedInterventions, selectedProfile]
+  const selectedProfileAdminTrophyDisplay = useMemo(
+    () =>
+      selectedProfile
+        ? buildTrophyDisplayModels({
+            adminEvaluations,
+            customSurgicalInterventions,
+            adminTrophies,
+            profile: selectedProfile,
+            savedInterventions,
+            trophyAwards,
+          })
+        : null,
+    [
+      adminEvaluations,
+      adminTrophies,
+      customSurgicalInterventions,
+      savedInterventions,
+      selectedProfile,
+      trophyAwards,
+    ]
   );
+  const selectedProfileAllEarnedTrophies =
+    selectedProfileAdminTrophyDisplay?.earned ?? [];
 
   const selectedProfileStats = useMemo(() => {
     if (!selectedProfile) {
@@ -2090,12 +2276,14 @@ export function AdminScreen() {
 
     return {
       recordedInterventionsCount: selectedProfileInterventions.length,
-      earnedBadgesCount:
-        selectedProfileEarnedBadges.length ||
-        selectedProfile.achievementBadges?.length ||
-        0,
+      earnedTrophiesCount:
+        selectedProfileAdminTrophyDisplay?.counts.earned ?? 0,
     };
-  }, [selectedProfile, selectedProfileEarnedBadges.length, selectedProfileInterventions]);
+  }, [
+    selectedProfile,
+    selectedProfileAdminTrophyDisplay?.counts.earned,
+    selectedProfileInterventions,
+  ]);
   const selectedProfileDisplayName = selectedProfile
     ? formatDisplayName(selectedProfile.firstName, selectedProfile.lastName)
     : '';
@@ -2113,7 +2301,11 @@ export function AdminScreen() {
         (seniorItem) => seniorItem.id === intervention.seniorId
       );
       const searchHaystack = [
-        getChoiceLabel(surgicalProcedureOptions, intervention.procedure),
+        getHistoricalProcedureLabel(
+          intervention,
+          customSurgicalInterventions,
+          intervention.procedure
+        ),
         getInterventionApproachLabel(intervention),
         getInterventionIndicationLabel(intervention),
         senior ? formatSeniorDisplayName(senior) : '',
@@ -2165,8 +2357,7 @@ export function AdminScreen() {
     () =>
       selectedProfileInterventions.filter(
         (intervention) =>
-          getProfileHistoryStatus(adminEvaluations[intervention.id]) === 'evaluated' &&
-          intervention.autonomyScore != null
+          getProfileHistoryStatus(adminEvaluations[intervention.id]) === 'evaluated'
       ),
     [adminEvaluations, selectedProfileInterventions]
   );
@@ -2193,35 +2384,187 @@ export function AdminScreen() {
     1,
     Math.ceil(selectedProfileHistoryRows.length / profileHistoryPageSize)
   );
-  const selectedProfileProgressOptions = useMemo(() => {
-    const groupedOptions = selectedProfileInterventions.reduce<
-      Array<{
-        key: string;
-        label: string;
-      }>
-    >((options, intervention) => {
-      const key = `${intervention.procedure}::${intervention.approach ?? 'all'}`;
+  const selectedProfileProgressProcedureOptions = useMemo(() => {
+    const optionsByKey = new Map<string, ProfileProgressProcedureOption>();
+    const addOption = (
+      procedure: InterventionType,
+      procedureLabel: string,
+      indicationToken: string,
+      indicationLabel: string
+    ) => {
+      const normalizedLabel = indicationLabel.trim();
 
-      if (options.some((option) => option.key === key)) {
-        return options;
+      if (!normalizedLabel) {
+        return;
       }
 
-      const procedureLabel = getChoiceLabel(
-        surgicalProcedureOptions,
-        intervention.procedure
-      );
-      const approachLabel = getInterventionApproachLabel(intervention);
+      const key = `${procedure}::${indicationToken}`;
 
-      options.push({
+      if (optionsByKey.has(key)) {
+        return;
+      }
+
+      optionsByKey.set(key, {
+        indicationLabel: normalizedLabel,
+        indicationToken,
         key,
-        label: `${procedureLabel} · ${approachLabel}`,
+        label: `${procedureLabel} - ${normalizedLabel}`,
+        procedure,
+        procedureLabel,
+      });
+    };
+
+    surgicalInterventionDefinitions
+      .filter((definition) => definition.status !== 'archived')
+      .forEach((definition) => {
+        const procedureLabel = definition.name;
+        const activeIndicationOptions =
+          definition.indicationOptions?.filter(
+            (option) => option.active && option.label.trim().length > 0 && !option.isOther
+          ) ?? [];
+        const indicationLabels =
+          activeIndicationOptions.length > 0
+            ? activeIndicationOptions.map((option) => option.label.trim())
+            : definition.indications
+                .map((indication) => indication.trim())
+                .filter((indication) => indication.length > 0);
+
+        indicationLabels.forEach((indicationLabel) => {
+          addOption(
+            definition.id,
+            procedureLabel,
+            `custom:${normalizeProgressToken(indicationLabel)}`,
+            indicationLabel
+          );
+        });
       });
 
-      return options;
-    }, []);
+    selectedProfileInterventions.forEach((intervention) => {
+      addOption(
+        intervention.procedure,
+        getHistoricalProcedureLabel(
+          intervention,
+          customSurgicalInterventions,
+          intervention.procedure
+        ),
+        getInterventionIndicationToken(intervention),
+        getInterventionIndicationLabel(intervention) || 'Indication non renseignée'
+      );
+    });
 
-    return groupedOptions;
-  }, [selectedProfileInterventions, surgicalProcedureOptions]);
+    return Array.from(optionsByKey.values()).sort((left, right) =>
+      left.label.localeCompare(right.label, 'fr-FR', { sensitivity: 'base' })
+    );
+  }, [selectedProfileInterventions, surgicalInterventionDefinitions, surgicalProcedureOptions]);
+  const selectedProfileProgressProcedureOption =
+    selectedProfileProgressProcedureOptions.find(
+      (option) => option.key === profileProgressProcedureKey
+    ) ?? null;
+  const defaultProfileProgressProcedureKey = useMemo(() => {
+    const latestIntervention = [...selectedProfileInterventions].sort((left, right) =>
+      (right.savedAt ?? '').localeCompare(left.savedAt ?? '')
+    )[0];
+
+    if (!latestIntervention) {
+      return selectedProfileProgressProcedureOptions[0]?.key ?? '';
+    }
+
+    const latestIndicationToken = getInterventionIndicationToken(latestIntervention);
+
+    return (
+      selectedProfileProgressProcedureOptions.find(
+        (option) =>
+          option.procedure === latestIntervention.procedure &&
+          option.indicationToken === latestIndicationToken
+      )?.key ??
+      selectedProfileProgressProcedureOptions[0]?.key ??
+      ''
+    );
+  }, [selectedProfileInterventions, selectedProfileProgressProcedureOptions]);
+  const selectedProfileProgressApproachOptions = useMemo(() => {
+    const optionsByValue = new Map<
+      SurgicalApproach,
+      { label: string; value: SurgicalApproach }
+    >();
+    const addOption = (approach: SurgicalApproach) => {
+      if (optionsByValue.has(approach)) {
+        return;
+      }
+
+      optionsByValue.set(approach, {
+        label: getChoiceLabel(approachOptions, approach, approach),
+        value: approach,
+      });
+    };
+
+    if (!selectedProfileProgressProcedureOption) {
+      return [];
+    }
+
+    const selectedDefinition =
+      surgicalInterventionDefinitions.find(
+        (definition) => definition.id === selectedProfileProgressProcedureOption.procedure
+      ) ?? null;
+
+    selectedDefinition?.allowedApproaches.forEach(addOption);
+    selectedDefinition?.approachConfigs
+      ?.filter((config) => config.active)
+      .forEach((config) => addOption(config.approach));
+
+    selectedProfileInterventions
+      .filter((intervention) =>
+        matchesProfileProgressProcedureOption(
+          intervention,
+          selectedProfileProgressProcedureOption
+        )
+      )
+      .forEach((intervention) => {
+        if (intervention.approach) {
+          addOption(intervention.approach);
+        }
+      });
+
+    return Array.from(optionsByValue.values()).sort((left, right) =>
+      left.label.localeCompare(right.label, 'fr-FR', { sensitivity: 'base' })
+    );
+  }, [
+    selectedProfileInterventions,
+    selectedProfileProgressProcedureOption,
+    surgicalInterventionDefinitions,
+  ]);
+  const defaultProfileProgressApproach = useMemo(() => {
+    if (!selectedProfileProgressProcedureOption) {
+      return '';
+    }
+
+    const latestMatchingIntervention = [...selectedProfileInterventions]
+      .sort((left, right) =>
+        (right.savedAt ?? '').localeCompare(left.savedAt ?? '')
+      )
+      .find(
+        (intervention) =>
+          matchesProfileProgressProcedureOption(
+            intervention,
+            selectedProfileProgressProcedureOption
+          ) && intervention.approach
+      );
+    const latestApproach = latestMatchingIntervention?.approach ?? null;
+
+    if (
+      latestApproach &&
+      selectedProfileProgressApproachOptions.some(
+        (option) => option.value === latestApproach
+      )
+    ) {
+      return latestApproach;
+    }
+
+    return selectedProfileProgressApproachOptions[0]?.value ?? '';
+  }, [
+    selectedProfileInterventions,
+    selectedProfileProgressApproachOptions,
+    selectedProfileProgressProcedureOption,
+  ]);
   const selectedProfileProgressInterventions = useMemo(() => {
     const now = new Date();
     const periodStart =
@@ -2238,12 +2581,21 @@ export function AdminScreen() {
 
     return selectedProfileInterventions
       .filter((intervention) => {
-        if (profileProgressKey) {
-          const interventionKey = `${intervention.procedure}::${intervention.approach ?? 'all'}`;
+        if (
+          selectedProfileProgressProcedureOption &&
+          !matchesProfileProgressProcedureOption(
+            intervention,
+            selectedProfileProgressProcedureOption
+          )
+        ) {
+          return false;
+        }
 
-          if (interventionKey !== profileProgressKey) {
-            return false;
-          }
+        if (
+          profileProgressApproach &&
+          intervention.approach !== profileProgressApproach
+        ) {
+          return false;
         }
 
         if (!periodStart) {
@@ -2253,23 +2605,53 @@ export function AdminScreen() {
         return parseIsoDateValue(intervention.date) >= periodStart;
       })
       .sort((left, right) => left.date.localeCompare(right.date));
-  }, [profileProgressKey, profileProgressPeriod, selectedProfileInterventions]);
-  const selectedProfileProgressSeries = useMemo(
-    () =>
-      selectedProfileProgressInterventions
-        .filter(
-          (intervention) =>
-            getProfileHistoryStatus(adminEvaluations[intervention.id]) === 'evaluated' &&
-            intervention.autonomyScore != null
-        )
-        .map((intervention, index) => ({
-          id: intervention.id,
-          date: intervention.date,
-          index: index + 1,
-          score: Math.round(intervention.autonomyScore ?? 0),
-        })),
-    [adminEvaluations, selectedProfileProgressInterventions]
-  );
+  }, [
+    profileProgressApproach,
+    profileProgressPeriod,
+    selectedProfileInterventions,
+    selectedProfileProgressProcedureOption,
+  ]);
+  const selectedProfileProgressSeries = useMemo(() => {
+    const scoresByDate = selectedProfileProgressInterventions.reduce<
+      Map<string, number[]>
+    >((scores, intervention) => {
+      const evaluation = adminEvaluations[intervention.id];
+
+      if (!hasCompleteAdminEvaluation(evaluation)) {
+        return scores;
+      }
+
+      const autonomyScore = calculateAutonomyScore(
+        intervention,
+        customSurgicalInterventions,
+        evaluation
+      );
+
+      if (autonomyScore == null) {
+        return scores;
+      }
+
+      const dailyScores = scores.get(intervention.date) ?? [];
+
+      dailyScores.push(autonomyScore);
+      scores.set(intervention.date, dailyScores);
+
+      return scores;
+    }, new Map());
+
+    return Array.from(scoresByDate.entries())
+      .sort(([leftDate], [rightDate]) => leftDate.localeCompare(rightDate))
+      .map(([date, scores], index) => ({
+        date,
+        id: date,
+        index: index + 1,
+        score: Math.round(averageNumbers(scores) ?? 0),
+      }));
+  }, [
+    adminEvaluations,
+    customSurgicalInterventions,
+    selectedProfileProgressInterventions,
+  ]);
   const selectedProfileLastRecordedAt = useMemo(() => {
     const latestIntervention = [...selectedProfileProgressInterventions].sort((left, right) =>
       (right.savedAt ?? '').localeCompare(left.savedAt ?? '')
@@ -2278,93 +2660,72 @@ export function AdminScreen() {
     return latestIntervention?.savedAt ?? null;
   }, [selectedProfileProgressInterventions]);
   const selectedProfileStepRows = useMemo(() => {
-    const bucketStats = selectedProfileProgressInterventions.reduce<
-      Record<OperativeBucketId, { label: string; values: number[] }>
-    >(
-      (accumulator, intervention) => {
-        const checklistSteps = getChecklistStepsForIntervention(
-          intervention.procedure,
-          intervention.indication,
-          intervention.approach,
-          intervention.entryTechnique,
+    const stepStats = selectedProfileProgressInterventions.reduce<
+      Map<string, { label: string; order: number; values: number[] }>
+    >((accumulator, intervention) => {
+        const checklist = getAuthoritativeChecklist(
+          intervention,
+          adminEvaluations[intervention.id]
+        );
+        const checklistSteps = getHistoricalChecklistSteps(
+          intervention,
           customSurgicalInterventions
         );
 
-        checklistSteps.forEach((step) => {
+        checklistSteps.forEach((step, stepIndex) => {
           const numericValue = getChecklistLevelNumericValue(
-            intervention.checklist[step.id]
+            checklist[step.id]
           );
 
           if (numericValue == null) {
             return;
           }
 
-          const bucketId = getOperativeBucketId(step.label);
+          const normalizedStepLabel = normalizeProgressToken(step.label);
+          const currentEntry = accumulator.get(normalizedStepLabel);
+          const nextValue = Math.round((numericValue / 4) * 100);
 
-          accumulator[bucketId].values.push(Math.round((numericValue / 4) * 100));
+          if (!currentEntry) {
+            accumulator.set(normalizedStepLabel, {
+              label: step.label,
+              order: stepIndex,
+              values: [nextValue],
+            });
+            return;
+          }
+
+          currentEntry.values.push(nextValue);
+          currentEntry.order = Math.min(currentEntry.order, stepIndex);
         });
 
         return accumulator;
-      },
-      {
-        installation: { label: getOperativeBucketLabel('installation'), values: [] },
-        ouverture: { label: getOperativeBucketLabel('ouverture'), values: [] },
-        exposition: { label: getOperativeBucketLabel('exposition'), values: [] },
-        gestes: { label: getOperativeBucketLabel('gestes'), values: [] },
-        hemostase: { label: getOperativeBucketLabel('hemostase'), values: [] },
-        fermeture: { label: getOperativeBucketLabel('fermeture'), values: [] },
-        autres: { label: getOperativeBucketLabel('autres'), values: [] },
-      }
-    );
+      }, new Map());
 
-    return (Object.entries(bucketStats) as Array<
-      [OperativeBucketId, { label: string; values: number[] }]
-    >)
+    return Array.from(stepStats.entries())
       .filter(([, value]) => value.values.length > 0)
-      .map(([bucketId, value]) => ({
-        id: bucketId,
+      .map(([stepKey, value]) => ({
+        id: stepKey,
         label: value.label,
+        order: value.order,
         score: Math.round(averageNumbers(value.values) ?? 0),
         sampleSize: value.values.length,
         tone: getSeniorStepTone(Math.round(averageNumbers(value.values) ?? 0)),
       }))
       .sort(
         (left, right) =>
-          getOperativeBucketOrder(left.id) - getOperativeBucketOrder(right.id)
+          left.order - right.order || left.label.localeCompare(right.label, 'fr-FR')
       );
   }, [customSurgicalInterventions, selectedProfileProgressInterventions]);
-  const customInterventionNeedsEntryTechnique =
-    surgicalInterventionForm.allowedApproaches.includes('coelioscopie') ||
-    surgicalInterventionForm.allowedApproaches.includes('robot');
-  const automaticChecklistStepLabels = getAutomaticChecklistStepLabels(
-    surgicalInterventionForm.allowedApproaches
-  );
-  const previewChecklistStepLabels = getOrderedChecklistLabels([
-    ...automaticChecklistStepLabels,
-    ...surgicalInterventionForm.customChecklistSteps,
-  ], surgicalInterventionForm.stepOrderLabels);
-  const isEditingSurgicalIntervention = editingSurgicalInterventionId !== null;
   const selectedEvaluationIntervention =
     sortedInterventions.find(
-      (intervention) =>
-        intervention.id === selectedEvaluationInterventionId &&
-        (!isSenior || intervention.seniorId === selectedSenior?.id)
+      (intervention) => intervention.id === selectedEvaluationInterventionId
     ) ?? null;
   const selectedEvaluationInternal = selectedEvaluationIntervention
     ? getInternalById(selectedEvaluationIntervention.internalId, internalProfiles)
     : null;
-  const selectedEvaluationDefinition = selectedEvaluationIntervention
-    ? getSurgicalInterventionDefinition(
-        selectedEvaluationIntervention.procedure,
-        customSurgicalInterventions
-      )
-    : undefined;
   const selectedEvaluationChecklistSteps = selectedEvaluationIntervention
-    ? getChecklistStepsForIntervention(
-        selectedEvaluationIntervention.procedure,
-        selectedEvaluationIntervention.indication,
-        selectedEvaluationIntervention.approach,
-        selectedEvaluationIntervention.entryTechnique,
+    ? getHistoricalChecklistSteps(
+        selectedEvaluationIntervention,
         customSurgicalInterventions
       )
     : [];
@@ -2377,9 +2738,11 @@ export function AdminScreen() {
       return [];
     }
 
+    const authoritativeChecklist =
+      selectedEvaluation?.checklist ?? selectedEvaluationIntervention.checklist;
     const baseLevels: ChecklistLevel[] = ['0', '1', '2', '3', '4'];
     const hasNonApplicableStep = selectedEvaluationChecklistSteps.some(
-      (step) => selectedEvaluationIntervention.checklist[step.id] === 'NA'
+      (step) => authoritativeChecklist[step.id] === 'NA'
     );
     const levels = hasNonApplicableStep
       ? (['NA', ...baseLevels] as ChecklistLevel[])
@@ -2388,23 +2751,27 @@ export function AdminScreen() {
     return levels.map((level) => ({
       level,
       steps: selectedEvaluationChecklistSteps.filter(
-        (step) => selectedEvaluationIntervention.checklist[step.id] === level
+        (step) => authoritativeChecklist[step.id] === level
       ),
     }));
-  }, [selectedEvaluationChecklistSteps, selectedEvaluationIntervention]);
-
+  }, [
+    selectedEvaluation?.checklist,
+    selectedEvaluationChecklistSteps,
+    selectedEvaluationIntervention,
+  ]);
   useEffect(() => {
     if (!selectedEvaluationInterventionId) {
       return;
     }
 
     setEvaluationDraft({
+      checklist: selectedEvaluation?.checklist ?? {},
       globalPerformance: selectedEvaluation?.globalPerformance ?? null,
       categoryDifficulty: selectedEvaluation?.categoryDifficulty ?? null,
       seniorComment: selectedEvaluation?.seniorComment ?? '',
     });
-    setIsAutoEvaluationOpen(false);
   }, [
+    selectedEvaluation?.checklist,
     selectedEvaluation?.categoryDifficulty,
     selectedEvaluation?.globalPerformance,
     selectedEvaluation?.seniorComment,
@@ -2434,36 +2801,54 @@ export function AdminScreen() {
 
   useEffect(() => {
     if (
-      profileProgressKey &&
-      !selectedProfileProgressOptions.some((option) => option.key === profileProgressKey)
+      profileProgressProcedureKey &&
+      !selectedProfileProgressProcedureOptions.some(
+        (option) => option.key === profileProgressProcedureKey
+      )
     ) {
-      setProfileProgressKey(selectedProfileProgressOptions[0]?.key ?? '');
+      setProfileProgressProcedureKey(defaultProfileProgressProcedureKey);
       return;
     }
 
-    if (!profileProgressKey && selectedProfileProgressOptions.length > 0) {
-      setProfileProgressKey(selectedProfileProgressOptions[0].key);
+    if (
+      !profileProgressProcedureKey &&
+      selectedProfileProgressProcedureOptions.length > 0
+    ) {
+      setProfileProgressProcedureKey(defaultProfileProgressProcedureKey);
     }
-  }, [profileProgressKey, selectedProfileProgressOptions]);
+  }, [
+    defaultProfileProgressProcedureKey,
+    profileProgressProcedureKey,
+    selectedProfileProgressProcedureOptions,
+  ]);
 
-  const getCurrentActor = () => {
-    if (isSenior && selectedSenior) {
-      return {
-        role: 'senior' as const,
-        label: formatSeniorDisplayName(selectedSenior),
-      };
+  useEffect(() => {
+    if (
+      profileProgressApproach &&
+      !selectedProfileProgressApproachOptions.some(
+        (option) => option.value === profileProgressApproach
+      )
+    ) {
+      setProfileProgressApproach(defaultProfileProgressApproach);
+      return;
     }
 
-    return {
-      role: 'admin' as const,
-      label: 'Admin',
-    };
-  };
+    if (!profileProgressApproach && selectedProfileProgressApproachOptions.length > 0) {
+      setProfileProgressApproach(defaultProfileProgressApproach);
+    }
+  }, [
+    defaultProfileProgressApproach,
+    profileProgressApproach,
+    selectedProfileProgressApproachOptions,
+  ]);
 
   const openProfileStats = (
     profile: InternalProfile,
     source: AdminProfileViewSource
   ) => {
+    setProfileStatsTab('progress');
+    setProfileProgressProcedureKey('');
+    setProfileProgressApproach('');
     setSelectedProfileId(profile.id);
     setSelectedProfileViewSource(source);
     setView('profile');
@@ -2472,39 +2857,6 @@ export function AdminScreen() {
       'Interne',
       formatDisplayName(profile.firstName, profile.lastName)
     );
-  };
-
-  const handleSubmitTestFeedback = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    const message = testFeedbackMessage.trim();
-
-    if (!message) {
-      setTestFeedbackStatus({
-        kind: 'error',
-        message: 'Ajoute une remarque avant de l’envoyer.',
-      });
-      return;
-    }
-
-    const actor = getCurrentActor();
-
-    setTestFeedbackItems((current) => [
-      {
-        id: `feedback-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-        message,
-        authorRole: actor.role,
-        authorLabel: actor.label,
-        createdAt: new Date().toISOString(),
-      },
-      ...current,
-    ]);
-    recordActivity('Remarque de test envoyée', 'Remarque', message);
-    setTestFeedbackMessage('');
-    setTestFeedbackStatus({
-      kind: 'success',
-      message: 'Remarque enregistrée. Merci, c’est exactement le carburant du pilote.',
-    });
   };
 
   const toggleSelection = (interventionId: string) => {
@@ -2527,16 +2879,89 @@ export function AdminScreen() {
     });
   };
 
-  const openEvaluationTool = (interventionId: string) => {
-    if (!isSenior) {
+  const startSeniorEvaluationAnalyticsSession = (interventionId: string) => {
+    seniorEvaluationAnalyticsSessionRef.current = {
+      clickCount: 1,
+      interventionId,
+      sessionId: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      startedAt: new Date().toISOString(),
+    };
+  };
+
+  const cancelSeniorEvaluationAnalyticsSession = () => {
+    seniorEvaluationAnalyticsSessionRef.current = null;
+  };
+
+  const registerSeniorEvaluationInteraction = () => {
+    const currentSession = seniorEvaluationAnalyticsSessionRef.current;
+
+    if (!currentSession) {
       return;
     }
 
+    seniorEvaluationAnalyticsSessionRef.current = {
+      ...currentSession,
+      clickCount: currentSession.clickCount + 1,
+    };
+  };
+
+  const completeSeniorEvaluationAnalyticsSession = () => {
+    const currentSession = seniorEvaluationAnalyticsSessionRef.current;
+
+    if (!currentSession) {
+      return;
+    }
+
+    const completedAt = new Date().toISOString();
+    const durationMs =
+      new Date(completedAt).getTime() - new Date(currentSession.startedAt).getTime();
+
+    if (!Number.isNaN(durationMs) && durationMs >= 0) {
+      recordActivity(
+        'Mesure senior du formulaire évaluation',
+        'Analytics',
+        selectedEvaluationIntervention
+          ? formatSeniorInterventionLabel(
+              getChoiceLabel(
+                surgicalProcedureOptions,
+                selectedEvaluationIntervention.procedure
+              ),
+              selectedEvaluationIntervention.procedure,
+              selectedEvaluationIntervention.approach
+            )
+          : 'Évaluation senior',
+        {
+          clickCount: currentSession.clickCount,
+          completedAt,
+          durationMs,
+          kind: 'senior_evaluation',
+          sessionId: currentSession.sessionId,
+        }
+      );
+    }
+
+    seniorEvaluationAnalyticsSessionRef.current = null;
+  };
+
+  const openEvaluationTool = (interventionId: string) => {
+    const intervention =
+      sortedInterventions.find((item) => item.id === interventionId) ?? null;
+    const checklistSteps = intervention
+      ? getHistoricalChecklistSteps(intervention, customSurgicalInterventions)
+      : [];
+    const existingChecklist = adminEvaluations[interventionId]?.checklist ?? {};
+    const initialStepId =
+      checklistSteps.find((step) => existingChecklist[step.id] == null)?.id ??
+      checklistSteps[0]?.id ??
+      null;
+
+    startSeniorEvaluationAnalyticsSession(interventionId);
+    setActiveEvaluationChecklistStepId(initialStepId);
     setSelectedEvaluationInterventionId(interventionId);
     setEvaluationFeedback(null);
   };
 
-  const updateAdminEvaluation = (
+  const updateAdminEvaluation = async (
     field: 'globalPerformance' | 'categoryDifficulty',
     value: AdminPerformanceRating | AdminCategoryDifficultyRating
   ) => {
@@ -2546,43 +2971,52 @@ export function AdminScreen() {
 
     const timestamp = new Date().toISOString();
 
-    setAdminEvaluations((current) => {
-      const currentEvaluation = current[selectedEvaluationIntervention.id] ?? {
+    const currentEvaluation = adminEvaluations[selectedEvaluationIntervention.id] ?? {
         interventionId: selectedEvaluationIntervention.id,
+        checklist: selectedEvaluationIntervention.checklist,
         globalPerformance: null,
         categoryDifficulty: null,
         seniorComment: '',
         updatedAt: null,
       };
-      const nextEvaluation = {
-        ...currentEvaluation,
-        [field]: value,
-        updatedAt: timestamp,
-      };
-      const nextAutonomyScore = calculateAutonomyScore(
-        selectedEvaluationIntervention,
-        customSurgicalInterventions,
-        nextEvaluation
-      );
-
-      updateSavedInterventionAutonomyScore(
-        selectedEvaluationIntervention.id,
-        nextAutonomyScore
-      );
-
-      return {
-        ...current,
-        [selectedEvaluationIntervention.id]: nextEvaluation,
-      };
-    });
-    setEvaluationFeedback({
-      kind: 'success',
-      message: 'Évaluation administrateur enregistrée.',
-    });
+    const nextEvaluation = {
+      ...currentEvaluation,
+      [field]: value,
+      updatedAt: timestamp,
+    };
+    try {
+      await saveSeniorEvaluation(nextEvaluation);
+      setEvaluationFeedback({
+        kind: 'success',
+        message: 'Évaluation administrateur enregistrée.',
+      });
+    } catch (error) {
+      setEvaluationFeedback({
+        kind: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'L’évaluation n’a pas pu être enregistrée.',
+      });
+    }
   };
 
-  const handleValidateSeniorEvaluation = () => {
+  const handleValidateSeniorEvaluation = async () => {
     if (!selectedEvaluationIntervention) {
+      return;
+    }
+
+    const missingChecklistSteps = selectedEvaluationChecklistSteps.filter(
+      (step) => evaluationDraft.checklist[step.id] == null
+    );
+
+    if (missingChecklistSteps.length > 0) {
+      setEvaluationFeedback({
+        kind: 'error',
+        message: `Complétez la checklist Senior (${missingChecklistSteps.length} étape${
+          missingChecklistSteps.length > 1 ? 's' : ''
+        } restante${missingChecklistSteps.length > 1 ? 's' : ''}).`,
+      });
       return;
     }
 
@@ -2597,25 +3031,30 @@ export function AdminScreen() {
     const timestamp = new Date().toISOString();
     const nextEvaluation: AdminInterventionEvaluation = {
       interventionId: selectedEvaluationIntervention.id,
+      checklist: selectedEvaluationChecklistSteps.reduce<
+        Record<string, ChecklistLevel | null>
+      >((checklist, step) => {
+        checklist[step.id] = evaluationDraft.checklist[step.id] ?? null;
+        return checklist;
+      }, {}),
       globalPerformance: evaluationDraft.globalPerformance,
       categoryDifficulty: evaluationDraft.categoryDifficulty,
       seniorComment: evaluationDraft.seniorComment.trim(),
       updatedAt: timestamp,
     };
-    const nextAutonomyScore = calculateAutonomyScore(
-      selectedEvaluationIntervention,
-      customSurgicalInterventions,
-      nextEvaluation
-    );
+    try {
+      await saveSeniorEvaluation(nextEvaluation);
+    } catch (error) {
+      setEvaluationFeedback({
+        kind: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'L’évaluation n’a pas pu être enregistrée.',
+      });
+      return;
+    }
 
-    setAdminEvaluations((current) => ({
-      ...current,
-      [selectedEvaluationIntervention.id]: nextEvaluation,
-    }));
-    updateSavedInterventionAutonomyScore(
-      selectedEvaluationIntervention.id,
-      nextAutonomyScore
-    );
     setEvaluationFeedback({
       kind: 'success',
       message: 'Évaluation senior validée.',
@@ -2630,6 +3069,7 @@ export function AdminScreen() {
         )
       );
     }
+    completeSeniorEvaluationAnalyticsSession();
     setSelectedEvaluationInterventionId(null);
   };
 
@@ -2653,6 +3093,94 @@ export function AdminScreen() {
       [field]: value,
     }));
     setSeniorFeedback(null);
+  };
+
+  const handleSaveInstitution = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const name = institutionName.trim();
+
+    if (!name) {
+      setInstitutionFeedback({
+        kind: 'error',
+        message: 'Le nom officiel de l’établissement est obligatoire.',
+      });
+      return;
+    }
+
+    try {
+      if (editingInstitutionId) {
+        const currentInstitution = institutions.find(
+          (institution) => institution.id === editingInstitutionId
+        );
+
+        if (!currentInstitution) {
+          throw new Error('Cet établissement est introuvable.');
+        }
+
+        await renameInstitution(
+          currentInstitution.id,
+          name,
+          currentInstitution.version
+        );
+        setInstitutionFeedback({
+          kind: 'success',
+          message: 'L’établissement a été renommé sans modifier ses rattachements.',
+        });
+      } else {
+        await createInstitution(name);
+        setInstitutionFeedback({
+          kind: 'success',
+          message: 'L’établissement officiel a bien été créé.',
+        });
+      }
+
+      setEditingInstitutionId(null);
+      setInstitutionName('');
+    } catch (error) {
+      setInstitutionFeedback({
+        kind: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'L’établissement n’a pas pu être enregistré.',
+      });
+    }
+  };
+
+  const handleArchiveInstitution = async (institutionId: string) => {
+    const institution = institutions.find(
+      (candidate) => candidate.id === institutionId
+    );
+
+    if (!institution) {
+      return;
+    }
+
+    if (
+      !window.confirm(
+        `Archiver « ${institution.name} » ? Les comptes déjà rattachés conserveront leur historique, mais cet établissement ne pourra plus être choisi pour une nouvelle affectation.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await archiveInstitution(institution.id, institution.version);
+      setEditingInstitutionId(null);
+      setInstitutionName('');
+      setInstitutionFeedback({
+        kind: 'success',
+        message: 'L’établissement a été archivé et son historique est conservé.',
+      });
+    } catch (error) {
+      setInstitutionFeedback({
+        kind: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'L’établissement n’a pas pu être archivé.',
+      });
+    }
   };
 
   const resetInternalEditor = () => {
@@ -2687,12 +3215,11 @@ export function AdminScreen() {
     setEditingSeniorId(null);
     setCreateForm({
       firstName: profile.firstName,
+      institutionId: profile.institutionId ?? '',
       lastName: profile.lastName,
       loginId: profile.loginId,
-      password: profile.password,
       promotion: profile.promotion,
       semester: profile.semester,
-      currentRotation: profile.currentRotation,
     });
     setEditingInternalProfileId(profile.id);
     setFeedback(null);
@@ -2704,9 +3231,9 @@ export function AdminScreen() {
     setEditingInternalProfileId(null);
     setCreateSeniorForm({
       firstName: senior.firstName,
+      institutionId: senior.institutionId ?? '',
       lastName: senior.lastName,
       loginId: senior.loginId ?? '',
-      password: senior.password ?? '',
     });
     setEditingSeniorId(senior.id);
     setSeniorFeedback(null);
@@ -2715,10 +3242,6 @@ export function AdminScreen() {
 
   const startSeniorCredentialsEdition = (senior: Senior) => {
     startSeniorEdition(senior);
-    setCreateSeniorForm((current) => ({
-      ...current,
-      password: '',
-    }));
     setSeniorAccountFeedback(null);
   };
 
@@ -2733,338 +3256,157 @@ export function AdminScreen() {
     setSeniorAccountFeedback(null);
   };
 
-  const toggleSurgicalApproach = (approach: SurgicalApproach) => {
-    setSurgicalInterventionForm((current) => {
-      const allowedApproaches = current.allowedApproaches.includes(approach)
-        ? current.allowedApproaches.filter((value) => value !== approach)
-        : [...current.allowedApproaches, approach];
-      const needsEntryTechnique =
-        allowedApproaches.includes('coelioscopie') ||
-        allowedApproaches.includes('robot');
-
-      return {
-        ...current,
-        allowedApproaches,
-        allowedEntryTechniques: needsEntryTechnique
-          ? current.allowedEntryTechniques
-          : [],
-        stepApproachLabels: Object.fromEntries(
-          Object.entries(current.stepApproachLabels).map(
-            ([stepLabel, approaches]) => [
-              stepLabel,
-              approaches.filter((value) => allowedApproaches.includes(value)),
-            ]
-          )
-        ),
-      };
-    });
-    setSurgicalInterventionFeedback(null);
-  };
-
-  const toggleEntryTechnique = (entryTechnique: EntryTechnique) => {
-    setSurgicalInterventionForm((current) => ({
-      ...current,
-      allowedEntryTechniques: current.allowedEntryTechniques.includes(entryTechnique)
-        ? current.allowedEntryTechniques.filter((value) => value !== entryTechnique)
-        : [...current.allowedEntryTechniques, entryTechnique],
-    }));
-    setSurgicalInterventionFeedback(null);
-  };
-
-  const updateSurgicalIndication = (index: number, value: string) => {
-    setSurgicalInterventionForm((current) => ({
-      ...current,
-      indications: current.indications.map((indication, indicationIndex) =>
-        indicationIndex === index ? value : indication
-      ),
-    }));
-    setSurgicalInterventionFeedback(null);
-  };
-
-  const addSurgicalIndication = () => {
-    setSurgicalInterventionForm((current) => ({
-      ...current,
-      indications: [...current.indications, ''],
-    }));
-  };
-
-  const removeSurgicalIndication = (index: number) => {
-    setSurgicalInterventionForm((current) => ({
-      ...current,
-      indications:
-        current.indications.length === 1
-          ? ['']
-          : current.indications.filter(
-              (_indication, indicationIndex) => indicationIndex !== index
-            ),
-    }));
-    setSurgicalInterventionFeedback(null);
-  };
-
-  const updateCustomChecklistStep = (index: number, value: string) => {
-    setSurgicalInterventionForm((current) => ({
-      ...current,
-      customChecklistSteps: current.customChecklistSteps.map((step, stepIndex) =>
-        stepIndex === index ? value : step
-      ),
-      stepApproachLabels: (() => {
-        const previousLabel = current.customChecklistSteps[index]?.trim();
-        const nextLabel = value.trim();
-
-        if (
-          !previousLabel ||
-          !nextLabel ||
-          previousLabel === nextLabel ||
-          !Object.prototype.hasOwnProperty.call(
-            current.stepApproachLabels,
-            previousLabel
-          )
-        ) {
-          return current.stepApproachLabels;
-        }
-
-        const nextStepApproachLabels = { ...current.stepApproachLabels };
-        nextStepApproachLabels[nextLabel] = nextStepApproachLabels[previousLabel];
-        delete nextStepApproachLabels[previousLabel];
-
-        return nextStepApproachLabels;
-      })(),
-    }));
-    setSurgicalInterventionFeedback(null);
-  };
-
-  const moveChecklistStepLabel = (sourceLabel: string, targetLabel: string) => {
-    if (sourceLabel === targetLabel) {
-      return;
-    }
-
-    setSurgicalInterventionForm((current) => {
-      const currentStepLabels = getOrderedChecklistLabels(
-        [
-          ...getAutomaticChecklistStepLabels(current.allowedApproaches),
-          ...current.customChecklistSteps,
-        ],
-        current.stepOrderLabels
-      );
-      const sourceIndex = currentStepLabels.indexOf(sourceLabel);
-      const targetIndex = currentStepLabels.indexOf(targetLabel);
-
-      if (sourceIndex === -1 || targetIndex === -1) {
-        return current;
-      }
-
-      const nextStepLabels = [...currentStepLabels];
-      const [movedLabel] = nextStepLabels.splice(sourceIndex, 1);
-      nextStepLabels.splice(targetIndex, 0, movedLabel);
-
-      return {
-        ...current,
-        stepOrderLabels: nextStepLabels,
-      };
-    });
-    setSurgicalInterventionFeedback(null);
-  };
-
-  const addCustomChecklistStep = () => {
-    setSurgicalInterventionForm((current) => ({
-      ...current,
-      customChecklistSteps: [...current.customChecklistSteps, ''],
-    }));
-  };
-
-  const removeCustomChecklistStep = (index: number) => {
-    setSurgicalInterventionForm((current) => {
-      const removedStepLabel = current.customChecklistSteps[index]?.trim();
-      const nextStepApproachLabels = { ...current.stepApproachLabels };
-
-      if (removedStepLabel) {
-        delete nextStepApproachLabels[removedStepLabel];
-      }
-
-      return {
-        ...current,
-        customChecklistSteps: current.customChecklistSteps.filter(
-          (_step, stepIndex) => stepIndex !== index
-        ),
-        keyStepLabels: removedStepLabel
-          ? current.keyStepLabels.filter((label) => label !== removedStepLabel)
-          : current.keyStepLabels,
-        stepOrderLabels: removedStepLabel
-          ? current.stepOrderLabels.filter((label) => label !== removedStepLabel)
-          : current.stepOrderLabels,
-        stepApproachLabels: nextStepApproachLabels,
-      };
-    });
-  };
-
-  const toggleKeyStepLabel = (label: string) => {
-    setSurgicalInterventionForm((current) => ({
-      ...current,
-      keyStepLabels: current.keyStepLabels.includes(label)
-        ? current.keyStepLabels.filter((value) => value !== label)
-        : [...current.keyStepLabels, label],
-    }));
-    setSurgicalInterventionFeedback(null);
-  };
-
-  const setStepApplicableToAllApproaches = (label: string) => {
-    setSurgicalInterventionForm((current) => ({
-      ...current,
-      stepApproachLabels: {
-        ...current.stepApproachLabels,
-        [label]: [],
-      },
-    }));
-    setSurgicalInterventionFeedback(null);
-  };
-
-  const toggleStepApplicableApproach = (
-    label: string,
-    approach: SurgicalApproach
-  ) => {
-    setSurgicalInterventionForm((current) => {
-      const currentApproaches = getStepApproachLabels(label, current);
-      const nextApproaches = currentApproaches.includes(approach)
-        ? currentApproaches.filter((value) => value !== approach)
-        : [...currentApproaches, approach];
-      const normalizedApproaches = nextApproaches.filter((value) =>
-        current.allowedApproaches.includes(value)
-      );
-
-      return {
-        ...current,
-        stepApproachLabels: {
-          ...current.stepApproachLabels,
-          [label]: normalizedApproaches,
-        },
-      };
-    });
-    setSurgicalInterventionFeedback(null);
-  };
-
-  const handleEditSurgicalIntervention = (
-    intervention: SurgicalInterventionDefinition
-  ) => {
-    const stepLabels = intervention.checklistSteps.map((step) => step.label);
-    const automaticStepLabelsForIntervention = getAutomaticChecklistStepLabels(
-      intervention.allowedApproaches
-    );
-    const automaticStepLabelSet = new Set(automaticStepLabelsForIntervention);
-    const editableStepLabels = stepLabels.filter(
-      (stepLabel) => !automaticStepLabelSet.has(stepLabel)
-    );
-
-    setSurgicalInterventionForm({
-      name: intervention.name,
-      indications: intervention.indications.length ? intervention.indications : [''],
-      allowedApproaches: intervention.allowedApproaches,
-      allowedEntryTechniques: intervention.allowedEntryTechniques,
-      requiresLaterality: intervention.requiresLaterality,
-      customChecklistSteps: editableStepLabels.length ? editableStepLabels : [''],
-      keyStepLabels: getInterventionKeyStepLabels(intervention),
-      stepOrderLabels: stepLabels,
-      stepApproachLabels: Object.fromEntries(
-        intervention.checklistSteps.map((step) => [
-          step.label,
-          step.applicableApproaches ?? [],
-        ])
-      ),
-    });
-    setEditingSurgicalInterventionId(intervention.id);
-    setShowSurgicalInterventionList(false);
-    setSurgicalInterventionFeedback({
-      kind: 'success',
-      message: `${intervention.name} est prête à être modifiée.`,
-    });
-  };
-
-  const cancelSurgicalInterventionEdition = () => {
-    setSurgicalInterventionForm(EMPTY_SURGICAL_INTERVENTION_FORM);
-    setEditingSurgicalInterventionId(null);
-    setSurgicalInterventionFeedback(null);
-  };
-
-  const handleCreateProfile = (event: FormEvent<HTMLFormElement>) => {
+  const handleCreateProfile = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    const result =
+    const result = await (
       editingInternalProfileId != null
         ? updateInternalProfile(editingInternalProfileId, createForm)
-        : createInternalProfile(createForm);
+        : createInternalProfile(createForm)
+    );
 
     setFeedback({
       kind: result.success ? 'success' : 'error',
-      message: result.success && result.profile
-        ? `${result.message} Identifiant : ${result.profile.loginId} · Mot de passe : ${result.profile.password}`
-        : result.message,
+      message: result.message,
     });
 
     if (!result.success) {
       return;
+    }
+
+    if (result.accessKey && result.profile) {
+      setRevealedAccessKey({
+        accessKey: result.accessKey,
+        userLabel: formatDisplayName(
+          result.profile.firstName,
+          result.profile.lastName
+        ),
+      });
     }
 
     setEditingInternalProfileId(null);
     setCreateForm(EMPTY_CREATE_FORM);
   };
 
-  const handleCreateSeniorProfile = (event: FormEvent<HTMLFormElement>) => {
+  const handleCreateSeniorProfile = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSeniorAccountFeedback(null);
 
-    const result =
+    const result = await (
       editingSeniorId != null
         ? updateSeniorProfile(editingSeniorId, createSeniorForm)
-        : createSeniorProfile(createSeniorForm);
+        : createSeniorProfile(createSeniorForm)
+    );
 
     setSeniorFeedback({
       kind: result.success ? 'success' : 'error',
-      message: result.success && result.senior
-        ? `${result.message} Identifiant : ${result.senior.loginId} · Mot de passe : ${result.senior.password}`
-        : result.message,
+      message: result.message,
     });
 
     if (!result.success) {
       return;
     }
 
+    if (result.accessKey && result.senior) {
+      setRevealedAccessKey({
+        accessKey: result.accessKey,
+        userLabel: formatSeniorDisplayName(result.senior),
+      });
+    }
+
     setEditingSeniorId(null);
     setCreateSeniorForm(EMPTY_CREATE_SENIOR_FORM);
   };
 
-  const handlePrepareInternalPasswordReset = (profile: InternalProfile) => {
-    startInternalEdition(profile);
-    setCreateForm((current) => ({
-      ...current,
-      password: '',
-    }));
-    setFeedback({
-      kind: 'success',
-      message:
-        'Saisissez un nouveau mot de passe temporaire dans le panneau de droite puis enregistrez la modification.',
-    });
+  const handleRegenerateAccessKey = async (
+    profile: InternalProfile | Senior
+  ) => {
+    if (!profile.version) {
+      const nextFeedback = {
+        kind: 'error',
+        message: 'Rechargez les données avant de régénérer cette clé.',
+      } as const;
+
+      if ('semester' in profile) {
+        setFeedback(nextFeedback);
+      } else {
+        setSeniorFeedback(nextFeedback);
+      }
+      return;
+    }
+
+    const userLabel = formatDisplayName(profile.firstName, profile.lastName);
+
+    if (
+      !window.confirm(
+        `Régénérer la clé d’accès de ${userLabel} ? L’ancienne clé deviendra immédiatement invalide.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const result = await regenerateAccessKey(profile.id, profile.version);
+      setRevealedAccessKey({
+        accessKey: result.accessKey,
+        userLabel,
+      });
+      const nextFeedback = {
+        kind: result.auditWarning ? 'error' : 'success',
+        message:
+          result.auditWarning ??
+          'La nouvelle clé est prête. Copiez-la maintenant : elle ne sera plus affichée ensuite.',
+      } as const;
+
+      if ('semester' in profile) {
+        setFeedback(nextFeedback);
+      } else {
+        setSeniorFeedback(nextFeedback);
+      }
+    } catch (error) {
+      const nextFeedback = {
+        kind: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Impossible de régénérer cette clé d’accès.',
+      } as const;
+
+      if ('semester' in profile) {
+        setFeedback(nextFeedback);
+      } else {
+        setSeniorFeedback(nextFeedback);
+      }
+    }
   };
 
-  const handlePrepareSeniorPasswordReset = (senior: Senior) => {
-    startSeniorEdition(senior);
-    setCreateSeniorForm((current) => ({
-      ...current,
-      password: '',
-    }));
-    setSeniorFeedback({
-      kind: 'success',
-      message:
-        'Saisissez un nouveau mot de passe temporaire dans le panneau de droite puis enregistrez la modification.',
-    });
+  const handleCopyAccessKey = async () => {
+    if (!revealedAccessKey) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(revealedAccessKey.accessKey);
+      setFeedback({
+        kind: 'success',
+        message: 'La clé d’accès a été copiée dans le presse-papiers.',
+      });
+    } catch {
+      setFeedback({
+        kind: 'error',
+        message: 'La copie automatique a échoué. Sélectionnez la clé manuellement.',
+      });
+    }
   };
 
-  const handleUpdateSeniorCredentials = (
+  const handleUpdateSeniorCredentials = async (
     event: FormEvent<HTMLFormElement>,
     seniorId: string
   ) => {
     event.preventDefault();
     setSeniorFeedback(null);
 
-    const result = updateSeniorCredentials(
+    const result = await updateSeniorCredentials(
       seniorId,
       {
         ...editSeniorCredentialsForm,
@@ -3074,9 +3416,7 @@ export function AdminScreen() {
 
     setSeniorAccountFeedback({
       kind: result.success ? 'success' : 'error',
-      message: result.success && result.senior
-        ? `${result.message} Identifiant : ${result.senior.loginId} · Mot de passe : ${result.senior.password}`
-        : result.message,
+      message: result.message,
     });
 
     if (!result.success) {
@@ -3087,7 +3427,7 @@ export function AdminScreen() {
     setEditSeniorCredentialsForm(EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM);
   };
 
-  const handleDeleteSeniorProfile = (senior: Senior) => {
+  const handleDeleteSeniorProfile = async (senior: Senior) => {
     const seniorLabel = formatSeniorDisplayName(senior);
     const confirmed = window.confirm(
       `Supprimer le compte senior ${seniorLabel} ?`
@@ -3097,48 +3437,21 @@ export function AdminScreen() {
       return;
     }
 
-    deleteSeniorProfile(senior.id);
-    setEditingSeniorId((current) => (current === senior.id ? null : current));
-    setEditSeniorCredentialsForm(EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM);
-    setSeniorFeedback(null);
-    setSeniorAccountFeedback({
-      kind: 'success',
-      message: `Le compte senior ${seniorLabel} a été supprimé.`,
-    });
-  };
-
-  const handleCreateSurgicalIntervention = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    const validKeyStepLabels = surgicalInterventionForm.keyStepLabels.filter((label) =>
-      previewChecklistStepLabels.includes(label)
-    );
-    const payload = {
-      ...surgicalInterventionForm,
-      indications: normalizeLabels(surgicalInterventionForm.indications),
-      customChecklistSteps: normalizeLabels(
-        surgicalInterventionForm.customChecklistSteps
-      ),
-      keyStepLabels: validKeyStepLabels,
-      stepOrderLabels: previewChecklistStepLabels,
-    };
-    const result =
-      editingSurgicalInterventionId !== null
-        ? updateSurgicalIntervention(editingSurgicalInterventionId, payload)
-        : createSurgicalIntervention(payload);
-
-    setSurgicalInterventionFeedback({
-      kind: result.success ? 'success' : 'error',
-      message: result.message,
-    });
-
-    if (!result.success) {
-      return;
+    try {
+      await deleteSeniorProfile(senior.id);
+      setEditingSeniorId((current) => (current === senior.id ? null : current));
+      setEditSeniorCredentialsForm(EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM);
+      setSeniorFeedback(null);
+      setSeniorAccountFeedback({
+        kind: 'success',
+        message: `Le compte senior ${seniorLabel} a été supprimé.`,
+      });
+    } catch (error) {
+      setSeniorAccountFeedback({
+        kind: 'error',
+        message: error instanceof Error ? error.message : 'Suppression impossible.',
+      });
     }
-
-    setSurgicalInterventionForm(EMPTY_SURGICAL_INTERVENTION_FORM);
-    setEditingSurgicalInterventionId(null);
-    setShowSurgicalInterventionList(true);
   };
 
   const handleInterventionFilterChange = (
@@ -3153,8 +3466,18 @@ export function AdminScreen() {
 
   const handleAdminSupportClick = () => {
     if (typeof window !== 'undefined') {
-      window.location.href =
-        'mailto:support@chu-nantes.fr?subject=Support%20espace%20administrateur';
+      window.location.href = buildSupportMailto({
+        body: [
+          'Bonjour,',
+          '',
+          'Je rencontre le problème suivant :',
+          '',
+          '[Décrivez votre demande ici]',
+          '',
+          'Espace : Administrateur',
+        ].join('\n'),
+        subject: 'Support espace administrateur',
+      });
     }
   };
 
@@ -3183,7 +3506,23 @@ export function AdminScreen() {
       return;
     }
 
-    setTrophyDraft(ensureTrophyDefinitionShape(existingTrophy));
+    const editableDefinition = existingTrophy.pendingDraft
+      ? {
+          ...existingTrophy.pendingDraft,
+          draftBaseVersion: existingTrophy.draftBaseVersion ?? null,
+          draftVersion: existingTrophy.draftVersion ?? null,
+          id: existingTrophy.id,
+          version: existingTrophy.version,
+          everActivated: existingTrophy.everActivated,
+          activatedAt: existingTrophy.activatedAt,
+        }
+      : {
+          ...existingTrophy,
+          pendingDraft: null,
+          status: 'draft' as const,
+        };
+
+    setTrophyDraft(ensureTrophyDefinitionShape(editableDefinition));
     setSelectedTrophyId(trophyId);
     setTrophyFormFeedback(null);
     setTrophyValidationErrors([]);
@@ -3203,38 +3542,67 @@ export function AdminScreen() {
     setView('trophy-editor');
   };
 
-  const handleDeleteTrophy = (trophyId: string) => {
-    const confirmed = window.confirm('Supprimer ce trophée ?');
+  const handleDeleteTrophy = async (trophyId: string) => {
+    const trophy = adminTrophies.find((item) => item.id === trophyId);
+
+    if (trophy?.status !== 'draft') {
+      setTrophyFormFeedback({
+        kind: 'error',
+        message:
+          'Un trophée activé doit être désactivé et ne peut pas être supprimé.',
+      });
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'Supprimer définitivement ce brouillon jamais activé ?'
+    );
 
     if (!confirmed) {
       return;
     }
 
-    setAdminTrophies((current) => current.filter((trophy) => trophy.id !== trophyId));
-    setSelectedTrophyId((current) => (current === trophyId ? null : current));
-    if (trophyDraft?.id === trophyId) {
-      setTrophyDraft(null);
-      setView('trophies');
+    try {
+      await deleteAdminTrophy(trophyId);
+      setSelectedTrophyId((current) => (current === trophyId ? null : current));
+      if (trophyDraft?.id === trophyId) {
+        setTrophyDraft(null);
+        setView('trophies');
+      }
+    } catch (error) {
+      setTrophyFormFeedback({
+        kind: 'error',
+        message:
+          error instanceof Error ? error.message : 'Suppression impossible.',
+      });
     }
   };
 
-  const handleTrophyStatusToggle = (trophyId: string) => {
-    setAdminTrophies((current) =>
-      current.map((trophy) =>
-        trophy.id === trophyId
-          ? {
-              ...trophy,
-              status:
-                trophy.status === 'active'
-                  ? 'inactive'
-                  : trophy.status === 'inactive'
-                    ? 'active'
-                    : 'active',
-              updatedAt: new Date().toISOString(),
-            }
-          : trophy
-      )
-    );
+  const handleTrophyStatusToggle = async (trophyId: string) => {
+    const trophy = adminTrophies.find((item) => item.id === trophyId);
+
+    if (!trophy) {
+      return;
+    }
+
+    try {
+      await saveAdminTrophy({
+        ...trophy,
+        status:
+          trophy.status === 'active'
+            ? 'inactive'
+            : trophy.status === 'inactive'
+              ? 'active'
+              : 'active',
+        updatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      setTrophyFormFeedback({
+        kind: 'error',
+        message:
+          error instanceof Error ? error.message : 'Mise à jour impossible.',
+      });
+    }
   };
 
   const updateTrophyDraft = (
@@ -3454,137 +3822,16 @@ export function AdminScreen() {
     }));
   };
 
-  const getTrophyImageFileExtension = (contentType: string) => {
-    if (contentType === 'image/png') {
-      return 'png';
-    }
-
-    if (contentType === 'image/webp') {
-      return 'webp';
-    }
-
-    if (contentType === 'image/gif') {
-      return 'gif';
-    }
-
-    return 'jpg';
-  };
-
-  const hasLegacyTrophyImage = (imageValue: string | null) =>
-    Boolean(imageValue && imageValue.startsWith('data:'));
-
-  const uploadLegacyTrophyImages = async (
-    definition: AdminTrophyDefinition
-  ): Promise<AdminTrophyDefinition> => {
-    const nextDefinition = ensureTrophyDefinitionShape(definition);
-    const imageKeys = TROPHY_IMAGE_FIELDS.map((field) => field.key);
-
-    for (const imageKey of imageKeys) {
-      const imageValue = nextDefinition.images[imageKey];
-
-      if (!imageValue || !hasLegacyTrophyImage(imageValue)) {
-        continue;
-      }
-
-      const imageResponse = await fetch(imageValue);
-      const imageBlob = await imageResponse.blob();
-      const extension = getTrophyImageFileExtension(imageBlob.type);
-      const imageFile = new File([imageBlob], `${imageKey}.${extension}`, {
-        type: imageBlob.type || 'image/jpeg',
-      });
-      const { publicUrl } = await uploadTrophyImage({
-        file: imageFile,
-        fileName: imageFile.name,
-        imageKey,
-        trophyId: nextDefinition.id,
-      });
-
-      nextDefinition.images[imageKey] = publicUrl;
-      nextDefinition.levels = nextDefinition.levels.map((level) =>
-        level.tier === imageKey
-          ? {
-              ...level,
-              imageSrc: publicUrl,
-            }
-          : level
-      );
-    }
-
-    return nextDefinition;
-  };
-
-  const migrateTrophyCollectionImages = async (
-    definitions: AdminTrophyDefinition[]
-  ): Promise<AdminTrophyDefinition[]> =>
-    Promise.all(
-      definitions.map((definition) => uploadLegacyTrophyImages(definition))
-    );
-
-  useEffect(() => {
-    if (
-      !isAdmin ||
-      trophyDraft ||
-      view === 'trophy-editor' ||
-      hasAttemptedLegacyTrophyImageMigrationRef.current
-    ) {
-      return;
-    }
-
-    const legacyTrophies = adminTrophies.filter((trophy) =>
-      Object.values(ensureTrophyDefinitionShape(trophy).images).some((imageValue) =>
-        hasLegacyTrophyImage(imageValue)
-      )
-    );
-
-    if (!legacyTrophies.length) {
-      hasAttemptedLegacyTrophyImageMigrationRef.current = true;
-      return;
-    }
-
-    hasAttemptedLegacyTrophyImageMigrationRef.current = true;
-
-    let isCancelled = false;
-
-    async function migrateLegacyTrophyImages() {
-      try {
-        const migratedTrophies = await migrateTrophyCollectionImages(legacyTrophies);
-
-        if (isCancelled) {
-          return;
-        }
-
-        const migratedTrophyMap = new Map(
-          migratedTrophies.map((trophy) => [
-            trophy.id,
-            {
-              ...trophy,
-              updatedAt: new Date().toISOString(),
-            },
-          ])
-        );
-
-        setAdminTrophies((current) =>
-          current.map((trophy) => migratedTrophyMap.get(trophy.id) ?? trophy)
-        );
-      } catch (error) {
-        console.warn('Legacy trophy image migration failed', error);
-      }
-    }
-
-    void migrateLegacyTrophyImages();
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [adminTrophies, isAdmin, setAdminTrophies, trophyDraft, view]);
-
   const handleSaveTrophy = async () => {
     if (!trophyDraft) {
       return;
     }
 
     const normalizedDraft = ensureTrophyDefinitionShape(trophyDraft);
-    const errors = validateTrophyDefinition(normalizedDraft);
+    const errors =
+      normalizedDraft.status === 'active'
+        ? validateTrophyDefinition(normalizedDraft)
+        : [];
 
     setTrophyValidationErrors(errors);
 
@@ -3599,9 +3846,12 @@ export function AdminScreen() {
     const existingTrophy =
       adminTrophies.find((trophy) => trophy.id === normalizedDraft.id) ?? null;
 
-    if (existingTrophy?.status === 'active') {
+    if (
+      existingTrophy?.status === 'active' &&
+      normalizedDraft.status !== 'draft'
+    ) {
       const confirmed = window.confirm(
-        'Modifier cette règle peut recalculer l’attribution du trophée pour tous les internes.'
+        'Publier cette nouvelle version recalculera les trophées de tous les internes. Continuer ?'
       );
 
       if (!confirmed) {
@@ -3613,32 +3863,18 @@ export function AdminScreen() {
     setTrophyFormFeedback(null);
 
     try {
-      const migratedDraft = await uploadLegacyTrophyImages(normalizedDraft);
-      const nextTrophies = (
-        existingTrophy
-          ? adminTrophies.map((trophy) =>
-              trophy.id === migratedDraft.id
-                ? {
-                    ...migratedDraft,
-                    updatedAt: new Date().toISOString(),
-                  }
-                : trophy
-            )
-          : [
-              {
-                ...migratedDraft,
-                updatedAt: new Date().toISOString(),
-              },
-              ...adminTrophies,
-            ]
-      ).map((trophy) => ensureTrophyDefinitionShape(trophy));
-      const migratedTrophies = await migrateTrophyCollectionImages(nextTrophies);
-
-      setAdminTrophies(migratedTrophies);
-      setSelectedTrophyId(migratedDraft.id);
+      const nextDraft = {
+        ...normalizedDraft,
+        updatedAt: new Date().toISOString(),
+      };
+      const savedTrophy = await saveAdminTrophy(nextDraft);
+      setSelectedTrophyId(savedTrophy.id);
       setTrophyFormFeedback({
         kind: 'success',
-        message: 'Le trophée a été enregistré.',
+        message:
+          nextDraft.status === 'draft'
+            ? 'Le brouillon a été enregistré. La version actuellement publiée reste inchangée.'
+            : 'La nouvelle version du trophée a été publiée atomiquement.',
       });
       setView('trophies');
       setTrophyDraft(null);
@@ -3656,10 +3892,26 @@ export function AdminScreen() {
   };
 
   const handleCancelTrophyEditor = () => {
+    if (uploadingTrophyImageKeys.length > 0) {
+      setTrophyFormFeedback({
+        kind: 'error',
+        message: 'Attendez la fin du téléversement avant de quitter.',
+      });
+      return;
+    }
+
+    const trophyIdToClean = trophyDraft?.id ?? null;
+
     setTrophyDraft(null);
     setTrophyValidationErrors([]);
     setTrophyFormFeedback(null);
     setView('trophies');
+
+    if (trophyIdToClean) {
+      void cleanupTrophyImages(trophyIdToClean).catch((error) => {
+        console.warn('Unable to clean up cancelled trophy images.', error);
+      });
+    }
   };
 
   const handleExportFilteredBlocks = () => {
@@ -3692,38 +3944,84 @@ export function AdminScreen() {
     );
   };
 
-  const handleDelete = () => {
-    if (selectedInterventions.length === 0) {
+  const handleExportAnalyticsExcel = () => {
+    const generatedAt = new Date();
+
+    downloadAnalyticsExcel({
+      activityLog,
+      adminEvaluations,
+      allTimeCycleSummary: allTimeActivityCycleSummary,
+      customSurgicalInterventions,
+      internalProfiles,
+      period: activityAnalyticsPeriod,
+      periodEndIso: generatedAt.toISOString(),
+      periodLabel: analyticsPeriodLabel,
+      periodStartIso: getAdminAnalyticsPeriodStart(
+        activityAnalyticsPeriod,
+        generatedAt
+      ).toISOString(),
+      periodSummary: activityAnalyticsSummary,
+      generatedAtIso: generatedAt.toISOString(),
+      savedInterventions,
+      selectableSeniors,
+    });
+    setAnalyticsFeedback({
+      kind: 'success',
+      message: 'L’export des données au format Excel a bien été téléchargé.',
+    });
+  };
+
+  const handleSendRelanceEmail = (profile: AdminRelanceProfile) => {
+    setAnalyticsFeedback(null);
+
+    if (!profile.contactEmail) {
+      setAnalyticsFeedback({
+        kind: 'error',
+        message: `Aucune adresse e-mail n’est enregistrée pour ${profile.name}.`,
+      });
       return;
     }
 
+    const subject = encodeURIComponent('Rappel de connexion - Mon Journal de Bloc');
+    const body = encodeURIComponent(
+      `Bonjour ${profile.name},\n\n` +
+        `Un rappel vous est adressé afin de vous reconnecter à Mon Journal de Bloc.\n\n` +
+        `Vous pouvez utiliser votre identifiant habituel pour accéder à la plateforme.\n\n` +
+        `Bien cordialement,`
+    );
+
+    window.location.href = `mailto:${profile.contactEmail}?subject=${subject}&body=${body}`;
+    recordActivity('Préparation d’un rappel e-mail', 'Relance profil', profile.name);
+    setAnalyticsFeedback({
+      kind: 'success',
+      message: `Le rappel e-mail pour ${profile.name} a été préparé.`,
+    });
+  };
+
+  const handleDeleteInternalProfile = async (profile: InternalProfile) => {
     const confirmed = window.confirm(
-      `Supprimer ${selectedInterventions.length} intervention(s) du journal administrateur ?`
+      `Désactiver le profil de ${formatDisplayName(
+        profile.firstName,
+        profile.lastName
+      )} ?\n\nSon accès sera désactivé, sans supprimer ses interventions, fiches ni trophées.`
     );
 
     if (!confirmed) {
       return;
     }
 
-    deleteSavedInterventions(selectedInterventions.map((intervention) => intervention.id));
-    setSelectedIds((current) =>
-      current.filter(
-        (id) => !selectedInterventions.some((intervention) => intervention.id === id)
-      )
-    );
-  };
-
-  const handleConfirmProfileDeletion = () => {
-    if (!profileToDelete) {
-      return;
-    }
-
-    deleteInternalProfile(profileToDelete.id);
+    try {
+      await deleteInternalProfile(profile.id);
       setFeedback({
         kind: 'success',
-        message: `Le profil ${formatDisplayName(profileToDelete.firstName, profileToDelete.lastName)} a été supprimé.`,
+        message: `Le profil ${formatDisplayName(profile.firstName, profile.lastName)} a été supprimé.`,
       });
-    setProfileToDelete(null);
+    } catch (error) {
+      setFeedback({
+        kind: 'error',
+        message: error instanceof Error ? error.message : 'Suppression impossible.',
+      });
+    }
   };
 
   if (selectedEvaluationInterventionId && !selectedEvaluationIntervention) {
@@ -3776,6 +4074,51 @@ export function AdminScreen() {
           selectedEvaluationInternal.lastName
         )
       : 'Interne non retrouvé';
+    const selectedEvaluationContextRows = getClinicalContextSummaryRows(
+      selectedEvaluationIntervention.contextVariables
+    );
+    const selectedEvaluationVisibleContextRows =
+      selectedEvaluationContextRows.filter(
+        (row) =>
+          row.value !== 'Non renseigné' &&
+          row.value !== 'Non renseignée' &&
+          row.value !== 'Non renseignées'
+      );
+    const selectedEvaluationContextMetricLabels = new Set([
+      'Âge de la patiente',
+      'IMC de la patiente',
+      'Saignement per-opératoire',
+    ]);
+    const getSelectedEvaluationContextValue = (label: string) =>
+      selectedEvaluationContextRows.find((row) => row.label === label)?.value ??
+      'Non renseigné';
+    const selectedEvaluationContextMetrics = [
+      {
+        label: 'Âge',
+        value: getSelectedEvaluationContextValue('Âge de la patiente'),
+      },
+      {
+        label: 'IMC',
+        value: getSelectedEvaluationContextValue('IMC de la patiente'),
+      },
+      {
+        label: 'Durée opératoire',
+        value: selectedEvaluationIntervention.operativeDurationMinutes
+          ? `${selectedEvaluationIntervention.operativeDurationMinutes} min`
+          : 'Non renseignée',
+      },
+      {
+        label: 'Saignement',
+        value: getSelectedEvaluationContextValue('Saignement per-opératoire'),
+      },
+    ];
+    const selectedEvaluationOtherContextRows =
+      selectedEvaluationVisibleContextRows.filter(
+        (row) => !selectedEvaluationContextMetricLabels.has(row.label)
+      );
+    const selectedEvaluationClinicalDataCount =
+      selectedEvaluationVisibleContextRows.length +
+      (selectedEvaluationIntervention.operativeDurationMinutes ? 1 : 0);
     const priorAutonomyScores = sortedInterventions
       .filter(
         (intervention) =>
@@ -3790,7 +4133,7 @@ export function AdminScreen() {
             intervention,
             customSurgicalInterventions,
             adminEvaluations[intervention.id]
-          ) ?? intervention.autonomyScore
+          )
       )
       .filter((score): score is number => score != null);
     const priorAutonomyAverage =
@@ -3801,29 +4144,6 @@ export function AdminScreen() {
               priorAutonomyScores.length
           );
     const hasCompleteEvaluation = hasCompleteAdminEvaluation(selectedEvaluation);
-    const selectedEvaluationKeyStepRows = selectedEvaluationDefinition
-      ? selectedEvaluationChecklistSteps.filter((step) =>
-          selectedEvaluationDefinition.keyStepIds.includes(step.id)
-        )
-      : [];
-    const selectedEvaluationKeyStepScores = selectedEvaluationKeyStepRows
-      .map((step) => selectedEvaluationIntervention.checklist[step.id])
-      .filter((level): level is '0' | '1' | '2' | '3' | '4' =>
-        ['0', '1', '2', '3', '4'].includes(level ?? '')
-      )
-      .map((level) => Number(level));
-    const selectedEvaluationKeyStepScore =
-      selectedEvaluationKeyStepScores.length > 0
-        ? Math.round(
-            (selectedEvaluationKeyStepScores.reduce(
-              (total, score) => total + score,
-              0
-            ) /
-              selectedEvaluationKeyStepScores.length /
-              4) *
-              100
-          )
-        : null;
     const selectedPerformanceOption = evaluationDraft.globalPerformance
       ? ADMIN_PERFORMANCE_OPTIONS.find(
           (option) => option.value === evaluationDraft.globalPerformance
@@ -3843,6 +4163,7 @@ export function AdminScreen() {
             <button
               className="senior-evaluation-screen__hero-back"
               onClick={() => {
+                cancelSeniorEvaluationAnalyticsSession();
                 setSelectedEvaluationInterventionId(null);
                 setEvaluationFeedback(null);
               }}
@@ -3856,6 +4177,13 @@ export function AdminScreen() {
           title="Évaluer l’interne"
           frameWidth="wide"
         >
+          <div
+            onClickCapture={(event) => {
+              if (isAnalyticsInteractionTarget(event.target)) {
+                registerSeniorEvaluationInteraction();
+              }
+            }}
+          >
           <section className="senior-evaluation-summary-card">
             <div className="senior-evaluation-summary-card__main">
               <ApproachIcon intervention={selectedEvaluationIntervention} />
@@ -3866,61 +4194,80 @@ export function AdminScreen() {
                   {selectedEvaluationInternalName} -{' '}
                   {getChoiceLabel(roleOptions, selectedEvaluationIntervention.role)}
                 </small>
-                <small>
+                <small className="senior-evaluation-summary-card__native-indication">
                   Indication : {indicationLabel || 'Non renseignée'}
+                </small>
+                <small className="senior-evaluation-summary-card__native-timing">
+                  Début : {selectedEvaluationIntervention.startTime ?? 'Non renseigné'}
+                  <span className="senior-evaluation-summary-card__native-duration">
+                    {' · '}
+                    Durée :{' '}
+                    {selectedEvaluationIntervention.operativeDurationMinutes
+                      ? `${selectedEvaluationIntervention.operativeDurationMinutes} min`
+                      : 'Non renseignée'}
+                  </span>
+                </small>
+                <small className="senior-evaluation-summary-card__web-meta">
+                  {indicationLabel || 'Indication non renseignée'}
+                  {' · '}
+                  {selectedEvaluationIntervention.startTime ?? 'Horaire non renseigné'}
                 </small>
               </div>
             </div>
-            <div className="senior-auto-evaluation__score senior-auto-evaluation__score--summary">
-              <Check aria-hidden="true" />
-              <div>
-                <strong>
-                  {selectedEvaluationKeyStepScore == null
-                    ? 'Non calculable'
-                    : `${selectedEvaluationKeyStepScore} %`}
-                </strong>
-                <span>
-                  {selectedEvaluationKeyStepScore == null
-                    ? 'Score non calculable'
-                    : 'Score calculé'}
+            <section
+              aria-labelledby="senior-evaluation-clinical-overview-title"
+              className="senior-evaluation-clinical-overview"
+            >
+              <div className="senior-evaluation-clinical-overview__heading">
+                <div>
+                  <strong id="senior-evaluation-clinical-overview-title">
+                    Contexte clinique
+                  </strong>
+                  <span>Synthèse des variables renseignées</span>
+                </div>
+                <span className="senior-evaluation-clinical-overview__count">
+                  {selectedEvaluationClinicalDataCount}{' '}
+                  {selectedEvaluationClinicalDataCount > 1 ? 'données' : 'donnée'}
                 </span>
               </div>
-            </div>
+
+              <dl className="senior-evaluation-clinical-overview__metrics">
+                {selectedEvaluationContextMetrics.map((metric) => (
+                  <div key={metric.label}>
+                    <dt>{metric.label}</dt>
+                    <dd>{metric.value}</dd>
+                  </div>
+                ))}
+              </dl>
+
+              <details className="senior-evaluation-clinical-overview__details">
+                <summary>Voir les autres variables</summary>
+                {selectedEvaluationOtherContextRows.length ? (
+                  <dl>
+                    {selectedEvaluationOtherContextRows.map((row) => (
+                      <div key={row.label}>
+                        <dt>{row.label}</dt>
+                        <dd>{row.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : (
+                  <p>Aucune autre variable renseignée.</p>
+                )}
+              </details>
+            </section>
+            <details className="senior-evaluation-clinical-context senior-evaluation-clinical-context--native">
+              <summary>Contexte clinique de l’intervention</summary>
+              <dl>
+                {selectedEvaluationContextRows.map((row) => (
+                  <div key={row.label}>
+                    <dt>{row.label}</dt>
+                    <dd>{row.value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
           </section>
-
-          <div className="senior-auto-evaluation">
-            <button
-              className="senior-auto-evaluation__toggle"
-              onClick={() => setIsAutoEvaluationOpen((current) => !current)}
-              type="button"
-            >
-              <span>Voir le détail de l’auto-évaluation</span>
-              <ChevronDown
-                aria-hidden="true"
-                className={isAutoEvaluationOpen ? 'senior-auto-evaluation__toggle-icon--open' : ''}
-              />
-            </button>
-          </div>
-
-          {isAutoEvaluationOpen ? (
-            <div className="senior-auto-evaluation__details">
-              {selectedEvaluationKeyStepRows.length ? (
-                selectedEvaluationKeyStepRows.map((step) => {
-                  const level = selectedEvaluationIntervention.checklist[step.id];
-
-                  return (
-                    <div className="senior-auto-evaluation__detail-row" key={step.id}>
-                      <strong>{step.label}</strong>
-                      <span>{getChecklistLevelBadgeLabel(level)}</span>
-                      <small>{getChecklistLevelDescription(level)}</small>
-                    </div>
-                  );
-                })
-              ) : (
-                <p>Aucun temps opératoire clé défini pour cette intervention.</p>
-              )}
-            </div>
-          ) : null}
 
           <section className="senior-evaluation-panel senior-evaluation-panel--primary">
             <div className="senior-evaluation-panel__header">
@@ -3930,6 +4277,43 @@ export function AdminScreen() {
             <div className="senior-evaluation-step">
               <div className="senior-evaluation-step__title">
                 <span>1</span>
+                <h3>Autonomie par temps opératoire</h3>
+                <small className="senior-evaluation-step__progress">
+                  {
+                    selectedEvaluationChecklistSteps.filter(
+                      (step) => evaluationDraft.checklist[step.id] != null
+                    ).length
+                  }{' '}
+                  étapes sur {selectedEvaluationChecklistSteps.length} renseignées
+                </small>
+              </div>
+              {selectedEvaluationChecklistSteps.length ? (
+                <SeniorChecklistEditor
+                  activeStepId={activeEvaluationChecklistStepId}
+                  onActiveStepChange={setActiveEvaluationChecklistStepId}
+                  onValueChange={(stepId, level) => {
+                    setEvaluationFeedback(null);
+                    setEvaluationDraft((current) => ({
+                      ...current,
+                      checklist: {
+                        ...current.checklist,
+                        [stepId]: level,
+                      },
+                    }));
+                  }}
+                  steps={selectedEvaluationChecklistSteps}
+                  values={evaluationDraft.checklist}
+                />
+              ) : (
+                <p className="senior-rating-description">
+                  Aucun temps opératoire applicable à cette intervention.
+                </p>
+              )}
+            </div>
+
+            <div className="senior-evaluation-step">
+              <div className="senior-evaluation-step__title">
+                <span>2</span>
                 <h3>Performance chirurgicale globale</h3>
               </div>
               <div className="senior-evaluation-option-grid senior-evaluation-option-grid--performance">
@@ -3940,6 +4324,7 @@ export function AdminScreen() {
 
                   return (
                     <button
+                      aria-pressed={isSelected}
                       className={`senior-rating-option senior-rating-option--level-${option.value} ${
                         isSelected ? 'senior-rating-option--selected' : ''
                       }`.trim()}
@@ -3956,7 +4341,7 @@ export function AdminScreen() {
                       <span className="senior-rating-option__number">
                         {option.value}
                       </span>
-                      <strong>{SENIOR_PERFORMANCE_SHORT_LABELS[option.value]}</strong>
+                      <strong>{SENIOR_PERFORMANCE_LABELS[option.value]}</strong>
                       <span className="senior-rating-option__chevrons" aria-hidden="true">
                         {'>'.repeat(level)}
                       </span>
@@ -3973,7 +4358,7 @@ export function AdminScreen() {
 
             <div className="senior-evaluation-step">
               <div className="senior-evaluation-step__title">
-                <span>2</span>
+                <span>3</span>
                 <h3>Difficulté chirurgicale intra-catégorie</h3>
               </div>
               <div className="senior-evaluation-option-grid senior-evaluation-option-grid--difficulty">
@@ -3984,6 +4369,7 @@ export function AdminScreen() {
 
                   return (
                     <button
+                      aria-pressed={isSelected}
                       className={`senior-rating-option senior-rating-option--difficulty ${
                         isSelected ? 'senior-rating-option--selected' : ''
                       }`.trim()}
@@ -4000,7 +4386,7 @@ export function AdminScreen() {
                       <span className="senior-rating-option__number">
                         {option.value}
                       </span>
-                      <strong>{SENIOR_DIFFICULTY_SHORT_LABELS[option.value]}</strong>
+                      <strong>{SENIOR_DIFFICULTY_LABELS[option.value]}</strong>
                       <span className="senior-rating-option__stars" aria-hidden="true">
                         {Array.from({ length: level }, (_, index) => (
                           <Star key={index} />
@@ -4019,7 +4405,7 @@ export function AdminScreen() {
 
             <div className="senior-evaluation-step">
               <div className="senior-evaluation-step__title">
-                <span>3</span>
+                <span>4</span>
                 <h3>
                   Commentaire senior <small>(optionnel)</small>
                 </h3>
@@ -4065,6 +4451,7 @@ export function AdminScreen() {
               <button
                 className="senior-evaluation-actions__secondary"
                 onClick={() => {
+                  cancelSeniorEvaluationAnalyticsSession();
                   setSelectedEvaluationInterventionId(null);
                   setEvaluationFeedback(null);
                 }}
@@ -4074,6 +4461,7 @@ export function AdminScreen() {
               </button>
             </div>
           </section>
+          </div>
         </ScreenContainer>
       );
     }
@@ -4125,6 +4513,16 @@ export function AdminScreen() {
                     <strong>Méthode d’entrée</strong>
                     {selectedEvaluationEntryTechniqueLabel}
                   </span>
+                  <span>
+                    <strong>Début</strong>
+                    {selectedEvaluationIntervention.startTime ?? 'Non renseigné'}
+                  </span>
+                  <span>
+                    <strong>Durée</strong>
+                    {selectedEvaluationIntervention.operativeDurationMinutes
+                      ? `${selectedEvaluationIntervention.operativeDurationMinutes} min`
+                      : 'Non renseignée'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -4166,6 +4564,17 @@ export function AdminScreen() {
               ) : null}
             </div>
           </div>
+          <details className="senior-evaluation-clinical-context">
+            <summary>Contexte clinique de l’intervention</summary>
+            <dl>
+              {selectedEvaluationContextRows.map((row) => (
+                <div key={row.label}>
+                  <dt>{row.label}</dt>
+                  <dd>{row.value}</dd>
+                </div>
+              ))}
+            </dl>
+          </details>
         </SectionCard>
 
         <SectionCard
@@ -4217,6 +4626,9 @@ export function AdminScreen() {
             <div className="admin-rating-grid">
               {ADMIN_PERFORMANCE_OPTIONS.map((option) => (
                 <button
+                  aria-pressed={
+                    selectedEvaluation?.globalPerformance === option.value
+                  }
                   className={`admin-rating-card ${
                     selectedEvaluation?.globalPerformance === option.value
                       ? 'admin-rating-card--selected'
@@ -4245,6 +4657,9 @@ export function AdminScreen() {
             <div className="admin-rating-grid">
               {ADMIN_CATEGORY_DIFFICULTY_OPTIONS.map((option) => (
                 <button
+                  aria-pressed={
+                    selectedEvaluation?.categoryDifficulty === option.value
+                  }
                   className={`admin-rating-card ${
                     selectedEvaluation?.categoryDifficulty === option.value
                       ? 'admin-rating-card--selected'
@@ -4332,9 +4747,8 @@ export function AdminScreen() {
           <div className="admin-export-note">
             <CalendarDays aria-hidden="true" />
             <span>
-              L’export inclut les données générales, les auto-évaluations internes,
-              les évaluations senior, les étapes opératoires, les scores calculés et
-              les délais d’évaluation.
+              L’export inclut les données générales, les évaluations Senior, les
+              étapes opératoires, les scores calculés et les délais d’évaluation.
             </span>
           </div>
 
@@ -4514,51 +4928,636 @@ export function AdminScreen() {
       <AdminPageShell
         backLabel="Retour à l’espace administrateur"
         onBack={() => setView('home')}
-        subtitle="Historique synthétique des dernières connexions internes et seniors."
-        title="Connexions utilisateurs"
+        subtitle="Vue détaillée de l’usage de la plateforme, des blocs enregistrés et des profils à relancer."
+        title="Analytique d'usage"
       >
-        <SectionCard className="admin-dashboard-card" title="Toutes les connexions">
-          {userConnections.length ? (
-            <div className="admin-connections-list">
-              {userConnections.map((connection) => {
-                const activities = getConnectionActivities(connection);
+        <FeedbackMessage feedback={analyticsFeedback} />
+        <SectionCard
+          className="admin-dashboard-card admin-usage-overview-card"
+        >
+          <div className="admin-usage-overview">
+            <div className="admin-usage-overview__copy">
+              <h2>Vue instantanée de l'activité</h2>
+            </div>
 
-                return (
-                  <article className="admin-connection-row" key={connection.id}>
-                    <div className="admin-connection-row__copy">
-                      <div className="admin-connection-row__main">
-                        <strong>{connection.name}</strong>
-                        <span className="admin-connection-row__time">
-                          {formatAdminConnectionTimestamp(connection.lastLoginAt)}
-                        </span>
+            <div className="admin-usage-overview__toolbar">
+              <div className="admin-segmented-control" role="tablist" aria-label="Période d'analyse">
+                {ADMIN_ACTIVITY_ANALYTICS_PERIOD_OPTIONS.map((option) => (
+                  <button
+                    aria-selected={activityAnalyticsPeriod === option.value}
+                    className={`admin-segmented-control__button ${
+                      activityAnalyticsPeriod === option.value
+                        ? 'admin-segmented-control__button--active'
+                        : ''
+                    }`}
+                    key={option.value}
+                    onClick={() => setActivityAnalyticsPeriod(option.value)}
+                    role="tab"
+                    type="button"
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <div className="admin-usage-overview__actions">
+                <button
+                  className="app-button app-button--primary"
+                  onClick={handleExportAnalyticsExcel}
+                  type="button"
+                >
+                  Exporter les données
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="admin-metric-grid admin-metric-grid--analytics admin-metric-grid--usage">
+            <article className="admin-metric-card admin-metric-card--compact admin-metric-card--compact-no-icon">
+              <div>
+                <strong>{activityAnalyticsSummary.recentActivityCount}</strong>
+                <span>Activités sur {analyticsPeriodLabel.toLocaleLowerCase('fr-FR')}</span>
+                <small>internes + seniors</small>
+              </div>
+            </article>
+
+            <article className="admin-metric-card admin-metric-card--compact admin-metric-card--compact-no-icon">
+              <div>
+                <strong>
+                  {activityAnalyticsSummary.activeInternalCount +
+                    activityAnalyticsSummary.activeSeniorCount}
+                </strong>
+                <span>Profils actifs sur {analyticsPeriodLabel.toLocaleLowerCase('fr-FR')}</span>
+                <small>
+                  {activityAnalyticsSummary.activeInternalCount} internes ·{' '}
+                  {activityAnalyticsSummary.activeSeniorCount} seniors
+                </small>
+              </div>
+            </article>
+
+            <article className="admin-metric-card admin-metric-card--compact admin-metric-card--compact-no-icon">
+              <div>
+                <strong>{activityAnalyticsSummary.evaluationRate}%</strong>
+                <span>Blocs évalués</span>
+                <small>
+                  {activityAnalyticsSummary.recentEvaluatedCount} évaluations enregistrées
+                  sur {analyticsPeriodLabel.toLocaleLowerCase('fr-FR')}
+                </small>
+              </div>
+            </article>
+
+            <article className="admin-metric-card admin-metric-card--compact admin-metric-card--compact-no-icon">
+              <div>
+                <strong>
+                  {formatAdminDelayLabel(activityAnalyticsSummary.averageRecordingDelayMs)}
+                </strong>
+                <span>Délai moyen bloc → saisie</span>
+                <small>date opératoire → enregistrement</small>
+              </div>
+            </article>
+
+            <article className="admin-metric-card admin-metric-card--compact admin-metric-card--compact-no-icon">
+              <div>
+                <strong>
+                  {formatAdminDelayLabel(activityAnalyticsSummary.averageEvaluationDelayMs)}
+                </strong>
+                <span>Délai moyen saisie → évaluation</span>
+                <small>calculé sur les blocs déjà évalués</small>
+              </div>
+            </article>
+          </div>
+        </SectionCard>
+
+        <div className="admin-usage-primary-grid">
+          <SectionCard
+            className="admin-dashboard-card admin-usage-chart-card"
+            description="Suivi du volume d'usage par granularité sélectionnée."
+            title="Connexions"
+          >
+            <div className="admin-usage-chart-card__toolbar">
+              <div className="admin-usage-chart-card__meta">
+                <span>
+                  {activityAnalyticsSummary.recentActivityCount} activités sur {analyticsPeriodLabel.toLocaleLowerCase('fr-FR')}
+                </span>
+              </div>
+            </div>
+
+            {hasActivityAnalyticsChartData ? (
+              <>
+                <div className="admin-usage-line-chart-scroll" ref={analyticsChartScrollRef}>
+                  <div
+                    className="admin-usage-line-chart"
+                    style={{
+                      minWidth: `${Math.max(activityAnalyticsBuckets.length * 84, 480)}px`,
+                    }}
+                  >
+                    <div className="admin-usage-line-chart__plot admin-usage-line-chart__plot--bars">
+                      <div className="admin-usage-line-chart__grid">
+                        {Array.from({ length: 4 }, (_, index) => (
+                          <span key={index} />
+                        ))}
                       </div>
-                      <span>{connection.role}</span>
-                      <div className="admin-connection-row__activity-list">
-                        {activities.length ? (
-                          activities.map((entry) => (
-                            <span
-                              className="admin-connection-row__activity-item"
-                              key={entry.id}
-                            >
-                              {formatAdminConnectionTimestamp(entry.createdAt)} ·{' '}
-                              {formatActivityLogEntrySummary(entry)}
-                            </span>
-                          ))
-                        ) : (
-                          <span className="admin-connection-row__activity-empty">
-                            Aucune activité récente enregistrée.
-                          </span>
-                        )}
+
+                      <div
+                        className="admin-usage-bar-chart"
+                        style={{
+                          gridTemplateColumns: `repeat(${Math.max(
+                            activityAnalyticsBuckets.length,
+                            1
+                          )}, minmax(64px, 1fr))`,
+                        }}
+                      >
+                        {activityAnalyticsBuckets.map((bucket) => (
+                          <div className="admin-usage-bar-chart__column" key={bucket.id}>
+                            <div className="admin-usage-bar-chart__bars">
+                              <button
+                                aria-label={formatAdminActivityBarTooltip(
+                                  bucket.internalCount,
+                                  'interne'
+                                )}
+                                className="admin-usage-bar-chart__bar admin-usage-bar-chart__bar--internal"
+                                style={{
+                                  height: `${Math.max(
+                                    (bucket.internalCount /
+                                      Math.max(activityAnalyticsSummary.chartMax, 1)) *
+                                      100,
+                                    bucket.internalCount > 0 ? 10 : 0
+                                  )}%`,
+                                }}
+                                title={formatAdminActivityBarTooltip(
+                                  bucket.internalCount,
+                                  'interne'
+                                )}
+                                type="button"
+                              >
+                                <span className="admin-usage-bar-chart__tooltip">
+                                  {formatAdminActivityBarTooltip(
+                                    bucket.internalCount,
+                                    'interne'
+                                  )}
+                                </span>
+                              </button>
+                              <button
+                                aria-label={formatAdminActivityBarTooltip(
+                                  bucket.seniorCount,
+                                  'senior'
+                                )}
+                                className="admin-usage-bar-chart__bar admin-usage-bar-chart__bar--senior"
+                                style={{
+                                  height: `${Math.max(
+                                    (bucket.seniorCount /
+                                      Math.max(activityAnalyticsSummary.chartMax, 1)) *
+                                      100,
+                                    bucket.seniorCount > 0 ? 10 : 0
+                                  )}%`,
+                                }}
+                                title={formatAdminActivityBarTooltip(
+                                  bucket.seniorCount,
+                                  'senior'
+                                )}
+                                type="button"
+                              >
+                                <span className="admin-usage-bar-chart__tooltip">
+                                  {formatAdminActivityBarTooltip(
+                                    bucket.seniorCount,
+                                    'senior'
+                                  )}
+                                </span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                  </article>
-                );
-              })}
+
+                    <div
+                      className="admin-usage-line-chart__labels"
+                      style={{
+                        gridTemplateColumns: `repeat(${Math.max(
+                          activityAnalyticsBuckets.length,
+                          1
+                        )}, minmax(64px, 1fr))`,
+                      }}
+                    >
+                      {activityAnalyticsBuckets.map((bucket) => (
+                        <div className="admin-usage-line-chart__label" key={bucket.id}>
+                          <span>{bucket.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="admin-activity-legend admin-activity-legend--usage">
+                  <span>
+                    <i className="admin-activity-legend__dot admin-activity-legend__dot--recorded" />
+                    Activités internes
+                  </span>
+                  <span>
+                    <i className="admin-activity-legend__dot admin-activity-legend__dot--senior" />
+                    Activités seniors
+                  </span>
+                </div>
+              </>
+            ) : (
+              <div className="admin-empty-state">
+                <BarChart3 aria-hidden="true" />
+                <strong>Aucune activité récente à tracer</strong>
+                <span>
+                  Les connexions et activités des utilisateurs apparaitront ici dès qu'elles seront enregistrées.
+                </span>
+              </div>
+            )}
+          </SectionCard>
+
+          <SectionCard
+            className="admin-dashboard-card admin-usage-relance-card"
+            description={`Profils inactifs depuis ${relanceThresholdDays} jours ou jamais connectés.`}
+            title="Profils à relancer"
+          >
+            <div className="admin-usage-relance-summary">
+              <div className="admin-segmented-control" role="tablist" aria-label="Fenêtre de relance">
+                {ADMIN_RELANCE_WINDOW_OPTIONS.map((option) => (
+                  <button
+                    aria-selected={relanceWindow === option.value}
+                    className={`admin-segmented-control__button ${
+                      relanceWindow === option.value
+                        ? 'admin-segmented-control__button--active'
+                        : ''
+                    }`}
+                    key={option.value}
+                    onClick={() => setRelanceWindow(option.value)}
+                    role="tab"
+                    type="button"
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
             </div>
+
+            {activityAnalyticsSummary.neverConnectedCount > 0 ? (
+              <div className="admin-usage-relance-summary">
+                <span className="admin-usage-filter-pill admin-usage-filter-pill--warning">
+                  {activityAnalyticsSummary.neverConnectedCount} jamais connectés
+                </span>
+              </div>
+            ) : null}
+
+            {activityAnalyticsSummary.relanceProfiles.length ? (
+              <div className="admin-usage-relance-columns">
+                <div className="admin-usage-relance-column">
+                  <h3>Internes</h3>
+                  {relanceInternalProfiles.length ? (
+                    <div className="admin-usage-relance-list">
+                      {relanceInternalProfiles.map((profile) => (
+                        <article className="admin-usage-relance-item" key={profile.id}>
+                          <div>
+                            <strong>{profile.name}</strong>
+                            <span>{formatInactiveDaysLabel(profile.inactiveDays)}</span>
+                            <small>{profile.contactEmail ?? 'Aucun e-mail enregistré'}</small>
+                          </div>
+                          <div className="admin-usage-relance-item__actions">
+                            <small>
+                              {profile.lastLoginAt
+                                ? formatAdminConnectionTimestamp(profile.lastLoginAt)
+                                : 'Aucune connexion'}
+                            </small>
+                            <button
+                              className="mini-button mini-button--secondary"
+                              disabled={!profile.contactEmail}
+                              onClick={() => handleSendRelanceEmail(profile)}
+                              type="button"
+                            >
+                              Envoyer un rappel
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="validation-box">
+                      <strong>Aucun interne à relancer</strong>
+                      <span>Tous les internes se sont connectés récemment.</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="admin-usage-relance-column">
+                  <h3>Seniors</h3>
+                  {relanceSeniorProfiles.length ? (
+                    <div className="admin-usage-relance-list">
+                      {relanceSeniorProfiles.map((profile) => (
+                        <article className="admin-usage-relance-item" key={profile.id}>
+                          <div>
+                            <strong>{profile.name}</strong>
+                            <span>{formatInactiveDaysLabel(profile.inactiveDays)}</span>
+                            <small>{profile.contactEmail ?? 'Aucun e-mail enregistré'}</small>
+                          </div>
+                          <div className="admin-usage-relance-item__actions">
+                            <small>
+                              {profile.lastLoginAt
+                                ? formatAdminConnectionTimestamp(profile.lastLoginAt)
+                                : 'Aucune connexion'}
+                            </small>
+                            <button
+                              className="mini-button mini-button--secondary"
+                              disabled={!profile.contactEmail}
+                              onClick={() => handleSendRelanceEmail(profile)}
+                              type="button"
+                            >
+                              Envoyer un rappel
+                            </button>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="validation-box">
+                      <strong>Aucun senior à relancer</strong>
+                      <span>Tous les seniors se sont connectés récemment.</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="validation-box">
+                <strong>Aucun profil à relancer</strong>
+                <span>Tous les comptes ont été actifs récemment.</span>
+              </div>
+            )}
+          </SectionCard>
+        </div>
+
+        <div className="admin-usage-secondary-grid">
+          <SectionCard
+            className="admin-dashboard-card admin-usage-cycle-card"
+            description="Indicateurs calculables immédiatement à partir des horodatages déjà enregistrés."
+            title="Cycle des interventions"
+          >
+            <div className="admin-usage-cycle-strip">
+              <article className="admin-usage-cycle-pill">
+                <strong>{activityAnalyticsSummary.recentRecordedCount}</strong>
+                <span>Blocs enregistrés</span>
+              </article>
+              <article className="admin-usage-cycle-pill">
+                <strong>{activityAnalyticsSummary.recentEvaluatedCount}</strong>
+                <span>Évaluations enregistrées</span>
+              </article>
+            </div>
+
+            <div className="admin-usage-delay-grid">
+              <article className="admin-usage-delay-card">
+                <span>Délai moyen bloc → saisie</span>
+                <strong>
+                  {formatAdminDelayLabel(activityAnalyticsSummary.averageRecordingDelayMs)}
+                </strong>
+              </article>
+              <article className="admin-usage-delay-card">
+                <span>Délai moyen saisie → évaluation</span>
+                <strong>
+                  {formatAdminDelayLabel(activityAnalyticsSummary.averageEvaluationDelayMs)}
+                </strong>
+              </article>
+              <article className="admin-usage-delay-card">
+                <span>Temps moyen pour ajouter une intervention</span>
+                <strong>
+                  {formatWorkflowDurationLabel(
+                    activityAnalyticsSummary.averageInterventionFormDurationMs
+                  )}
+                </strong>
+                <small>
+                  {activityAnalyticsSummary.completedInterventionFormCount} formulaire(s)
+                  complété(s)
+                </small>
+              </article>
+              <article className="admin-usage-delay-card">
+                <span>Clics moyens pour ajouter une intervention</span>
+                <strong>
+                  {formatAverageClickCountLabel(
+                    activityAnalyticsSummary.averageInterventionFormClickCount
+                  )}
+                </strong>
+                <small>
+                  Mesure des interactions internes sur mobile et desktop
+                </small>
+              </article>
+              <article className="admin-usage-delay-card">
+                <span>Temps moyen pour évaluer un interne</span>
+                <strong>
+                  {formatWorkflowDurationLabel(
+                    activityAnalyticsSummary.averageSeniorEvaluationDurationMs
+                  )}
+                </strong>
+                <small>
+                  {activityAnalyticsSummary.completedSeniorEvaluationCount} évaluation(s)
+                  validée(s)
+                </small>
+              </article>
+              <article className="admin-usage-delay-card">
+                <span>Clics moyens pour évaluer un interne</span>
+                <strong>
+                  {formatAverageClickCountLabel(
+                    activityAnalyticsSummary.averageSeniorEvaluationClickCount
+                  )}
+                </strong>
+                <small>
+                  Mesure des interactions seniors sur mobile et desktop
+                </small>
+              </article>
+            </div>
+
+          </SectionCard>
+
+          <SectionCard
+            className="admin-dashboard-card admin-usage-ranking-panel"
+            description={`Ce que les utilisateurs font le plus sur ${analyticsPeriodLabel.toLocaleLowerCase('fr-FR')}.`}
+            title="Top usages"
+          >
+            <div className="admin-usage-ranking-grid">
+              <div className="admin-usage-ranking-card">
+                <div className="admin-usage-ranking-block">
+                  <h3>Activités les plus fréquentes</h3>
+                  {activityAnalyticsSummary.topActions.length ? (
+                    <div className="admin-usage-ranking-list">
+                      {activityAnalyticsSummary.topActions.map((item) => (
+                        <article className="admin-usage-ranking-item" key={item.id}>
+                          <div>
+                            <strong>{item.label}</strong>
+                            <span>{item.detail}</span>
+                          </div>
+                          <b>{item.value}</b>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="admin-connection-row__activity-empty">
+                      Aucune activité enregistrée sur la période.
+                    </span>
+                  )}
+                </div>
+
+              </div>
+
+              <div className="admin-usage-ranking-card">
+                <div className="admin-usage-ranking-block">
+                  <h3>Internes les plus actifs</h3>
+                  {activityAnalyticsSummary.topInternalConnections.length ? (
+                    <div className="admin-usage-ranking-list">
+                      {activityAnalyticsSummary.topInternalConnections.map((item) => (
+                        <article className="admin-usage-ranking-item" key={item.id}>
+                          <div>
+                            <strong>{item.label}</strong>
+                            <span>{item.detail}</span>
+                          </div>
+                          <b>{item.value}</b>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="admin-connection-row__activity-empty">
+                      Aucune connexion interne récente.
+                    </span>
+                  )}
+                </div>
+
+                <div className="admin-usage-ranking-block">
+                  <h3>Seniors les plus actifs</h3>
+                  {activityAnalyticsSummary.topSeniorConnections.length ? (
+                    <div className="admin-usage-ranking-list">
+                      {activityAnalyticsSummary.topSeniorConnections.map((item) => (
+                        <article className="admin-usage-ranking-item" key={item.id}>
+                          <div>
+                            <strong>{item.label}</strong>
+                            <span>{item.detail}</span>
+                          </div>
+                          <b>{item.value}</b>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="admin-connection-row__activity-empty">
+                      Aucune connexion senior récente.
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </SectionCard>
+        </div>
+
+        <SectionCard
+          className="admin-dashboard-card"
+          description="Les actions utilisateurs détaillées les plus récentes."
+          title="Dernières activités détaillées sur 24h"
+        >
+          {activityAnalyticsSummary.recentDetailedActivities.length ? (
+            <>
+              <div className="admin-usage-table-shell">
+                <table className="admin-usage-table">
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Utilisateur</th>
+                      <th>Rôle</th>
+                      <th>Action</th>
+                      <th>Cible</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleDetailedActivities.map((entry) => (
+                      <tr key={entry.id}>
+                        <td>{formatAdminConnectionTimestamp(entry.createdAt)}</td>
+                        <td>
+                          <div className="admin-usage-table__identity">
+                            <strong>{entry.actorLabel}</strong>
+                          </div>
+                        </td>
+                        <td>
+                          <span className="admin-usage-role-badge">
+                            {entry.actorRole === 'internal' ? 'Interne' : 'Senior'}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="admin-usage-table__detail">
+                            <strong>{entry.action}</strong>
+                            <span>{entry.targetType}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <div className="admin-usage-table__detail">
+                            <strong>{entry.targetLabel || 'Sans cible précise'}</strong>
+                            <span>{formatActivityLogEntrySummary(entry)}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="admin-usage-mobile-list">
+                {visibleDetailedActivities.map((entry) => (
+                  <article className="admin-usage-mobile-card" key={entry.id}>
+                    <div className="admin-usage-mobile-card__head">
+                      <strong>{entry.actorLabel}</strong>
+                      <span>{formatAdminConnectionTimestamp(entry.createdAt)}</span>
+                    </div>
+                    <div className="admin-usage-mobile-card__meta">
+                      <span className="admin-usage-role-badge">
+                        {entry.actorRole === 'internal' ? 'Interne' : 'Senior'}
+                      </span>
+                      <small>{entry.targetType}</small>
+                    </div>
+                    <p>{entry.action}</p>
+                    <small>{entry.targetLabel || 'Sans cible précise'}</small>
+                  </article>
+                ))}
+              </div>
+
+              {activityAnalyticsSummary.recentDetailedActivities.length >
+              ADMIN_DETAILED_ACTIVITY_PAGE_SIZE ? (
+                <div className="admin-usage-table-footer">
+                  <span>
+                    {visibleDetailedActivities.length} /{' '}
+                    {activityAnalyticsSummary.recentDetailedActivities.length} activités
+                    affichées
+                  </span>
+                  <div className="admin-usage-table-footer__actions">
+                    {hasMoreDetailedActivities ? (
+                      <button
+                        className="mini-button mini-button--secondary"
+                        onClick={() =>
+                          setDetailedActivitiesVisibleCount((current) =>
+                            current + ADMIN_DETAILED_ACTIVITY_PAGE_SIZE
+                          )
+                        }
+                        type="button"
+                      >
+                        Voir {ADMIN_DETAILED_ACTIVITY_PAGE_SIZE} activités de plus
+                      </button>
+                    ) : null}
+                    {visibleDetailedActivities.length >
+                    ADMIN_DETAILED_ACTIVITY_PAGE_SIZE ? (
+                      <button
+                        className="mini-button mini-button--secondary"
+                        onClick={() =>
+                          setDetailedActivitiesVisibleCount(
+                            ADMIN_DETAILED_ACTIVITY_PAGE_SIZE
+                          )
+                        }
+                        type="button"
+                      >
+                        Voir moins
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+            </>
           ) : (
             <div className="validation-box">
-              <strong>Aucune connexion enregistrée</strong>
-              <span>Les prochaines connexions internes et seniors apparaîtront ici.</span>
+              <strong>Aucune activité enregistrée</strong>
+              <span>Les prochaines actions utilisateurs apparaitront ici.</span>
             </div>
           )}
         </SectionCard>
@@ -4628,7 +5627,9 @@ export function AdminScreen() {
       const usableWidth = 320;
       const usableHeight = 150;
       const x =
-        points.length <= 1 ? 0 : (index / Math.max(points.length - 1, 1)) * usableWidth;
+        points.length <= 1
+          ? usableWidth / 2
+          : (index / Math.max(points.length - 1, 1)) * usableWidth;
       const y = usableHeight - (point.score / 100) * usableHeight;
 
       return {
@@ -4640,6 +5641,21 @@ export function AdminScreen() {
     const progressChartPath = progressChartPoints
       .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`)
       .join(' ');
+    const maximumDateLabels = 5;
+    const dateLabelInterval = Math.max(
+      1,
+      Math.ceil(
+        (progressChartPoints.length - 1) /
+          Math.max(maximumDateLabels - 1, 1)
+      )
+    );
+    const progressChartDateLabelPoints = progressChartPoints.filter(
+      (_point, index) =>
+        progressChartPoints.length <= maximumDateLabels ||
+        index === 0 ||
+        index === progressChartPoints.length - 1 ||
+        index % dateLabelInterval === 0
+    );
 
     return (
       <AdminPageShell
@@ -4667,7 +5683,6 @@ export function AdminScreen() {
                 </div>
                 <div className="admin-profile-summary-card__meta">
                   <span>{selectedProfile.promotion}</span>
-                  <span>Stage actuel : {selectedProfile.currentRotation}</span>
                   <span>Identifiant : {selectedProfile.loginId}</span>
                 </div>
               </div>
@@ -4679,50 +5694,61 @@ export function AdminScreen() {
               <span className="admin-profile-kpi-card__icon">
                 <Pencil aria-hidden="true" />
               </span>
-              <strong>{selectedProfileStats.recordedInterventionsCount}</strong>
-              <span>interventions</span>
+              <div className="admin-profile-kpi-card__copy">
+                <strong>{selectedProfileStats.recordedInterventionsCount}</strong>
+                <span>interventions</span>
+              </div>
             </article>
             <article className="admin-profile-kpi-card admin-profile-kpi-card--success">
               <span className="admin-profile-kpi-card__icon">
                 <Check aria-hidden="true" />
               </span>
-              <strong>{selectedProfileEvaluationRate}%</strong>
-              <span>évaluées</span>
+              <div className="admin-profile-kpi-card__copy">
+                <strong>{selectedProfileEvaluationRate}%</strong>
+                <span>évaluées</span>
+              </div>
             </article>
             <article className="admin-profile-kpi-card admin-profile-kpi-card--amber">
               <span className="admin-profile-kpi-card__icon">
                 <Trophy aria-hidden="true" />
               </span>
-              <strong>{selectedProfileStats.earnedBadgesCount}</strong>
-              <span>trophées</span>
+              <div className="admin-profile-kpi-card__copy">
+                <strong>{selectedProfileStats.earnedTrophiesCount}</strong>
+                <span>trophées</span>
+              </div>
             </article>
           </div>
         </div>
 
-        <SectionCard
-          className="admin-dashboard-card admin-profile-stats-card"
-          title={profileStatsTab === 'history' ? 'Historique opératoire' : 'Progression pédagogique'}
-        >
-          <div className="admin-profile-stats-tabs" aria-label="Onglets statistiques">
+        <SectionCard className="admin-dashboard-card admin-profile-stats-card">
+          <div
+            aria-label="Onglets statistiques"
+            className="admin-profile-stats-tabs"
+            role="tablist"
+          >
             <button
-              className={`admin-profile-stats-tab ${
-                profileStatsTab === 'history' ? 'admin-profile-stats-tab--active' : ''
-              }`}
-              onClick={() => setProfileStatsTab('history')}
-              type="button"
-            >
-              <FolderOpen aria-hidden="true" />
-              <span>Historique</span>
-            </button>
-            <button
+              aria-selected={profileStatsTab === 'progress'}
               className={`admin-profile-stats-tab ${
                 profileStatsTab === 'progress' ? 'admin-profile-stats-tab--active' : ''
               }`}
               onClick={() => setProfileStatsTab('progress')}
+              role="tab"
               type="button"
             >
               <BarChart3 aria-hidden="true" />
               <span>Progression</span>
+            </button>
+            <button
+              aria-selected={profileStatsTab === 'history'}
+              className={`admin-profile-stats-tab ${
+                profileStatsTab === 'history' ? 'admin-profile-stats-tab--active' : ''
+              }`}
+              onClick={() => setProfileStatsTab('history')}
+              role="tab"
+              type="button"
+            >
+              <FolderOpen aria-hidden="true" />
+              <span>Historique</span>
             </button>
           </div>
 
@@ -4801,15 +5827,20 @@ export function AdminScreen() {
                   {paginatedProfileHistoryRows.map((intervention) => {
                     const evaluation = adminEvaluations[intervention.id];
                     const status = getProfileHistoryStatus(evaluation);
+                    const autonomyScore =
+                      status === 'evaluated'
+                        ? calculateAutonomyScore(
+                            intervention,
+                            customSurgicalInterventions,
+                            evaluation
+                          )
+                        : null;
                     const senior =
                       selectableSeniors.find(
                         (seniorItem) => seniorItem.id === intervention.seniorId
                       ) ?? null;
-                    const checklistSteps = getChecklistStepsForIntervention(
-                      intervention.procedure,
-                      intervention.indication,
-                      intervention.approach,
-                      intervention.entryTechnique,
+                    const checklistSteps = getHistoricalChecklistSteps(
+                      intervention,
                       customSurgicalInterventions
                     );
                     const isExpanded =
@@ -4886,9 +5917,11 @@ export function AdminScreen() {
                               <div className="info-block">
                                 <span className="info-block__label">Score d'autonomie</span>
                                 <strong className="info-block__value">
-                                  {intervention.autonomyScore != null
-                                    ? `${Math.round(intervention.autonomyScore)}%`
-                                    : 'Non calculable'}
+                                  {autonomyScore != null
+                                    ? `${Math.round(autonomyScore)}%`
+                                    : status === 'evaluated'
+                                      ? INSUFFICIENT_KEY_STEP_COVERAGE_MESSAGE
+                                      : 'Non calculable'}
                                 </strong>
                               </div>
                             </div>
@@ -4902,7 +5935,10 @@ export function AdminScreen() {
                                   <span>{step.label}</span>
                                   <strong>
                                     {getChecklistLevelBadgeLabel(
-                                      intervention.checklist[step.id]
+                                      getAuthoritativeChecklist(
+                                        intervention,
+                                        adminEvaluations[intervention.id]
+                                      )[step.id]
                                     )}
                                   </strong>
                                 </div>
@@ -4969,156 +6005,379 @@ export function AdminScreen() {
             <>
               <div className="admin-profile-filters admin-profile-filters--progress">
                 <label className="field-stack">
-                  <span className="field-stack__label">Intervention</span>
-                  <select
-                    className="field-input"
-                    onChange={(event) => setProfileProgressKey(event.target.value)}
-                    value={profileProgressKey}
-                  >
-                    {selectedProfileProgressOptions.map((option) => (
-                      <option key={option.key} value={option.key}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
+                  <span className="field-stack__label">Procédure + indication</span>
+                  <span className="admin-profile-themed-select">
+                    <select
+                      className="field-input admin-profile-themed-select__input"
+                      onChange={(event) =>
+                        setProfileProgressProcedureKey(event.target.value)
+                      }
+                      value={profileProgressProcedureKey}
+                    >
+                      {selectedProfileProgressProcedureOptions.length === 0 ? (
+                        <option value="">Aucune intervention créée</option>
+                      ) : null}
+                      {selectedProfileProgressProcedureOptions.map((option) => (
+                        <option key={option.key} value={option.key}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="admin-profile-themed-select__icon" aria-hidden="true">
+                      <ChevronDown />
+                    </span>
+                  </span>
+                </label>
+
+                <label className="field-stack">
+                  <span className="field-stack__label">Voie d’abord</span>
+                  <span className="admin-profile-themed-select">
+                    <select
+                      className="field-input admin-profile-themed-select__input"
+                      onChange={(event) =>
+                        setProfileProgressApproach(event.target.value as SurgicalApproach)
+                      }
+                      value={profileProgressApproach}
+                    >
+                      {selectedProfileProgressApproachOptions.length === 0 ? (
+                        <option value="">Aucune voie disponible</option>
+                      ) : null}
+                      {selectedProfileProgressApproachOptions.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="admin-profile-themed-select__icon" aria-hidden="true">
+                      <ChevronDown />
+                    </span>
+                  </span>
                 </label>
 
                 <label className="field-stack">
                   <span className="field-stack__label">Période</span>
-                  <select
-                    className="field-input"
-                    onChange={(event) =>
-                      setProfileProgressPeriod(
-                        event.target.value as ProfileProgressPeriod
-                      )
-                    }
-                    value={profileProgressPeriod}
-                  >
-                    <option value="3m">3 derniers mois</option>
-                    <option value="6m">6 derniers mois</option>
-                    <option value="12m">12 derniers mois</option>
-                    <option value="all">Toutes les données</option>
-                  </select>
+                  <span className="admin-profile-themed-select">
+                    <select
+                      className="field-input admin-profile-themed-select__input"
+                      onChange={(event) =>
+                        setProfileProgressPeriod(
+                          event.target.value as ProfileProgressPeriod
+                        )
+                      }
+                      value={profileProgressPeriod}
+                    >
+                      <option value="3m">3 derniers mois</option>
+                      <option value="6m">6 derniers mois</option>
+                      <option value="12m">12 derniers mois</option>
+                      <option value="all">Toutes les données</option>
+                    </select>
+                    <span className="admin-profile-themed-select__icon" aria-hidden="true">
+                      <ChevronDown />
+                    </span>
+                  </span>
                 </label>
 
               </div>
 
-              {selectedProfileProgressSeries.length ? (
-                <>
-                  <div className="admin-profile-progress-kpis">
-                    <div className="info-block">
-                      <span className="info-block__label">Dernier enregistrement</span>
-                      <strong className="info-block__value">
-                        {selectedProfileLastRecordedAt
-                          ? formatDateTime(selectedProfileLastRecordedAt)
-                          : 'Non renseignée'}
-                      </strong>
-                    </div>
+              {selectedProfileProgressInterventions.length ? (
+                <div className="admin-profile-progress-kpis">
+                  <div className="info-block">
+                    <span className="info-block__label">Dernier enregistrement</span>
+                    <strong className="info-block__value">
+                      {selectedProfileLastRecordedAt
+                        ? formatDateTime(selectedProfileLastRecordedAt)
+                        : 'Non renseignée'}
+                    </strong>
                   </div>
-
-                  <div className="admin-profile-progress-layout">
-                    <SectionCard
-                      className="admin-profile-progress-panel"
-                      title="Évolution de l’autonomie"
-                    >
-                      <div className="admin-profile-progress-chart">
-                        <svg
-                          aria-hidden="true"
-                          viewBox="0 0 360 190"
-                          xmlns="http://www.w3.org/2000/svg"
-                        >
-                          <line x1="16" x2="336" y1="160" y2="160" />
-                          <line x1="16" x2="16" y1="10" y2="160" />
-                          <line x1="16" x2="336" y1="122.5" y2="122.5" />
-                          <line x1="16" x2="336" y1="85" y2="85" />
-                          <line x1="16" x2="336" y1="47.5" y2="47.5" />
-                          {progressChartPath ? (
-                            <path
-                              d={progressChartPath}
-                              fill="none"
-                              stroke="currentColor"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="3"
-                              transform="translate(16 10)"
-                            />
-                          ) : null}
-                          {progressChartPoints.map((point) => (
-                            <g key={point.id} transform={`translate(${point.x + 16} ${point.y + 10})`}>
-                              <circle cx="0" cy="0" fill="white" r="5" stroke="currentColor" strokeWidth="3" />
-                              <text x="0" y="-12">
-                                {point.score}%
-                              </text>
-                            </g>
-                          ))}
-                        </svg>
-                        <div className="admin-profile-progress-chart__labels">
-                          {selectedProfileProgressSeries.map((point) => (
-                            <span key={point.id}>{formatIsoDate(point.date)}</span>
-                          ))}
-                        </div>
-                      </div>
-                    </SectionCard>
-
-                    <SectionCard
-                      className="admin-profile-progress-panel"
-                      title="Temps opératoires clés"
-                    >
-                      {selectedProfileStepRows.length ? (
-                        <div className="admin-profile-step-list">
-                          {selectedProfileStepRows.map((step) => (
-                            <div className="admin-profile-step-row" key={step.id}>
-                              <span>{step.label}</span>
-                              <div className="admin-profile-step-row__bar">
-                                <div
-                                  className={`admin-profile-step-row__fill admin-profile-step-row__fill--${step.tone}`}
-                                  style={{ width: `${step.score}%` }}
-                                />
-                              </div>
-                              <strong>{step.score}%</strong>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="validation-box">
-                          <strong>Aucune donnée de progression disponible</strong>
-                          <span>Les prochaines évaluations alimenteront cette vue.</span>
-                        </div>
-                      )}
-                    </SectionCard>
-                  </div>
-
-                  <div className="admin-profile-progress-footer">
-                    <SectionCard
-                      className="admin-profile-progress-panel"
-                      title="Trophées obtenus"
-                    >
-                      {selectedProfileEarnedBadges.length ? (
-                        <div className="badge-grid">
-                          {selectedProfileEarnedBadges.map((badge) => (
-                            <ProgressBadgeCard key={badge.id} badge={badge} />
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="validation-box">
-                          <strong>Aucun trophée acquis pour l’instant</strong>
-                          <span>Les futurs trophées validés apparaîtront ici.</span>
-                        </div>
-                      )}
-                    </SectionCard>
-                  </div>
-                </>
+                </div>
               ) : (
                 <div className="validation-box">
-                  <strong>Aucune donnée de progression disponible pour cet interne</strong>
+                  <strong>Aucun bloc enregistré pour cette sélection</strong>
                   <span>
-                    Les évaluations senior et les scores d’autonomie apparaîtront ici dès
-                    qu’ils seront disponibles.
+                    Choisis une autre procédure, une autre indication ou une autre voie
+                    d’abord pour afficher les données disponibles.
                   </span>
                 </div>
               )}
+
+              <div className="admin-profile-progress-layout">
+                <SectionCard
+                  className="admin-profile-progress-panel"
+                  title="Évolution de l’autonomie"
+                >
+                  {selectedProfileProgressSeries.length ? (
+                    <div
+                      aria-label="Évolution du score d’autonomie de l’interne sélectionné"
+                      className="admin-profile-progress-chart"
+                      role="img"
+                    >
+                      <svg
+                        viewBox="0 0 360 205"
+                        xmlns="http://www.w3.org/2000/svg"
+                      >
+                        <line x1="16" x2="336" y1="160" y2="160" />
+                        <line x1="16" x2="16" y1="10" y2="160" />
+                        <line x1="16" x2="336" y1="122.5" y2="122.5" />
+                        <line x1="16" x2="336" y1="85" y2="85" />
+                        <line x1="16" x2="336" y1="47.5" y2="47.5" />
+                        {progressChartPath ? (
+                          <path
+                            d={progressChartPath}
+                            fill="none"
+                            stroke="currentColor"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="3"
+                            transform="translate(16 10)"
+                          />
+                        ) : null}
+                        {progressChartPoints.map((point) => (
+                          <g
+                            key={point.id}
+                            transform={`translate(${point.x + 16} ${point.y + 10})`}
+                          >
+                            <title>
+                              {formatIsoDate(point.date)} : {point.score}%
+                            </title>
+                            <circle
+                              cx="0"
+                              cy="0"
+                              fill="white"
+                              r="5"
+                              stroke="currentColor"
+                              strokeWidth="3"
+                            />
+                            <text x="0" y="-12">
+                              {point.score}%
+                            </text>
+                          </g>
+                        ))}
+                        {progressChartDateLabelPoints.map((point, index) => (
+                          <text
+                            className="admin-profile-progress-chart__date-label"
+                            key={`date-${point.id}`}
+                            textAnchor={
+                              progressChartDateLabelPoints.length === 1
+                                ? 'middle'
+                                : index === 0
+                                  ? 'start'
+                                  : index ===
+                                      progressChartDateLabelPoints.length - 1
+                                    ? 'end'
+                                    : 'middle'
+                            }
+                            x={point.x + 16}
+                            y="192"
+                          >
+                            {formatIsoDate(point.date)}
+                          </text>
+                        ))}
+                      </svg>
+                    </div>
+                  ) : (
+                    <div className="validation-box">
+                      <strong>Aucune autonomie évaluée pour cette sélection</strong>
+                      <span>
+                        La courbe apparaîtra dès qu’au moins une intervention évaluée aura
+                        un score d’autonomie.
+                      </span>
+                    </div>
+                  )}
+                </SectionCard>
+
+                <SectionCard
+                  className="admin-profile-progress-panel"
+                  title="Temps opératoires"
+                >
+                  {selectedProfileStepRows.length ? (
+                    <div className="admin-profile-step-list">
+                      {selectedProfileStepRows.map((step) => (
+                        <div className="admin-profile-step-row" key={step.id}>
+                          <span>{step.label}</span>
+                          <div className="admin-profile-step-row__bar">
+                            <div
+                              className={`admin-profile-step-row__fill admin-profile-step-row__fill--${step.tone}`}
+                              style={{ width: `${step.score}%` }}
+                            />
+                          </div>
+                          <strong>{step.score}%</strong>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="validation-box">
+                      <strong>Aucun temps opératoire disponible</strong>
+                      <span>
+                        Les étapes de cette intervention apparaîtront ici dès qu’un bloc
+                        correspondant sera enregistré.
+                      </span>
+                    </div>
+                  )}
+                </SectionCard>
+              </div>
+
+              <div className="admin-profile-progress-footer admin-profile-progress-footer--single">
+                <SectionCard
+                  className="admin-profile-progress-panel"
+                  title="Trophées obtenus"
+                >
+                  {selectedProfileAllEarnedTrophies.length ? (
+                    <div className="trophy-card-grid">
+                      {selectedProfileAllEarnedTrophies.map((trophy) => (
+                        <InternalTrophyCard item={trophy} key={trophy.id} />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="validation-box">
+                      <strong>Aucun trophée acquis pour l’instant</strong>
+                      <span>Tous les trophées gagnés par l’interne apparaîtront ici.</span>
+                    </div>
+                  )}
+                </SectionCard>
+              </div>
             </>
           )}
+        </SectionCard>
+      </AdminPageShell>
+    );
+  }
+
+  if (isAdmin && view === 'institutions') {
+    return (
+      <AdminPageShell
+        backLabel="Retour à l’espace administrateur"
+        onBack={() => setView('home')}
+        subtitle="Les rattachements utilisent un identifiant stable : renommer un établissement ne modifie ni les droits ni les historiques."
+        title="Établissements"
+      >
+        <div className="admin-profile-overview">
+          <article className="admin-profile-overview-card admin-profile-overview-card--violet">
+            <span className="admin-profile-overview-card__icon">
+              <Building2 aria-hidden="true" />
+            </span>
+            <div>
+              <strong>{activeInstitutions.length}</strong>
+              <span>Établissements actifs</span>
+            </div>
+          </article>
+        </div>
+
+        <FeedbackMessage feedback={institutionFeedback} />
+
+        <SectionCard
+          className="admin-dashboard-card"
+          title={
+            editingInstitutionId
+              ? 'Renommer l’établissement'
+              : 'Créer un établissement officiel'
+          }
+        >
+          <form className="admin-create-form" onSubmit={handleSaveInstitution}>
+            <div className="admin-create-form__grid">
+              <label className="field-stack admin-create-form__field--full">
+                <span className="field-stack__label">Nom officiel</span>
+                <input
+                  className="field-input"
+                  maxLength={160}
+                  onChange={(event) => {
+                    setInstitutionName(event.target.value);
+                    setInstitutionFeedback(null);
+                  }}
+                  placeholder="Ex : CHU de Nantes"
+                  required
+                  type="text"
+                  value={institutionName}
+                />
+              </label>
+            </div>
+            <div className="admin-profile-editor__actions">
+              {editingInstitutionId ? (
+                <button
+                  className="app-button app-button--secondary"
+                  onClick={() => {
+                    setEditingInstitutionId(null);
+                    setInstitutionName('');
+                  }}
+                  type="button"
+                >
+                  Annuler
+                </button>
+              ) : null}
+              <button className="app-button app-button--primary" type="submit">
+                {editingInstitutionId ? 'Enregistrer le nouveau nom' : 'Créer'}
+              </button>
+            </div>
+          </form>
+        </SectionCard>
+
+        <SectionCard
+          className="admin-dashboard-card admin-profile-management-card"
+          title="Référentiel officiel"
+        >
+          <div className="admin-profile-list">
+            {institutions.map((institution) => {
+              const linkedAccountCount =
+                internalProfiles.filter(
+                  (profile) => profile.institutionId === institution.id
+                ).length +
+                customSeniors.filter(
+                  (senior) => senior.institutionId === institution.id
+                ).length;
+
+              return (
+                <article
+                  className="profile-card profile-card--static admin-profile-card"
+                  key={institution.id}
+                >
+                  <div className="admin-profile-card__identity">
+                    <span className="admin-profile-card__avatar admin-profile-card__avatar--senior">
+                      <Building2 aria-hidden="true" />
+                    </span>
+                    <div className="admin-profile-card__copy">
+                      <div className="profile-card__header">
+                        <strong>{institution.name}</strong>
+                        <span className="profile-card__badge">
+                          {institution.status === 'active' ? 'Actif' : 'Archivé'}
+                        </span>
+                      </div>
+                      <div className="profile-card__meta">
+                        <span>
+                          {linkedAccountCount} compte
+                          {linkedAccountCount > 1 ? 's' : ''} rattaché
+                          {linkedAccountCount > 1 ? 's' : ''}
+                        </span>
+                        <span>Identifiant stable : {institution.id}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="admin-profile-card__actions">
+                    <button
+                      className="mini-button mini-button--secondary"
+                      onClick={() => {
+                        setEditingInstitutionId(institution.id);
+                        setInstitutionName(institution.name);
+                        setInstitutionFeedback(null);
+                      }}
+                      type="button"
+                    >
+                      <Pencil aria-hidden="true" />
+                      Renommer
+                    </button>
+                    {institution.status === 'active' ? (
+                      <button
+                        className="mini-button"
+                        onClick={() => handleArchiveInstitution(institution.id)}
+                        type="button"
+                      >
+                        <Archive aria-hidden="true" />
+                        Archiver
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
         </SectionCard>
       </AdminPageShell>
     );
@@ -5129,7 +6388,7 @@ export function AdminScreen() {
       <AdminPageShell
         backLabel={isSenior ? 'Retour à l’espace senior' : 'Retour à l’espace administrateur'}
         onBack={() => setView('home')}
-        subtitle="Créez, modifiez ou désactivez les comptes internes et seniors de BlocLog."
+        subtitle="Modifiez ou désactivez les comptes internes et seniors de BlocLog."
         title="Gestion des profils"
       >
         <div className="admin-profile-overview">
@@ -5142,26 +6401,45 @@ export function AdminScreen() {
               <span>Comptes actifs</span>
             </div>
           </article>
+          {isAdmin ? (
+            <article className="admin-profile-overview-card">
+              <span className="admin-profile-overview-card__icon">
+                <Archive aria-hidden="true" />
+              </span>
+              <div>
+                <strong>{disabledProfiles.length}</strong>
+                <span>Comptes désactivés</span>
+              </div>
+            </article>
+          ) : null}
         </div>
 
         <SectionCard className="admin-dashboard-card admin-profile-management-card">
           <div className="admin-profiles-layout">
             <div className="admin-profiles-panel">
-              <div className="admin-profiles-tabs">
+              <div
+                aria-label="Type de profils"
+                className="admin-profiles-tabs"
+                role="tablist"
+              >
                 <button
+                  aria-selected={profilesTab === 'internal'}
                   className={`admin-profiles-tab ${
                     profilesTab === 'internal' ? 'admin-profiles-tab--active' : ''
                   }`}
                   onClick={() => setProfilesTab('internal')}
+                  role="tab"
                   type="button"
                 >
                   <span>Internes</span>
                 </button>
                 <button
+                  aria-selected={profilesTab === 'senior'}
                   className={`admin-profiles-tab ${
                     profilesTab === 'senior' ? 'admin-profiles-tab--active' : ''
                   }`}
                   onClick={() => setProfilesTab('senior')}
+                  role="tab"
                   type="button"
                 >
                   <span>Seniors</span>
@@ -5178,19 +6456,40 @@ export function AdminScreen() {
                     value={profileSearch}
                   />
                 </label>
-                <button
-                  className="app-button app-button--primary admin-profiles-toolbar__button"
-                  onClick={() => openProfileEditor(profilesTab)}
-                  type="button"
-                >
-                  + Nouveau profil
-                </button>
               </div>
 
               {profilesTab === 'internal' ? <FeedbackMessage feedback={feedback} /> : null}
               {profilesTab === 'senior' ? <FeedbackMessage feedback={seniorFeedback} /> : null}
               {profilesTab === 'senior' ? (
                 <FeedbackMessage feedback={seniorAccountFeedback} />
+              ) : null}
+              {revealedAccessKey ? (
+                <div className="validation-box" role="status">
+                  <strong>
+                    Clé d’accès de {revealedAccessKey.userLabel}
+                  </strong>
+                  <code>{revealedAccessKey.accessKey}</code>
+                  <span>
+                    Cette clé n’est affichée qu’ici. Copiez-la avant de fermer ce
+                    message.
+                  </span>
+                  <div className="admin-profile-card__actions">
+                    <button
+                      className="mini-button mini-button--secondary"
+                      onClick={() => void handleCopyAccessKey()}
+                      type="button"
+                    >
+                      Copier la clé
+                    </button>
+                    <button
+                      className="mini-button"
+                      onClick={() => setRevealedAccessKey(null)}
+                      type="button"
+                    >
+                      J’ai conservé la clé
+                    </button>
+                  </div>
+                </div>
               ) : null}
 
               <div className="admin-profile-list admin-profile-list--tall">
@@ -5216,9 +6515,12 @@ export function AdminScreen() {
                             </div>
                             <div className="profile-card__meta">
                               <span>{profile.promotion}</span>
-                              <span>Stage actuel : {profile.currentRotation}</span>
                               <span>Identifiant : {profile.loginId}</span>
-                              <span>Mot de passe : {MASKED_PASSWORD}</span>
+                              <span>
+                                {profile.mustChangePassword
+                                  ? 'Activation en attente'
+                                  : 'Compte activé'}
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -5238,16 +6540,18 @@ export function AdminScreen() {
                           >
                             Modifier
                           </button>
-                          <button
-                            className="mini-button"
-                            onClick={() => handlePrepareInternalPasswordReset(profile)}
-                            type="button"
-                          >
-                            Réinitialiser le mot de passe
-                          </button>
+                          {isAdmin && profile.mustChangePassword ? (
+                            <button
+                              className="mini-button"
+                              onClick={() => void handleRegenerateAccessKey(profile)}
+                              type="button"
+                            >
+                              Régénérer la clé d’accès
+                            </button>
+                          ) : null}
                           <button
                             className="mini-button mini-button--danger"
-                            onClick={() => setProfileToDelete(profile)}
+                            onClick={() => handleDeleteInternalProfile(profile)}
                             type="button"
                           >
                             Désactiver le profil
@@ -5258,7 +6562,7 @@ export function AdminScreen() {
                   ) : (
                     <div className="validation-box">
                       <strong>Aucun profil interne trouvé</strong>
-                      <span>Essayez un autre terme ou créez un nouveau profil.</span>
+                      <span>Essayez un autre terme de recherche.</span>
                     </div>
                   )
                 ) : filteredSeniorProfiles.length ? (
@@ -5279,7 +6583,11 @@ export function AdminScreen() {
                           </div>
                           <div className="profile-card__meta">
                             <span>Identifiant : {senior.loginId}</span>
-                            <span>Mot de passe : {MASKED_PASSWORD}</span>
+                            <span>
+                              {senior.mustChangePassword
+                                ? 'Activation en attente'
+                                : 'Compte activé'}
+                            </span>
                             {!senior.isCustom ? (
                               <span>Compte système : modification désactivée</span>
                             ) : null}
@@ -5296,13 +6604,15 @@ export function AdminScreen() {
                           >
                             Modifier
                           </button>
-                          <button
-                            className="mini-button"
-                            onClick={() => handlePrepareSeniorPasswordReset(senior)}
-                            type="button"
-                          >
-                            Réinitialiser le mot de passe
-                          </button>
+                          {isAdmin && senior.mustChangePassword ? (
+                            <button
+                              className="mini-button"
+                              onClick={() => void handleRegenerateAccessKey(senior)}
+                              type="button"
+                            >
+                              Régénérer la clé d’accès
+                            </button>
+                          ) : null}
                           <button
                             className="mini-button mini-button--danger"
                             onClick={() => handleDeleteSeniorProfile(senior)}
@@ -5348,8 +6658,13 @@ export function AdminScreen() {
                 ) : null}
               </div>
 
-              <div className="admin-profile-editor__switch">
+              <div
+                aria-label="Type de compte à éditer"
+                className="admin-profile-editor__switch"
+                role="tablist"
+              >
                 <button
+                  aria-selected={profileEditorType === 'internal'}
                   className={
                     profileEditorType === 'internal'
                       ? 'admin-profile-editor__switch-button admin-profile-editor__switch-button--active'
@@ -5359,11 +6674,13 @@ export function AdminScreen() {
                     setProfileEditorType('internal');
                     resetSeniorEditor();
                   }}
+                  role="tab"
                   type="button"
                 >
                   Interne
                 </button>
                 <button
+                  aria-selected={profileEditorType === 'senior'}
                   className={
                     profileEditorType === 'senior'
                       ? 'admin-profile-editor__switch-button admin-profile-editor__switch-button--active'
@@ -5373,6 +6690,7 @@ export function AdminScreen() {
                     setProfileEditorType('senior');
                     resetInternalEditor();
                   }}
+                  role="tab"
                   type="button"
                 >
                   Senior
@@ -5423,22 +6741,23 @@ export function AdminScreen() {
                       />
                     </label>
 
-                    <label className="field-stack">
-                      <span className="field-stack__label">Mot de passe temporaire</span>
-                      <input
-                        autoCapitalize="none"
-                        autoCorrect="off"
+                    <label className="field-stack admin-create-form__field--full">
+                      <span className="field-stack__label">Établissement</span>
+                      <select
                         className="field-input"
                         onChange={(event) =>
-                          handleCreateFieldChange('password', event.target.value)
+                          handleCreateFieldChange('institutionId', event.target.value)
                         }
-                        placeholder="Mot de passe temporaire"
-                        type="text"
-                        value={createForm.password}
-                      />
-                      <span className="field-helper">
-                        L’utilisateur devra le changer lors de sa première connexion.
-                      </span>
+                        required
+                        value={createForm.institutionId}
+                      >
+                        <option value="">Sélectionner un établissement</option>
+                        {activeInstitutions.map((institution) => (
+                          <option key={institution.id} value={institution.id}>
+                            {institution.name}
+                          </option>
+                        ))}
+                      </select>
                     </label>
 
                     <label className="field-stack">
@@ -5477,25 +6796,18 @@ export function AdminScreen() {
                       </select>
                     </label>
 
-                    <label className="field-stack admin-create-form__field--full">
-                      <span className="field-stack__label">Stage actuel</span>
-                      <input
-                        className="field-input"
-                        list="rotation-suggestions"
-                        onChange={(event) =>
-                          handleCreateFieldChange('currentRotation', event.target.value)
-                        }
-                        placeholder="Ex : Chirurgie digestive"
-                        type="text"
-                        value={createForm.currentRotation}
-                      />
-                      <datalist id="rotation-suggestions">
-                        {ROTATION_SUGGESTIONS.map((rotation) => (
-                          <option key={rotation} value={rotation} />
-                        ))}
-                      </datalist>
-                    </label>
                   </div>
+
+                  {!editingInternalProfileId ? (
+                    <div className="validation-box">
+                      <strong>Clé d’accès générée automatiquement</strong>
+                      <span>
+                        Le site affichera une clé provisoire XXXX-XXXX une seule
+                        fois après la création. L’interne choisira lui-même son
+                        e-mail et son mot de passe à sa première connexion.
+                      </span>
+                    </div>
+                  ) : null}
 
                   <div className="admin-profile-editor__actions">
                     {(editingInternalProfileId || createForm.firstName || createForm.lastName) ? (
@@ -5556,24 +6868,39 @@ export function AdminScreen() {
                       />
                     </label>
 
-                    <label className="field-stack">
-                      <span className="field-stack__label">Mot de passe temporaire</span>
-                      <input
-                        autoCapitalize="none"
-                        autoCorrect="off"
+                    <label className="field-stack admin-create-form__field--full">
+                      <span className="field-stack__label">Établissement</span>
+                      <select
                         className="field-input"
                         onChange={(event) =>
-                          handleCreateSeniorFieldChange('password', event.target.value)
+                          handleCreateSeniorFieldChange(
+                            'institutionId',
+                            event.target.value
+                          )
                         }
-                        placeholder="Mot de passe temporaire"
-                        type="text"
-                        value={createSeniorForm.password}
-                      />
-                      <span className="field-helper">
-                        L’utilisateur devra le changer lors de sa première connexion.
-                      </span>
+                        required
+                        value={createSeniorForm.institutionId}
+                      >
+                        <option value="">Sélectionner un établissement</option>
+                        {activeInstitutions.map((institution) => (
+                          <option key={institution.id} value={institution.id}>
+                            {institution.name}
+                          </option>
+                        ))}
+                      </select>
                     </label>
                   </div>
+
+                  {!editingSeniorId ? (
+                    <div className="validation-box">
+                      <strong>Clé d’accès générée automatiquement</strong>
+                      <span>
+                        Le site affichera une clé provisoire XXXX-XXXX une seule
+                        fois après la création. Le senior choisira lui-même son
+                        e-mail et son mot de passe à sa première connexion.
+                      </span>
+                    </div>
+                  ) : null}
 
                   <div className="admin-profile-editor__actions">
                     {(editingSeniorId || createSeniorForm.firstName || createSeniorForm.lastName) ? (
@@ -5594,29 +6921,89 @@ export function AdminScreen() {
             </aside>
           </div>
         </SectionCard>
+
+        {isAdmin ? (
+          <SectionCard
+            className="admin-dashboard-card"
+            description="Cette vue est en lecture seule. Les comptes restent rattachés à leur historique sans pouvoir se reconnecter."
+            title="Historique des comptes désactivés"
+          >
+            {isLoadingDisabledProfiles ? (
+              <div className="validation-box" role="status">
+                <strong>Chargement de l’historique…</strong>
+              </div>
+            ) : disabledProfilesError ? (
+              <div className="auth-error" role="alert">
+                {disabledProfilesError}
+              </div>
+            ) : disabledProfiles.length ? (
+              <div className="admin-profile-list">
+                {disabledProfiles.map((profile) => (
+                  <article
+                    className="profile-card profile-card--static admin-profile-card"
+                    key={profile.id}
+                  >
+                    <div className="admin-profile-card__identity">
+                      <span className="admin-profile-card__avatar admin-profile-card__avatar--senior">
+                        <span className="admin-profile-card__initials">
+                          {getProfileInitials(profile)}
+                        </span>
+                      </span>
+                      <div className="admin-profile-card__copy">
+                        <div className="profile-card__header">
+                          <strong>
+                            {formatDisplayName(profile.firstName, profile.lastName)}
+                          </strong>
+                          <span className="profile-card__badge">
+                            {profile.role === 'internal'
+                              ? 'Interne'
+                              : profile.role === 'senior'
+                                ? 'Senior'
+                                : 'Administrateur'}
+                          </span>
+                        </div>
+                        <div className="profile-card__meta">
+                          <span>
+                            Établissement : {profile.institution ?? 'Non renseigné'}
+                          </span>
+                          <span>
+                            Désactivé le{' '}
+                            {formatAdminConnectionTimestamp(profile.updatedAt)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <div className="validation-box">
+                <strong>Aucun compte désactivé</strong>
+                <span>Les comptes désactivés apparaîtront ici sans être supprimés.</span>
+              </div>
+            )}
+          </SectionCard>
+        ) : null}
       </AdminPageShell>
     );
   }
 
   if (view === 'interventions') {
     return (
-      <ScreenContainer
-        bodyClassName="admin-workspace__body"
-        frameClassName="admin-workspace__frame"
-        frameWidth="wide"
-        heroClassName="admin-workspace__hero"
-        hideBrandmark
-        shellClassName="admin-workspace"
+      <AdminPageShell
+        backLabel="Retour à l’espace administrateur"
+        onBack={() => setView('home')}
+        subtitle="Configurer les interventions, leurs voies d’abord et les étapes opératoires évaluables."
+        title="Création des interventions"
       >
         <AdminInterventionsManager
           createSurgicalIntervention={createSurgicalIntervention}
           deleteCustomSurgicalIntervention={deleteCustomSurgicalIntervention}
           interventions={surgicalInterventionDefinitions}
-          onBack={() => setView('home')}
           savedInterventions={savedInterventions}
           updateSurgicalIntervention={updateSurgicalIntervention}
         />
-      </ScreenContainer>
+      </AdminPageShell>
     );
   }
 
@@ -5658,6 +7045,7 @@ export function AdminScreen() {
             <div className="admin-filter-chip-row">
               {ADMIN_TROPHY_FILTER_OPTIONS.map((option) => (
                 <button
+                  aria-pressed={trophyFilter === option.value}
                   className={`admin-filter-chip ${
                     trophyFilter === option.value ? 'admin-filter-chip--active' : ''
                   }`}
@@ -5685,10 +7073,7 @@ export function AdminScreen() {
           <div className="admin-trophy-grid">
             {filteredAdminTrophies.map((trophy) => {
               const previewImage = getTrophyPreviewImage(trophy);
-              const summaryLabel =
-                trophy.visibility === 'surprise' && trophy.type === 'special'
-                  ? 'Règle visible uniquement par l’administrateur.'
-                  : trophy.ruleSummary;
+              const summaryLabel = trophy.ruleSummary;
 
               return (
                 <article className="admin-trophy-card" key={trophy.id}>
@@ -5757,13 +7142,15 @@ export function AdminScreen() {
                     >
                       {trophy.status === 'active' ? 'Désactiver' : 'Activer'}
                     </button>
-                    <button
-                      className="mini-button mini-button--danger"
-                      onClick={() => handleDeleteTrophy(trophy.id)}
-                      type="button"
-                    >
-                      Supprimer
-                    </button>
+                    {trophy.status === 'draft' ? (
+                      <button
+                        className="mini-button mini-button--danger"
+                        onClick={() => handleDeleteTrophy(trophy.id)}
+                        type="button"
+                      >
+                        Supprimer le brouillon
+                      </button>
+                    ) : null}
                   </div>
                 </article>
               );
@@ -5862,7 +7249,8 @@ export function AdminScreen() {
           trophyDraft,
           previewProfile,
           savedInterventions,
-          adminEvaluations
+          adminEvaluations,
+          customSurgicalInterventions
         )
       : null;
     const previewImage = getTrophyPreviewImage(trophyDraft);
@@ -5870,7 +7258,8 @@ export function AdminScreen() {
       trophyDraft,
       internalProfiles,
       savedInterventions,
-      adminEvaluations
+      adminEvaluations,
+      customSurgicalInterventions
     );
     const matchingProfiles = internalProfiles
       .filter(
@@ -5879,7 +7268,8 @@ export function AdminScreen() {
             trophyDraft,
             profile,
             savedInterventions,
-            adminEvaluations
+            adminEvaluations,
+            customSurgicalInterventions
           ) != null
       )
       .sort((left, right) =>
@@ -5915,7 +7305,11 @@ export function AdminScreen() {
             onClick={handleSaveTrophy}
             type="button"
           >
-            {isSavingTrophy ? 'Enregistrement...' : 'Enregistrer'}
+            {isSavingTrophy
+              ? 'Enregistrement...'
+              : trophyDraft.status === 'draft'
+                ? 'Enregistrer le brouillon'
+                : 'Publier la version'}
           </button>
         </div>
 
@@ -5967,19 +7361,19 @@ export function AdminScreen() {
 
                 <label className="field-stack admin-create-form__field--full">
                   <span className="field-stack__label">
-                    Description courte (optionnelle)
+                    Description courte
                   </span>
                   <input
                     className="field-input"
                     onChange={(event) =>
                       handleTrophyDraftFieldChange('description', event.target.value)
                     }
-                    placeholder="Optionnel : décrivez brièvement ce que récompense ce trophée."
+                    placeholder="Décrivez brièvement ce que récompense ce trophée."
                     type="text"
                     value={trophyDraft.description}
                   />
                   <small className="field-stack__hint">
-                    Ce champ est facultatif et n’empêche pas l’enregistrement.
+                    Cette description est obligatoire avant publication.
                   </small>
                 </label>
 
@@ -5995,7 +7389,9 @@ export function AdminScreen() {
                     >
                       <option value="draft">Brouillon</option>
                       <option value="active">Actif</option>
-                      <option value="inactive">Inactif</option>
+                      {trophyDraft.everActivated ? (
+                        <option value="inactive">Inactif</option>
+                      ) : null}
                     </select>
                   </label>
                 </div>
@@ -6201,6 +7597,7 @@ export function AdminScreen() {
                           {[
                             'total_recorded',
                             'total_evaluated',
+                            'profile_login_count',
                             'procedure_count',
                             'approach_count',
                             'recording_time_range',
@@ -6812,6 +8209,83 @@ export function AdminScreen() {
     );
   }
 
+  const adminHomeShortcuts = (
+    <section className="admin-home-shortcuts" aria-labelledby="admin-home-shortcuts-title">
+      <h2 id="admin-home-shortcuts-title">Accès rapides</h2>
+      <div className="admin-shortcut-grid admin-shortcut-grid--home">
+        <button
+          className="admin-shortcut-card admin-shortcut-card--compact"
+          onClick={() => setView('trophies')}
+          type="button"
+        >
+          <span className="admin-shortcut-card__icon">
+            <Trophy aria-hidden="true" />
+          </span>
+          <div className="admin-shortcut-card__copy">
+            <strong>Catalogue trophées</strong>
+          </div>
+          <ChevronRight aria-hidden="true" />
+        </button>
+
+        <button
+          className="admin-shortcut-card admin-shortcut-card--compact"
+          onClick={() => setView('history')}
+          type="button"
+        >
+          <span className="admin-shortcut-card__icon admin-shortcut-card__icon--green">
+            <FolderOpen aria-hidden="true" />
+          </span>
+          <div className="admin-shortcut-card__copy">
+            <strong>Historique des blocs</strong>
+          </div>
+          <ChevronRight aria-hidden="true" />
+        </button>
+
+        <button
+          className="admin-shortcut-card admin-shortcut-card--compact"
+          onClick={() => setView('interventions')}
+          type="button"
+        >
+          <span className="admin-shortcut-card__icon admin-shortcut-card__icon--violet">
+            <Pencil aria-hidden="true" />
+          </span>
+          <div className="admin-shortcut-card__copy">
+            <strong>Créer les interventions</strong>
+          </div>
+          <ChevronRight aria-hidden="true" />
+        </button>
+
+        <button
+          className="admin-shortcut-card admin-shortcut-card--compact"
+          onClick={() => setView('profiles')}
+          type="button"
+        >
+          <span className="admin-shortcut-card__icon admin-shortcut-card__icon--amber">
+            <Users aria-hidden="true" />
+          </span>
+          <div className="admin-shortcut-card__copy">
+            <strong>Gestion des profils</strong>
+          </div>
+          <ChevronRight aria-hidden="true" />
+        </button>
+
+        <button
+          className="admin-shortcut-card admin-shortcut-card--compact"
+          onClick={() => setView('institutions')}
+          type="button"
+        >
+          <span className="admin-shortcut-card__icon admin-shortcut-card__icon--green">
+            <Building2 aria-hidden="true" />
+          </span>
+          <div className="admin-shortcut-card__copy">
+            <strong>Gestion établissements</strong>
+          </div>
+          <ChevronRight aria-hidden="true" />
+        </button>
+      </div>
+    </section>
+  );
+
   if (isSenior && selectedSenior) {
     return (
       <SeniorDashboard
@@ -6820,7 +8294,9 @@ export function AdminScreen() {
         internalProfiles={internalProfiles}
         onEvaluate={openEvaluationTool}
         onLogout={logout}
+        refreshBackendData={refreshBackendData}
         savedInterventions={savedInterventions}
+        selectableSeniors={selectableSeniors}
         selectedSenior={selectedSenior}
         surgicalProcedureOptions={surgicalProcedureOptions}
         updateSeniorCredentials={updateSeniorCredentials}
@@ -6835,15 +8311,19 @@ export function AdminScreen() {
         subtitle="Supervision de l’activité opératoire, gestion des profils, interventions et trophées pédagogiques."
         title="Espace administrateur"
       >
-        <SectionCard
-          className="admin-dashboard-card admin-activity-card"
-          description="Évolution des interventions enregistrées et évaluées"
-          title="Rapport d’activité"
-        >
+        {adminHomeShortcuts}
+
+        <div className="admin-home-dashboard-grid">
+          <SectionCard
+            className="admin-dashboard-card admin-activity-card admin-home-activity-card"
+            description="Évolution des interventions enregistrées et évaluées"
+            title="Rapport d’activité"
+          >
           <div className="admin-activity-card__toolbar">
             <div className="admin-segmented-control" role="tablist" aria-label="Période">
               {ADMIN_ACTIVITY_RANGE_OPTIONS.map((option) => (
                 <button
+                  aria-selected={activityRange === option.value}
                   className={`admin-segmented-control__button ${
                     activityRange === option.value
                       ? 'admin-segmented-control__button--active'
@@ -6851,90 +8331,97 @@ export function AdminScreen() {
                   }`}
                   key={option.value}
                   onClick={() => setActivityRange(option.value)}
+                  role="tab"
                   type="button"
                 >
                   {option.label}
                 </button>
               ))}
             </div>
-          </div>
-
-          <div className="admin-activity-chart-scroll">
-            <div
-              className="admin-activity-chart"
-              style={{
-                gridTemplateColumns: `repeat(${activityBuckets.length}, minmax(88px, 1fr))`,
-                minWidth: `${activityBuckets.length * 98}px`,
-              }}
-            >
-              {activityBuckets.map((bucket) => (
-                <div className="admin-activity-chart__group" key={bucket.id}>
-                  <div className="admin-activity-chart__bars">
-                    <div
-                      className="admin-activity-chart__bar admin-activity-chart__bar--recorded"
-                      style={{
-                        height: `${(bucket.recordedCount / activityTotals.chartMax) * 100}%`,
-                      }}
-                    >
-                      <span>{bucket.recordedCount}</span>
-                    </div>
-                    <div
-                      className="admin-activity-chart__bar admin-activity-chart__bar--evaluated"
-                      style={{
-                        height: `${(bucket.evaluatedCount / activityTotals.chartMax) * 100}%`,
-                      }}
-                    >
-                      <span>{bucket.evaluatedCount}</span>
-                    </div>
-                  </div>
-                  <strong>{bucket.label}</strong>
-                </div>
-              ))}
+            <div className="admin-home-chart-summary" aria-label="Synthèse de la période">
+              <span className="admin-home-chart-summary__item">
+                <strong>{activityTotals.totalRecorded}</strong>
+                enregistrées
+              </span>
+              <span className="admin-home-chart-summary__item admin-home-chart-summary__item--navy">
+                <strong>{activityTotals.totalEvaluated}</strong>
+                évaluées
+              </span>
             </div>
           </div>
 
-          <div className="admin-activity-legend">
-            <span>
-              <i className="admin-activity-legend__dot admin-activity-legend__dot--recorded" />
-              Interventions enregistrées
-            </span>
-            <span>
-              <i className="admin-activity-legend__dot admin-activity-legend__dot--evaluated" />
-              Interventions évaluées
-            </span>
-          </div>
-
-          <div className="admin-metric-grid">
-            <article className="admin-metric-card">
-              <span className="admin-metric-card__icon">
-                <FolderOpen
-                  aria-hidden="true"
-                  className="admin-metric-card__glyph admin-metric-card__glyph--folder"
-                />
-              </span>
-              <div>
-                <strong>{activityTotals.totalRecorded}</strong>
-                <span>Total enregistré</span>
-                <small>sur la période</small>
+          {hasActivityChartData ? (
+            <>
+              <div className="admin-activity-chart-scroll" ref={homeActivityChartScrollRef}>
+                <div
+                  className="admin-activity-chart"
+                  style={{
+                    gridTemplateColumns: `repeat(${activityBuckets.length}, minmax(88px, 1fr))`,
+                    minWidth: `${activityBuckets.length * 98}px`,
+                  }}
+                >
+                  {activityBuckets.map((bucket) => (
+                    <div className="admin-activity-chart__group" key={bucket.id}>
+                      <div className="admin-activity-chart__bars">
+                        <div
+                          className="admin-activity-chart__bar admin-activity-chart__bar--recorded"
+                          style={{
+                            height: `${(bucket.recordedCount / activityTotals.chartMax) * 100}%`,
+                          }}
+                        >
+                          <span>{bucket.recordedCount}</span>
+                        </div>
+                        <div
+                          className="admin-activity-chart__bar admin-activity-chart__bar--evaluated"
+                          style={{
+                            height: `${(bucket.evaluatedCount / activityTotals.chartMax) * 100}%`,
+                          }}
+                        >
+                          <span>{bucket.evaluatedCount}</span>
+                        </div>
+                      </div>
+                      <strong>{bucket.label}</strong>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </article>
-            <article className="admin-metric-card">
-              <span className="admin-metric-card__icon admin-metric-card__icon--navy">
-                <Check
-                  aria-hidden="true"
-                  className="admin-metric-card__glyph admin-metric-card__glyph--check"
-                />
-              </span>
-              <div>
-                <strong>{activityTotals.totalEvaluated}</strong>
-                <span>Total évalué</span>
-                <small>sur la période</small>
-              </div>
-            </article>
-          </div>
-        </SectionCard>
 
-        <SectionCard className="admin-dashboard-card" title="Dernières activités utilisateurs">
+              <div className="admin-activity-legend">
+                <span>
+                  <i className="admin-activity-legend__dot admin-activity-legend__dot--recorded" />
+                  Interventions enregistrées
+                </span>
+                <span>
+                  <i className="admin-activity-legend__dot admin-activity-legend__dot--evaluated" />
+                  Interventions évaluées
+                </span>
+              </div>
+            </>
+          ) : (
+            <div className="admin-empty-state">
+              <BarChart3 aria-hidden="true" />
+              <strong>Aucune activité sur la période</strong>
+              <span>
+                Le graphique apparaitra dès qu'une intervention sera enregistrée ou évaluée.
+              </span>
+            </div>
+          )}
+
+          </SectionCard>
+
+          <SectionCard
+          className="admin-dashboard-card admin-home-connections-card"
+          headerAction={
+            <button
+              className="mini-button mini-button--secondary"
+              onClick={() => setView('connections')}
+              type="button"
+            >
+              Voir toutes les activités
+            </button>
+          }
+          title="Dernières activités utilisateurs"
+        >
           {recentUserConnections.length ? (
             <div className="admin-connections-list">
               {recentUserConnections.map((connection) => {
@@ -6973,79 +8460,39 @@ export function AdminScreen() {
               })}
             </div>
           ) : (
-            <div className="validation-box">
-              <strong>Aucune connexion sur les 48 dernières heures</strong>
-              <span>
-                Les connexions internes et seniors récentes apparaîtront ici
-                automatiquement.
-              </span>
-            </div>
+            <>
+              <div className="validation-box">
+                <strong>Aucune connexion sur les 48 dernières heures</strong>
+                <span>
+                  Les connexions internes et seniors récentes apparaîtront ici
+                  automatiquement.
+                </span>
+              </div>
+            </>
           )}
-        </SectionCard>
-
-        <div className="admin-shortcut-grid">
-          <button
-            className="admin-shortcut-card"
-            onClick={() => setView('trophies')}
-            type="button"
-          >
-            <span className="admin-shortcut-card__icon">
-              <Trophy aria-hidden="true" />
-            </span>
-            <div className="admin-shortcut-card__copy">
-              <strong>Catalogue des trophées</strong>
-              <span>Créer, modifier et consulter les trophées pédagogiques.</span>
+            <div className="admin-home-status-grid">
+              <article className="admin-home-status-card">
+                <span className="admin-home-status-card__icon">
+                  <Clock3 aria-hidden="true" />
+                </span>
+                <div>
+                  <strong>{activityTotals.totalPending}</strong>
+                  <span>en attente</span>
+                  <small>Interventions à évaluer</small>
+                </div>
+              </article>
+              <article className="admin-home-status-card admin-home-status-card--profiles">
+                <span className="admin-home-status-card__icon">
+                  <Users aria-hidden="true" />
+                </span>
+                <div>
+                  <strong>{activeProfileCount}</strong>
+                  <span>profils actifs</span>
+                  <small>Internes et seniors</small>
+                </div>
+              </article>
             </div>
-            <ChevronRight aria-hidden="true" />
-          </button>
-
-          <button
-            className="admin-shortcut-card"
-            onClick={() => setView('history')}
-            type="button"
-          >
-            <span className="admin-shortcut-card__icon admin-shortcut-card__icon--green">
-              <FolderOpen aria-hidden="true" />
-            </span>
-            <div className="admin-shortcut-card__copy">
-              <strong>Historique des blocs</strong>
-              <span>
-                Consulter toutes les interventions enregistrées, filtrer les données
-                et exporter en Excel.
-              </span>
-            </div>
-            <ChevronRight aria-hidden="true" />
-          </button>
-
-          <button
-            className="admin-shortcut-card"
-            onClick={() => setView('interventions')}
-            type="button"
-          >
-            <span className="admin-shortcut-card__icon admin-shortcut-card__icon--violet">
-              <Pencil aria-hidden="true" />
-            </span>
-            <div className="admin-shortcut-card__copy">
-              <strong>Créer les interventions</strong>
-              <span>Ajouter ou modifier les interventions, voies d’abord et étapes opératoires.</span>
-            </div>
-            <ChevronRight aria-hidden="true" />
-          </button>
-
-          <button
-            className="admin-shortcut-card"
-            onClick={() => setView('profiles')}
-            type="button"
-          >
-            <span className="admin-shortcut-card__icon admin-shortcut-card__icon--amber">
-              <Users aria-hidden="true" />
-            </span>
-            <div className="admin-shortcut-card__copy">
-              <strong>Administration des profils</strong>
-              <span>Créer et gérer les comptes internes, seniors et administrateurs.</span>
-            </div>
-            <ChevronRight aria-hidden="true" />
-          </button>
+          </SectionCard>
         </div>
 
         <button className="admin-logout-button" onClick={logout} type="button">
@@ -7157,342 +8604,6 @@ export function AdminScreen() {
         )}
       </SectionCard>
 
-      {false ? (
-      <SectionCard title="Créer une nouvelle intervention">
-        <form
-          className="admin-create-form"
-          onSubmit={handleCreateSurgicalIntervention}
-        >
-          <label className="field-stack">
-            <span className="field-stack__label">Nom de l’intervention</span>
-            <input
-              className="field-input"
-              onChange={(event) => {
-                setSurgicalInterventionForm((current) => ({
-                  ...current,
-                  name: event.target.value,
-                }));
-                setSurgicalInterventionFeedback(null);
-              }}
-              type="text"
-              value={surgicalInterventionForm.name}
-            />
-          </label>
-
-          <div className="field-stack">
-            <span className="field-stack__label">Indication</span>
-            <div className="admin-step-editor">
-              {surgicalInterventionForm.indications.map((indication, index) => (
-                <div className="admin-step-editor__row" key={index}>
-                  <input
-                    className="field-input"
-                    onChange={(event) =>
-                      updateSurgicalIndication(index, event.target.value)
-                    }
-                    placeholder="Nouvelle indication possible"
-                    type="text"
-                    value={indication}
-                  />
-                  <button
-                    className="mini-button mini-button--secondary"
-                    onClick={() => removeSurgicalIndication(index)}
-                    type="button"
-                  >
-                    Retirer
-                  </button>
-                </div>
-              ))}
-            </div>
-            <button
-              className="mini-button mini-button--secondary"
-              onClick={addSurgicalIndication}
-              type="button"
-            >
-              Ajouter une indication
-            </button>
-          </div>
-
-          <label className="admin-checkbox-card admin-checkbox-card--single">
-            <input
-              checked={surgicalInterventionForm.requiresLaterality}
-              onChange={(event) =>
-                setSurgicalInterventionForm((current) => ({
-                  ...current,
-                  requiresLaterality: event.target.checked,
-                }))
-              }
-              type="checkbox"
-            />
-            <span className="admin-checkbox-card__plain-label">
-              Cette intervention nécessite de préciser la latéralité
-            </span>
-          </label>
-
-          {surgicalInterventionForm.requiresLaterality ? (
-            <div className="validation-box">
-              <strong>Latéralité activée</strong>
-              <span>Options proposées dans le journal : droite, gauche, bilatérale.</span>
-            </div>
-          ) : null}
-
-          <div className="field-stack">
-            <span className="field-stack__label">Voies d’abord possibles</span>
-            <div className="admin-checkbox-grid">
-              {approachOptions.map((approach) => (
-                <label className="admin-checkbox-card" key={approach.value}>
-                  <input
-                    checked={surgicalInterventionForm.allowedApproaches.includes(
-                      approach.value
-                    )}
-                    onChange={() => toggleSurgicalApproach(approach.value)}
-                    type="checkbox"
-                  />
-                  <span>{approach.label}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {customInterventionNeedsEntryTechnique ? (
-            <div className="field-stack">
-              <span className="field-stack__label">Technique d’entrée</span>
-              <div className="admin-checkbox-grid">
-                {entryTechniqueOptions.map((entryTechnique) => (
-                  <label
-                    className="admin-checkbox-card"
-                    key={entryTechnique.value}
-                  >
-                    <input
-                      checked={surgicalInterventionForm.allowedEntryTechniques.includes(
-                        entryTechnique.value
-                      )}
-                      onChange={() => toggleEntryTechnique(entryTechnique.value)}
-                      type="checkbox"
-                    />
-                    <span>{entryTechnique.label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="field-stack">
-            <span className="field-stack__label">Temps opératoires spécifiques à ajouter</span>
-            <div className="admin-step-editor">
-              {surgicalInterventionForm.customChecklistSteps.map((step, index) => (
-                <div className="admin-step-editor__row" key={index}>
-                  <input
-                    className="field-input"
-                    onChange={(event) =>
-                      updateCustomChecklistStep(index, event.target.value)
-                    }
-                    placeholder="Nouveau temps opératoire"
-                    type="text"
-                    value={step}
-                  />
-                  <button
-                    className="mini-button mini-button--secondary"
-                    disabled={surgicalInterventionForm.customChecklistSteps.length === 1}
-                    onClick={() => removeCustomChecklistStep(index)}
-                    type="button"
-                  >
-                    Retirer
-                  </button>
-                </div>
-              ))}
-            </div>
-            <button
-              className="mini-button mini-button--secondary"
-              onClick={addCustomChecklistStep}
-              type="button"
-            >
-              Ajouter un temps opératoire
-            </button>
-          </div>
-
-          <div className="field-stack">
-            <span className="field-stack__label">Temps opératoire</span>
-            <div className="admin-step-order-list">
-              {previewChecklistStepLabels.map((stepLabel, index) => (
-                <article
-                  className="admin-step-order-item"
-                  draggable
-                  key={stepLabel}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDragStart={() => setDraggedStepLabel(stepLabel)}
-                  onDrop={() => {
-                    if (draggedStepLabel) {
-                      moveChecklistStepLabel(draggedStepLabel, stepLabel);
-                    }
-                    setDraggedStepLabel(null);
-                  }}
-                >
-                  <span className="admin-step-order-item__index">
-                    Temps {index + 1}
-                  </span>
-                  <div className="admin-step-order-item__content">
-                    <strong>{stepLabel}</strong>
-                    <div className="admin-step-order-item__controls">
-                      <label className="admin-step-order-item__key">
-                        <input
-                          checked={surgicalInterventionForm.keyStepLabels.includes(
-                            stepLabel
-                          )}
-                          onChange={() => toggleKeyStepLabel(stepLabel)}
-                          type="checkbox"
-                        />
-                        <span>Temps opératoire clé</span>
-                      </label>
-                      {surgicalInterventionForm.allowedApproaches.length > 0 ? (
-                        <div className="admin-step-applicability">
-                          <span className="admin-step-applicability__label">
-                            Applicable pour
-                          </span>
-                          <div className="admin-step-applicability__options">
-                            {(() => {
-                              const selectedApproaches = getStepApproachLabels(
-                                stepLabel,
-                                surgicalInterventionForm
-                              );
-
-                              return (
-                                <>
-                                  <button
-                                    className={`admin-step-applicability__all ${
-                                      selectedApproaches.length === 0
-                                        ? 'admin-step-applicability__all--selected'
-                                        : ''
-                                    }`}
-                                    onClick={() =>
-                                      setStepApplicableToAllApproaches(stepLabel)
-                                    }
-                                    type="button"
-                                  >
-                                    Toutes les voies
-                                  </button>
-                                  {surgicalInterventionForm.allowedApproaches.map(
-                                    (approach) => (
-                                      <label
-                                        className={`admin-step-applicability__choice ${
-                                          selectedApproaches.includes(approach)
-                                            ? 'admin-step-applicability__choice--selected'
-                                            : ''
-                                        }`}
-                                        key={approach}
-                                      >
-                                        <input
-                                          checked={selectedApproaches.includes(
-                                            approach
-                                          )}
-                                          onChange={() =>
-                                            toggleStepApplicableApproach(
-                                              stepLabel,
-                                              approach
-                                            )
-                                          }
-                                          type="checkbox"
-                                        />
-                                        <span>
-                                          {getChoiceLabel(
-                                            approachOptions,
-                                            approach
-                                          )}
-                                        </span>
-                                      </label>
-                                    )
-                                  )}
-                                </>
-                              );
-                            })()}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </div>
-
-          <FeedbackMessage feedback={surgicalInterventionFeedback} />
-
-          <div className="admin-form-actions">
-            <button className="app-button app-button--primary" type="submit">
-              {isEditingSurgicalIntervention
-                ? 'Enregistrer les modifications'
-                : 'Créer l’intervention'}
-            </button>
-            <button
-              className="app-button app-button--secondary"
-              onClick={() =>
-                setShowSurgicalInterventionList((current) => !current)
-              }
-              type="button"
-            >
-              Voir les interventions
-            </button>
-            {isEditingSurgicalIntervention ? (
-              <button
-                className="app-button app-button--secondary"
-                onClick={cancelSurgicalInterventionEdition}
-                type="button"
-              >
-                Annuler la modification
-              </button>
-            ) : null}
-          </div>
-
-          {showSurgicalInterventionList ? (
-            <div className="admin-created-interventions">
-              {surgicalInterventionDefinitions.map((intervention) => {
-                const storedDefinition = customSurgicalInterventions.find(
-                  (storedIntervention) => storedIntervention.id === intervention.id
-                );
-
-                return (
-                  <article
-                    className="admin-created-intervention"
-                    key={intervention.id}
-                  >
-                    <div className="admin-created-intervention__header">
-                      <strong>{intervention.name}</strong>
-                    </div>
-                    <span>{intervention.checklistSteps.length} étape(s)</span>
-                    <span>{intervention.keyStepIds.length} temps opératoire(s) clé(s)</span>
-                    {intervention.indications.length ? (
-                      <span>
-                        Indications : {intervention.indications.join(', ')}
-                      </span>
-                    ) : null}
-                    <div className="admin-created-intervention__actions">
-                      <button
-                        className="mini-button mini-button--secondary"
-                        onClick={() => handleEditSurgicalIntervention(intervention)}
-                        type="button"
-                      >
-                        Modifier
-                      </button>
-                      {storedDefinition ? (
-                        <button
-                          className="mini-button mini-button--danger"
-                          onClick={() =>
-                            deleteCustomSurgicalIntervention(intervention.id)
-                          }
-                          type="button"
-                        >
-                          Supprimer
-                        </button>
-                      ) : null}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          ) : null}
-        </form>
-      </SectionCard>
-      ) : null}
-
           {false ? (
           <SectionCard title="Profils internes">
             <div className="admin-profile-list">
@@ -7513,9 +8624,8 @@ export function AdminScreen() {
                   </div>
                   <div className="profile-card__meta">
                     <span>{profile.promotion}</span>
-                    <span>{profile.currentRotation}</span>
                     <span>Identifiant : {profile.loginId}</span>
-                    <span>Mot de passe : {profile.password}</span>
+                    <span>E-mail : {profile.contactEmail ?? 'Non renseigné'}</span>
                   </div>
                   <div className="admin-profile-card__actions">
                     <button
@@ -7527,7 +8637,7 @@ export function AdminScreen() {
                     </button>
                     <button
                       className="mini-button mini-button--danger"
-                      onClick={() => setProfileToDelete(profile)}
+                      onClick={() => handleDeleteInternalProfile(profile)}
                       type="button"
                     >
                       Supprimer le profil
@@ -7645,14 +8755,6 @@ export function AdminScreen() {
                     >
                       Exporter en CSV
                     </button>
-                    <button
-                      className="mini-button mini-button--danger"
-                      disabled={selectedIds.length === 0}
-                      onClick={handleDelete}
-                      type="button"
-                    >
-                      Supprimer la sélection
-                    </button>
                   </div>
                 </div>
 
@@ -7682,7 +8784,7 @@ export function AdminScreen() {
                               type="checkbox"
                             />
                             <span className="admin-item__checkbox-label">
-                              Sélectionner pour export ou suppression
+                              Sélectionner pour l’export
                             </span>
                           </label>
                           <div className="admin-item__header">
@@ -7734,1044 +8836,6 @@ export function AdminScreen() {
             )}
           </SectionCard>
           ) : null}
-      {profileToDelete ? (
-        <div
-          aria-modal="true"
-          className="confirm-modal"
-          onClick={() => setProfileToDelete(null)}
-          role="dialog"
-        >
-          <div
-            className="confirm-modal__content"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <h2>Supprimer ce profil ?</h2>
-              <p>
-                Le profil sera supprimé ainsi que les données qui y sont rattachées.
-              </p>
-            <div className="confirm-modal__actions">
-              <button
-                className="mini-button mini-button--secondary"
-                onClick={() => setProfileToDelete(null)}
-                type="button"
-              >
-                Annuler
-              </button>
-              <button
-                className="mini-button mini-button--danger"
-                onClick={handleConfirmProfileDeletion}
-                type="button"
-              >
-                Confirmer la suppression
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
     </ScreenContainer>
-  );
-}
-
-function SeniorDashboard({
-  adminEvaluations,
-  customSurgicalInterventions,
-  internalProfiles,
-  onEvaluate,
-  onLogout,
-  savedInterventions,
-  selectedSenior,
-  surgicalProcedureOptions,
-  updateSeniorCredentials,
-  updateSeniorManagedInternals,
-}: {
-  adminEvaluations: Record<string, AdminInterventionEvaluation>;
-  customSurgicalInterventions: SurgicalInterventionDefinition[];
-  internalProfiles: InternalProfile[];
-  onEvaluate: (interventionId: string) => void;
-  onLogout: () => void;
-  savedInterventions: SavedIntervention[];
-  selectedSenior: Senior;
-  surgicalProcedureOptions: ReturnType<typeof useAppContext>['surgicalProcedureOptions'];
-  updateSeniorCredentials: (
-    seniorId: string,
-    input: UpdateSeniorCredentialsInput
-  ) => UpdateSeniorCredentialsResult;
-  updateSeniorManagedInternals: (seniorId: string, internalIds: string[]) => void;
-}) {
-  const seniorName = formatDisplayName(
-    selectedSenior.firstName,
-    selectedSenior.lastName
-  );
-  const pendingEvaluationsPreviewLimit = 5;
-  const [populationFilter, setPopulationFilter] =
-    useState<SeniorPopulationFilter>('recent');
-  const [isInternalSettingsSheetOpen, setIsInternalSettingsSheetOpen] =
-    useState(false);
-  const [isPasswordSheetOpen, setIsPasswordSheetOpen] = useState(false);
-  const [isPendingEvaluationsSheetOpen, setIsPendingEvaluationsSheetOpen] =
-    useState(false);
-  const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
-  const [managedInternalIdsDraft, setManagedInternalIdsDraft] = useState<string[]>(
-    selectedSenior.managedInternalIds ?? []
-  );
-  const [passwordForm, setPasswordForm] = useState({
-    currentPassword: '',
-    nextPassword: '',
-    confirmPassword: '',
-  });
-  const [passwordFeedback, setPasswordFeedback] = useState<FeedbackState>(null);
-  const [selectedInterventionKey, setSelectedInterventionKey] = useState(
-    SENIOR_FALLBACK_INTERVENTION_OPTION.key
-  );
-  const [selectedInternalId, setSelectedInternalId] = useState<string | null>(null);
-  const internalStripRef = useRef<HTMLDivElement | null>(null);
-
-  const alphabeticalProfiles = useMemo(
-    () =>
-      [...internalProfiles].sort((left, right) =>
-        formatDisplayName(left.firstName, left.lastName).localeCompare(
-          formatDisplayName(right.firstName, right.lastName),
-          'fr-FR',
-          { sensitivity: 'base' }
-        )
-      ),
-    [internalProfiles]
-  );
-
-  const seniorSavedInterventions = useMemo(
-    () =>
-      savedInterventions.filter(
-        (intervention) => intervention.seniorId === selectedSenior.id
-      ),
-    [savedInterventions, selectedSenior.id]
-  );
-
-  const interventionOptions = useMemo(
-    () =>
-      buildSeniorInterventionOptions(
-        seniorSavedInterventions,
-        surgicalProcedureOptions
-      ),
-    [seniorSavedInterventions, surgicalProcedureOptions]
-  );
-
-  const pendingEvaluations = useMemo(
-    () =>
-      [...seniorSavedInterventions]
-        .filter(
-          (intervention) =>
-            !hasCompleteAdminEvaluation(adminEvaluations[intervention.id])
-        )
-        .sort((left, right) => right.savedAt.localeCompare(left.savedAt)),
-    [adminEvaluations, seniorSavedInterventions]
-  );
-
-  const relatedProfilesByRecency = useMemo(() => {
-    const latestByInternal = new Map<string, string>();
-
-    seniorSavedInterventions.forEach((intervention) => {
-      if (!intervention.internalId) {
-        return;
-      }
-
-      const current = latestByInternal.get(intervention.internalId);
-
-      if (!current || current < intervention.savedAt) {
-        latestByInternal.set(intervention.internalId, intervention.savedAt);
-      }
-    });
-
-    return Array.from(latestByInternal.entries())
-      .sort((left, right) => right[1].localeCompare(left[1]))
-      .map(([internalId]) =>
-        internalProfiles.find((profile) => profile.id === internalId) ?? null
-      )
-      .filter((profile): profile is InternalProfile => profile != null);
-  }, [internalProfiles, seniorSavedInterventions]);
-
-  const managedProfiles = useMemo(
-    () =>
-      alphabeticalProfiles.filter((profile) =>
-        (selectedSenior.managedInternalIds ?? []).includes(profile.id)
-      ),
-    [alphabeticalProfiles, selectedSenior.managedInternalIds]
-  );
-
-  const visibleProfiles = useMemo(() => {
-    if (populationFilter === 'all') {
-      return alphabeticalProfiles;
-    }
-
-    if (populationFilter === 'mine') {
-      return managedProfiles;
-    }
-
-    return relatedProfilesByRecency;
-  }, [
-    managedProfiles,
-    populationFilter,
-    relatedProfilesByRecency,
-  ]);
-
-  const selectedInterventionOption =
-    interventionOptions.find((option) => option.key === selectedInterventionKey) ??
-    interventionOptions[0] ??
-    SENIOR_FALLBACK_INTERVENTION_OPTION;
-
-  const selectedInternal =
-    visibleProfiles.find((profile) => profile.id === selectedInternalId) ??
-    visibleProfiles[0] ??
-    null;
-
-  const selectedInternalInterventions = useMemo(() => {
-    if (!selectedInternal) {
-      return [];
-    }
-
-    return [...seniorSavedInterventions]
-      .filter(
-        (intervention) =>
-          intervention.internalId === selectedInternal.id &&
-          matchesSeniorInterventionOption(intervention, selectedInterventionOption)
-      )
-      .sort((left, right) => left.savedAt.localeCompare(right.savedAt));
-  }, [
-    selectedInternal,
-    selectedInterventionOption,
-    seniorSavedInterventions,
-  ]);
-
-  const autonomySeries = useMemo(
-    () =>
-      buildSeniorAutonomySeries(
-        selectedInternalInterventions,
-        adminEvaluations,
-        customSurgicalInterventions
-      ),
-    [
-      adminEvaluations,
-      customSurgicalInterventions,
-      selectedInternalInterventions,
-    ]
-  );
-
-  const stepStats = useMemo(
-    () =>
-      buildSeniorStepStats(
-        selectedInternalInterventions,
-        customSurgicalInterventions
-      ),
-    [customSurgicalInterventions, selectedInternalInterventions]
-  );
-
-  useEffect(() => {
-    if (
-      interventionOptions.some((option) => option.key === selectedInterventionKey)
-    ) {
-      return;
-    }
-
-    setSelectedInterventionKey(
-      interventionOptions[0]?.key ?? SENIOR_FALLBACK_INTERVENTION_OPTION.key
-    );
-  }, [interventionOptions, selectedInterventionKey]);
-
-  useEffect(() => {
-    if (!isInternalSettingsSheetOpen) {
-      return;
-    }
-
-    setManagedInternalIdsDraft(selectedSenior.managedInternalIds ?? []);
-  }, [isInternalSettingsSheetOpen, selectedSenior.managedInternalIds]);
-
-  useEffect(() => {
-    if (!isPasswordSheetOpen) {
-      return;
-    }
-
-    setPasswordForm({
-      currentPassword: '',
-      nextPassword: '',
-      confirmPassword: '',
-    });
-    setPasswordFeedback(null);
-  }, [isPasswordSheetOpen]);
-
-  useEffect(() => {
-    if (
-      selectedInternalId &&
-      visibleProfiles.some((profile) => profile.id === selectedInternalId)
-    ) {
-      return;
-    }
-
-    setSelectedInternalId(visibleProfiles[0]?.id ?? null);
-  }, [selectedInternalId, visibleProfiles]);
-
-  const handleSupportClick = () => {
-    setIsSettingsMenuOpen(false);
-
-    if (typeof window !== 'undefined') {
-      window.location.href =
-        'mailto:support@chu-nantes.fr?subject=Support%20espace%20senior';
-    }
-  };
-
-  const toggleManagedInternal = (internalId: string) => {
-    setManagedInternalIdsDraft((current) =>
-      current.includes(internalId)
-        ? current.filter((id) => id !== internalId)
-        : [...current, internalId]
-    );
-  };
-
-  const handleSaveManagedInternals = () => {
-    updateSeniorManagedInternals(selectedSenior.id, managedInternalIdsDraft);
-    setPopulationFilter('mine');
-    setIsInternalSettingsSheetOpen(false);
-  };
-
-  const handlePasswordFieldChange = (
-    field: 'currentPassword' | 'nextPassword' | 'confirmPassword',
-    value: string
-  ) => {
-    setPasswordForm((current) => ({
-      ...current,
-      [field]: value,
-    }));
-    setPasswordFeedback(null);
-  };
-
-  const handleSaveSeniorPassword = () => {
-    const currentPassword = passwordForm.currentPassword.trim();
-    const nextPassword = passwordForm.nextPassword.trim();
-    const confirmPassword = passwordForm.confirmPassword.trim();
-
-    if (currentPassword !== (selectedSenior.password ?? '')) {
-      setPasswordFeedback({
-        kind: 'error',
-        message: 'Le mot de passe actuel est incorrect.',
-      });
-      return;
-    }
-
-    if (!nextPassword || !confirmPassword) {
-      setPasswordFeedback({
-        kind: 'error',
-        message: 'Renseigne le nouveau mot de passe et sa confirmation.',
-      });
-      return;
-    }
-
-    if (nextPassword !== confirmPassword) {
-      setPasswordFeedback({
-        kind: 'error',
-        message: 'La confirmation du nouveau mot de passe ne correspond pas.',
-      });
-      return;
-    }
-
-    const result = updateSeniorCredentials(selectedSenior.id, {
-      loginId: selectedSenior.loginId ?? '',
-      mustChangePassword: false,
-      password: nextPassword,
-    });
-
-    setPasswordFeedback({
-      kind: result.success ? 'success' : 'error',
-      message: result.success
-        ? 'Le mot de passe a bien été mis à jour.'
-        : result.message,
-    });
-
-    if (!result.success) {
-      return;
-    }
-
-    setPasswordForm({
-      currentPassword: '',
-      nextPassword: '',
-      confirmPassword: '',
-    });
-  };
-
-  const handleEvaluateIntervention = (interventionId: string) => {
-    setIsPendingEvaluationsSheetOpen(false);
-    onEvaluate(interventionId);
-  };
-
-  const scrollInternalStrip = (direction: 'left' | 'right') => {
-    internalStripRef.current?.scrollBy({
-      left: direction === 'left' ? -280 : 280,
-      behavior: 'smooth',
-    });
-  };
-
-  const renderPendingEvaluationCard = (intervention: SavedIntervention) => {
-    const internal = getInternalById(intervention.internalId, internalProfiles) ?? null;
-    const procedureLabel = getChoiceLabel(
-      surgicalProcedureOptions,
-      intervention.procedure
-    );
-
-    return (
-      <button
-        className="senior-evaluation-card senior-evaluation-card--clickable"
-        key={intervention.id}
-        onClick={() => handleEvaluateIntervention(intervention.id)}
-        type="button"
-      >
-        <ApproachIcon intervention={intervention} />
-        <div className="senior-evaluation-card__content">
-          <div className="senior-evaluation-card__headline">
-            <span className="senior-evaluation-card__date">
-              {formatLongFrenchDate(intervention.date)}
-            </span>
-            <span className="senior-evaluation-card__separator" aria-hidden="true">
-              |
-            </span>
-            <strong>
-              {formatSeniorInterventionLabel(
-                procedureLabel,
-                intervention.procedure,
-                intervention.approach
-              )}
-            </strong>
-          </div>
-          <span className="senior-evaluation-card__internal">
-            Interne :{' '}
-            {internal
-              ? formatDisplayName(internal.firstName, internal.lastName)
-              : 'Interne non retrouvé'}
-          </span>
-        </div>
-        <span className="senior-evaluation-card__action">
-          <span>Évaluer</span>
-          <ChevronRight aria-hidden="true" />
-        </span>
-      </button>
-    );
-  };
-
-  return (
-    <ScreenContainer
-      frameWidth="wide"
-      heroClassName="senior-screen__hero"
-      shellClassName="dashboard-screen senior-screen"
-      title={`Dr ${seniorName}`}
-      subtitle="Service de gynécologie-obstétrique – CHU Nantes"
-      headerAction={
-        <div className="senior-settings">
-          <button
-            aria-expanded={isSettingsMenuOpen}
-            aria-haspopup="menu"
-            aria-label="Ouvrir le menu senior"
-            className="senior-settings__button"
-            onClick={() => setIsSettingsMenuOpen((current) => !current)}
-            type="button"
-          >
-            <Settings aria-hidden="true" />
-          </button>
-
-          {isSettingsMenuOpen ? (
-            <div className="senior-settings__menu" role="menu">
-              <button
-                className="senior-settings__menu-item"
-                onClick={() => {
-                  setIsSettingsMenuOpen(false);
-                  setIsPasswordSheetOpen(true);
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <Pencil aria-hidden="true" />
-                <span>Modifier mot de passe</span>
-              </button>
-
-              <button
-                className="senior-settings__menu-item"
-                onClick={() => {
-                  setIsSettingsMenuOpen(false);
-                  setIsInternalSettingsSheetOpen(true);
-                }}
-                role="menuitem"
-                type="button"
-              >
-                <Users aria-hidden="true" />
-                <span>Mes paramètres internes</span>
-              </button>
-            </div>
-          ) : null}
-        </div>
-      }
-    >
-      <SectionCard className="senior-section-card" title="Interventions à évaluer">
-        {pendingEvaluations.length ? (
-          <>
-            <div className="senior-evaluation-list">
-              {pendingEvaluations
-                .slice(0, pendingEvaluationsPreviewLimit)
-                .map(renderPendingEvaluationCard)}
-            </div>
-
-            {pendingEvaluations.length > pendingEvaluationsPreviewLimit ? (
-              <button
-                className="senior-section-link"
-                onClick={() => setIsPendingEvaluationsSheetOpen(true)}
-                type="button"
-              >
-                <span>
-                  Voir toutes les interventions à évaluer ({pendingEvaluations.length})
-                </span>
-                <ChevronRight aria-hidden="true" />
-              </button>
-            ) : null}
-          </>
-        ) : (
-          <div className="validation-box">
-            <strong>Aucune intervention en attente d’évaluation</strong>
-            <span>Les prochains blocs attribués à ce senior apparaîtront ici.</span>
-          </div>
-        )}
-      </SectionCard>
-
-      <SectionCard
-        className="senior-section-card"
-        description="Consultez les statistiques détaillées par type d’intervention."
-        title="Aperçu des statistiques par interne"
-      >
-        <div className="senior-filter-grid">
-          <label className="field-stack">
-            <span className="field-stack__label">Population</span>
-            <select
-              className="field-input"
-              onChange={(event) =>
-                setPopulationFilter(event.target.value as SeniorPopulationFilter)
-              }
-              value={populationFilter}
-            >
-              {SENIOR_POPULATION_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-
-        {visibleProfiles.length ? (
-          <>
-            <div className="senior-internal-strip-shell">
-              <button
-                aria-label="Faire défiler la liste des internes vers la gauche"
-                className="senior-strip-arrow"
-                onClick={() => scrollInternalStrip('left')}
-                type="button"
-              >
-                <ChevronLeft aria-hidden="true" />
-              </button>
-
-              <div className="senior-internal-strip" ref={internalStripRef}>
-                {visibleProfiles.map((profile) => {
-                  const isSelected = profile.id === selectedInternal?.id;
-                  const semesterTone = getSeniorSemesterTone(profile.semester);
-
-                  return (
-                    <button
-                      className={`senior-internal-card ${
-                        isSelected ? 'senior-internal-card--selected' : ''
-                      }`.trim()}
-                      key={profile.id}
-                      onClick={() => setSelectedInternalId(profile.id)}
-                      type="button"
-                    >
-                      <span
-                        className={`senior-avatar senior-avatar--${semesterTone}`}
-                        aria-hidden="true"
-                      >
-                        <UserRound />
-                      </span>
-                      <span className="senior-internal-card__copy">
-                        <strong>
-                          {formatDisplayName(profile.firstName, profile.lastName)}
-                        </strong>
-                        <span>{profile.semester}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              <button
-                aria-label="Faire défiler la liste des internes vers la droite"
-                className="senior-strip-arrow"
-                onClick={() => scrollInternalStrip('right')}
-                type="button"
-              >
-                <ChevronRight aria-hidden="true" />
-              </button>
-            </div>
-
-            {selectedInternal ? (
-              <div className="senior-profile-detail">
-                <div className="senior-profile-detail__header">
-                  <div className="senior-profile-detail__identity">
-                    <span
-                      className={`senior-avatar senior-avatar--${getSeniorSemesterTone(
-                        selectedInternal.semester
-                      )}`}
-                      aria-hidden="true"
-                    >
-                      <UserRound />
-                    </span>
-                    <div className="senior-profile-detail__identity-copy">
-                      <h3>
-                        {formatDisplayName(
-                          selectedInternal.firstName,
-                          selectedInternal.lastName
-                        )}
-                      </h3>
-                      <span>{selectedInternal.semester}</span>
-                    </div>
-                  </div>
-
-                  <label className="field-stack senior-profile-detail__selector">
-                    <span className="field-stack__label">Intervention analysée</span>
-                    <select
-                      className="field-input"
-                      onChange={(event) =>
-                        setSelectedInterventionKey(event.target.value)
-                      }
-                      value={selectedInterventionOption.key}
-                    >
-                      {interventionOptions.map((option) => (
-                        <option key={option.key} value={option.key}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-
-                <div className="senior-profile-detail__count">
-                  <div className="senior-profile-detail__count-main">
-                    <strong>
-                      {selectedInternalInterventions.length} interventions enregistrées
-                    </strong>
-                  </div>
-                  <span>
-                    Nombre d’interventions correspondant au type sélectionné.
-                  </span>
-                </div>
-
-                <div className="senior-profile-detail__grid">
-                  <section className="senior-metric-card senior-metric-card--chart">
-                    <div className="senior-metric-card__title-row">
-                      <h4>Évolution autonomie</h4>
-                      <span className="senior-info-tooltip">
-                        <button
-                          aria-label="Informations sur l’évolution autonomie"
-                          className="senior-info-tooltip__button"
-                          type="button"
-                        >
-                          <Info aria-hidden="true" />
-                        </button>
-                        <span className="senior-info-tooltip__content" role="note">
-                          Évolution du score d’autonomie en fonction du nombre de
-                          procédures enregistrées.
-                        </span>
-                      </span>
-                    </div>
-                    <SeniorAutonomyLineChart
-                      ariaLabel="Évolution du score d’autonomie pour l’interne sélectionné"
-                      series={autonomySeries}
-                    />
-                  </section>
-
-                  <section className="senior-metric-card">
-                    <h4>Temps opératoires</h4>
-                    <div className="senior-step-list">
-                      {stepStats.map((step) => (
-                        <div className="senior-step-row" key={step.id}>
-                          <div className="senior-step-row__header">
-                            <span>{step.label}</span>
-                            <strong>
-                              {step.score} % <small>· n={step.sampleSize}</small>
-                            </strong>
-                          </div>
-                          <div className="senior-step-row__track" aria-hidden="true">
-                            <span
-                              className={`senior-step-row__fill senior-step-row__fill--${step.tone}`}
-                              style={{ width: `${step.score}%` }}
-                            />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </section>
-                </div>
-              </div>
-            ) : null}
-          </>
-        ) : (
-          <div className="validation-box">
-            <strong>Aucun interne disponible</strong>
-            <span>
-              {populationFilter === 'recent'
-                ? 'Les internes ayant récemment enregistré une intervention avec ce senior référent apparaîtront ici.'
-                : populationFilter === 'mine'
-                  ? 'Les internes ajoutés dans "Mes internes" apparaîtront ici.'
-                  : 'Les profils internes apparaîtront ici dès qu’ils seront créés.'}
-            </span>
-          </div>
-        )}
-      </SectionCard>
-
-      <SectionCard
-        className="senior-section-card"
-      >
-        <div className="action-stack">
-          <PrimaryButton
-            label="Contacter le support"
-            onPress={handleSupportClick}
-            variant="secondary"
-          />
-          <PrimaryButton
-            label="Se déconnecter"
-            onPress={onLogout}
-            variant="danger"
-          />
-        </div>
-      </SectionCard>
-
-      {isInternalSettingsSheetOpen ? (
-        <div
-          aria-hidden="true"
-          className="account-sheet-backdrop"
-          onClick={() => setIsInternalSettingsSheetOpen(false)}
-        >
-          <div
-            aria-modal="true"
-            className="account-sheet senior-account-sheet"
-            onClick={(event) => event.stopPropagation()}
-            role="dialog"
-          >
-            <div className="account-sheet__header">
-              <div className="account-sheet__heading">
-                <h3>Mes paramètres internes</h3>
-                <p className="account-sheet__text">
-                  Choisissez les internes qui alimentent le filtre “Mes internes”.
-                </p>
-              </div>
-              <button
-                aria-label="Fermer la fenêtre des paramètres internes"
-                className="account-sheet__close"
-                onClick={() => setIsInternalSettingsSheetOpen(false)}
-                type="button"
-              >
-                <X aria-hidden="true" />
-              </button>
-            </div>
-
-            <div className="senior-account-sheet__section">
-              <div className="senior-account-sheet__section-header">
-                <strong>Mes internes</strong>
-                <span>
-                  {managedInternalIdsDraft.length} sélectionné
-                  {managedInternalIdsDraft.length > 1 ? 's' : ''}
-                </span>
-              </div>
-              <div className="senior-account-sheet__list">
-                {alphabeticalProfiles.map((profile) => {
-                  const isSelected = managedInternalIdsDraft.includes(profile.id);
-
-                  return (
-                    <button
-                      className={`senior-account-internal ${
-                        isSelected ? 'senior-account-internal--selected' : ''
-                      }`.trim()}
-                      key={profile.id}
-                      onClick={() => toggleManagedInternal(profile.id)}
-                      type="button"
-                    >
-                      <span className="senior-account-internal__copy">
-                        <strong>
-                          {formatDisplayName(profile.firstName, profile.lastName)}
-                        </strong>
-                        <span>
-                          {profile.semester} · {profile.currentRotation}
-                        </span>
-                      </span>
-                      <span
-                        className={`senior-account-internal__check ${
-                          isSelected ? 'senior-account-internal__check--selected' : ''
-                        }`.trim()}
-                        aria-hidden="true"
-                      >
-                        <Check />
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="account-sheet__actions account-sheet__actions--split">
-              <button
-                className="account-button"
-                onClick={() => setIsInternalSettingsSheetOpen(false)}
-                type="button"
-              >
-                Fermer
-              </button>
-              <button
-                className="flow-button flow-button--primary"
-                onClick={handleSaveManagedInternals}
-                type="button"
-              >
-                Enregistrer
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {isPasswordSheetOpen ? (
-        <div
-          aria-hidden="true"
-          className="account-sheet-backdrop"
-          onClick={() => setIsPasswordSheetOpen(false)}
-        >
-          <div
-            aria-modal="true"
-            className="account-sheet senior-account-sheet"
-            onClick={(event) => event.stopPropagation()}
-            role="dialog"
-          >
-            <div className="account-sheet__header">
-              <div className="account-sheet__heading">
-                <h3>Modifier mot de passe</h3>
-                <p className="account-sheet__text">
-                  Mettez à jour le mot de passe du compte senior connecté.
-                </p>
-              </div>
-              <button
-                aria-label="Fermer la fenêtre de modification du mot de passe"
-                className="account-sheet__close"
-                onClick={() => setIsPasswordSheetOpen(false)}
-                type="button"
-              >
-                <X aria-hidden="true" />
-              </button>
-            </div>
-
-            {passwordFeedback ? (
-              <div className={passwordFeedback.kind === 'success' ? 'auth-success' : 'auth-error'}>
-                {passwordFeedback.message}
-              </div>
-            ) : null}
-
-            <div className="account-sheet__stack">
-              <label className="account-sheet__field">
-                <span>Mot de passe actuel</span>
-                <input
-                  className="account-sheet__input"
-                  onChange={(event) =>
-                    handlePasswordFieldChange('currentPassword', event.target.value)
-                  }
-                  type="password"
-                  value={passwordForm.currentPassword}
-                />
-              </label>
-
-              <label className="account-sheet__field">
-                <span>Nouveau mot de passe</span>
-                <input
-                  className="account-sheet__input"
-                  onChange={(event) =>
-                    handlePasswordFieldChange('nextPassword', event.target.value)
-                  }
-                  type="password"
-                  value={passwordForm.nextPassword}
-                />
-              </label>
-
-              <label className="account-sheet__field">
-                <span>Confirmer le nouveau mot de passe</span>
-                <input
-                  className="account-sheet__input"
-                  onChange={(event) =>
-                    handlePasswordFieldChange('confirmPassword', event.target.value)
-                  }
-                  type="password"
-                  value={passwordForm.confirmPassword}
-                />
-              </label>
-            </div>
-
-            <div className="account-sheet__actions account-sheet__actions--split">
-              <button
-                className="account-button"
-                onClick={() => setIsPasswordSheetOpen(false)}
-                type="button"
-              >
-                Fermer
-              </button>
-              <button
-                className="flow-button flow-button--primary"
-                onClick={handleSaveSeniorPassword}
-                type="button"
-              >
-                Enregistrer
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {isPendingEvaluationsSheetOpen ? (
-        <div
-          aria-hidden="true"
-          className="account-sheet-backdrop"
-          onClick={() => setIsPendingEvaluationsSheetOpen(false)}
-        >
-          <div
-            aria-labelledby="pending-evaluations-sheet-title"
-            aria-modal="true"
-            className="account-sheet senior-evaluations-sheet"
-            onClick={(event) => event.stopPropagation()}
-            role="dialog"
-          >
-            <div className="account-sheet__header">
-              <div className="account-sheet__heading">
-                <h3 id="pending-evaluations-sheet-title">
-                  Interventions à évaluer
-                </h3>
-                <p>
-                  Retrouvez l’ensemble des interventions en attente pour ce
-                  senior.
-                </p>
-              </div>
-              <button
-                aria-label="Fermer la fenêtre des interventions à évaluer"
-                className="account-sheet__close"
-                onClick={() => setIsPendingEvaluationsSheetOpen(false)}
-                type="button"
-              >
-                <X aria-hidden="true" />
-              </button>
-            </div>
-
-            <div className="senior-account-sheet__section">
-              <div className="senior-account-sheet__section-header">
-                <strong>{pendingEvaluations.length} intervention(s)</strong>
-                <span>Liste complète</span>
-              </div>
-              <div className="senior-evaluation-list senior-evaluation-list--sheet">
-                {pendingEvaluations.map(renderPendingEvaluationCard)}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </ScreenContainer>
-  );
-}
-
-function SeniorAutonomyLineChart({
-  ariaLabel,
-  series,
-}: {
-  ariaLabel: string;
-  series: SeniorAutonomyPoint[];
-}) {
-  const width = 446;
-  const height = 272;
-  const left = 84;
-  const right = 12;
-  const top = 18;
-  const bottom = 54;
-  const chartWidth = width - left - right;
-  const chartHeight = height - top - bottom;
-  const yAxisLabelX = 14;
-  const maxIndex = Math.max(...series.map((point) => point.index));
-  const xAxisTicks = buildSeniorXAxisTicks(maxIndex);
-  const points = series.map((point, index) => {
-    const x =
-      maxIndex <= 1
-        ? left + chartWidth / 2
-        : left + (chartWidth * (point.index - 1)) / (maxIndex - 1);
-    const y = top + chartHeight - (point.score / 100) * chartHeight;
-
-    return { ...point, x, y };
-  });
-
-  if (!series.length) {
-    return <p className="field-helper">Aucune donnée disponible pour cette intervention.</p>;
-  }
-
-  return (
-    <div className="progress-line-chart senior-progress-line-chart" role="img" aria-label={ariaLabel}>
-      <svg viewBox={`0 0 ${width} ${height}`}>
-        {[100, 75, 50, 25, 0].map((value) => {
-          const y = top + chartHeight - (value / 100) * chartHeight;
-
-          return (
-            <g key={value}>
-              <line
-                className="progress-line-chart__grid"
-                x1={left}
-                x2={width - right}
-                y1={y}
-                y2={y}
-              />
-              <text className="progress-line-chart__axis-label" x={yAxisLabelX} y={y + 4}>
-                {value}%
-              </text>
-            </g>
-          );
-        })}
-
-        <line
-          className="progress-line-chart__axis"
-          x1={left}
-          x2={left}
-          y1={top}
-          y2={height - bottom}
-        />
-        <line
-          className="progress-line-chart__axis"
-          x1={left}
-          x2={width - right}
-          y1={height - bottom}
-          y2={height - bottom}
-        />
-
-        <polyline
-          className="progress-line-chart__line"
-          fill="none"
-          points={points.map((point) => `${point.x},${point.y}`).join(' ')}
-        />
-
-        {points.map((point) => (
-          <g key={point.id}>
-            <circle className="progress-line-chart__point" cx={point.x} cy={point.y} r="4.5" />
-          </g>
-        ))}
-
-        {xAxisTicks.map((tick) => {
-          const tickX =
-            maxIndex <= 1
-              ? left + chartWidth / 2
-              : left + (chartWidth * (tick - 1)) / (maxIndex - 1);
-
-          return (
-            <text className="progress-line-chart__x-label" key={tick} x={tickX} y={height - 14}>
-              {tick}
-            </text>
-          );
-        })}
-      </svg>
-    </div>
   );
 }

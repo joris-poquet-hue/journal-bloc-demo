@@ -29,10 +29,6 @@ export function getInterventionApproachKey(
     return intervention.approach;
   }
 
-  if (intervention.procedure === 'colpoclesis') {
-    return 'voie_basse';
-  }
-
   return null;
 }
 
@@ -53,6 +49,23 @@ export function ApproachIcon({
   className?: string;
 }) {
   const approachKey = getInterventionApproachKey(intervention);
+
+  return (
+    <ApproachIconForApproach
+      approach={approachKey}
+      className={className}
+    />
+  );
+}
+
+export function ApproachIconForApproach({
+  approach,
+  className,
+}: {
+  approach: ApproachVisualKey | null;
+  className?: string;
+}) {
+  const approachKey = approach;
 
   if (!approachKey) {
     return (

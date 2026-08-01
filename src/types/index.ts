@@ -6,7 +6,7 @@ export type AppScreen =
   | 'form'
   | 'profile'
   | 'notebook'
-  | 'checklist'
+  | 'context-variables'
   | 'summary'
   | 'admin';
 
@@ -25,19 +25,20 @@ export type InternalProfile = {
   firstName: string;
   lastName: string;
   loginId: string;
-  password: string;
+  contactEmail?: string | null;
   mustChangePassword?: boolean;
+  institution: string;
+  institutionId?: string | null;
   promotion: string;
   semester: string;
-  currentRotation: string;
   avatarImageSrc?: string | null;
   createdAt: string;
   lastLoginAt: string | null;
-  achievementBadges?: AchievementBadge[];
-  badgeMetrics?: {
-    primarySalpingectomyCount: number;
-    primaryColpocleisisCount: number;
-  };
+  isActive?: boolean;
+  updatedAt?: string;
+  updatedByProfileId?: string | null;
+  version?: number;
+  loginCount?: number;
   baselineStats?: {
     totalInterventions: number;
     primaryOperatorCount: number;
@@ -49,19 +50,20 @@ export type CreateInternalProfileInput = {
   firstName: string;
   lastName: string;
   loginId: string;
-  password: string;
+  institutionId: string;
   promotion: string;
   semester: string;
-  currentRotation: string;
 };
 
 export type CreateInternalProfileResult = {
   success: boolean;
   message: string;
+  accessKey?: string;
   profile?: InternalProfile;
 };
 
 export type UpdateInternalCredentialsInput = {
+  currentPassword?: string;
   loginId: string;
   password: string;
   mustChangePassword?: boolean;
@@ -75,7 +77,6 @@ export type UpdateInternalCredentialsResult = {
 
 export type UpdateInternalProfileSettingsInput = {
   semester?: string;
-  currentRotation?: string;
   avatarImageSrc?: string | null;
 };
 
@@ -85,62 +86,26 @@ export type UpdateInternalProfileSettingsResult = {
   profile?: InternalProfile;
 };
 
-export type BadgeMetricKey =
-  | 'primary_salpingectomy'
-  | 'master_salpingectomy'
-  | 'master_colpocleisis'
-  | 'primary_colpocleisis';
-
 export type BadgeTier = 'diamond' | 'gold' | 'silver' | 'bronze';
 
-export type AchievementBadge = {
-  id: string;
-  metricKey: BadgeMetricKey;
-  title: string;
-  tier: BadgeTier;
-  target: number;
-  awardedAt: string;
-  imageSrc: string;
-};
-
 export type ProgressBadge = {
-  id: string;
-  metricKey: BadgeMetricKey;
-  title: string;
-  tier: BadgeTier;
-  target: number;
-  current: number;
   awardedAt: string | null;
+  current: number;
+  id: string;
   imageSrc: string;
+  isBinary?: boolean;
   isEarned: boolean;
   isLocked?: boolean;
-  isBinary?: boolean;
-  progressLabel: string;
-};
-
-export type NotebookNote = {
-  id: string;
-  internalId: string;
-  content: string;
-  createdAt: string;
-  updatedAt: string;
+  target: number;
+  title: string;
 };
 
 export type NotebookDocument = {
   internalId: string;
   contentHtml: string;
   updatedAt: string;
-};
-
-export type BadgeCatalogItem = {
-  id: string;
-  title: string;
-  tier: BadgeTier;
-  metricKey: BadgeMetricKey;
-  target: number;
-  imageSrc: string;
-  criteria: string;
-  prerequisiteTitle?: string;
+  updatedByProfileId?: string | null;
+  version?: number;
 };
 
 export type TrophyStatus = 'draft' | 'active' | 'inactive';
@@ -153,6 +118,7 @@ export type TrophyConditionType =
   | 'first_recorded'
   | 'total_recorded'
   | 'total_evaluated'
+  | 'profile_login_count'
   | 'procedure_count'
   | 'approach_count'
   | 'recording_time_range'
@@ -214,6 +180,26 @@ export type AdminTrophyDefinition = {
   images: TrophyImageSet;
   createdAt: string;
   updatedAt: string;
+  createdByProfileId?: string | null;
+  updatedByProfileId?: string | null;
+  version?: number;
+  everActivated?: boolean;
+  activatedAt?: string | null;
+  pendingDraft?: Omit<
+    AdminTrophyDefinition,
+    'pendingDraft' | 'draftBaseVersion' | 'draftVersion'
+  > | null;
+  draftBaseVersion?: number | null;
+  draftVersion?: number | null;
+};
+
+export type TrophyAward = {
+  id: string;
+  trophyId: string;
+  profileId: string;
+  tier: BadgeTier | null;
+  awardedAt: string;
+  sourceInterventionId: string | null;
 };
 
 export type Senior = {
@@ -221,28 +207,49 @@ export type Senior = {
   firstName: string;
   lastName: string;
   loginId?: string;
-  password?: string;
+  contactEmail?: string | null;
   mustChangePassword?: boolean;
+  institution: string;
+  institutionId?: string | null;
   createdAt?: string;
   isCustom?: boolean;
   lastLoginAt?: string | null;
   managedInternalIds?: string[];
+  isActive?: boolean;
+  updatedAt?: string;
+  updatedByProfileId?: string | null;
+  version?: number;
 };
 
 export type CreateSeniorProfileInput = {
   firstName: string;
   lastName: string;
   loginId: string;
-  password: string;
+  institutionId: string;
+};
+
+export type InstitutionStatus = 'active' | 'archived';
+
+export type Institution = {
+  id: string;
+  name: string;
+  status: InstitutionStatus;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  updatedByProfileId: string | null;
+  version: number;
 };
 
 export type CreateSeniorProfileResult = {
   success: boolean;
   message: string;
+  accessKey?: string;
   senior?: Senior;
 };
 
 export type UpdateSeniorCredentialsInput = {
+  currentPassword?: string;
   loginId: string;
   password: string;
   mustChangePassword?: boolean;
@@ -254,7 +261,7 @@ export type UpdateSeniorCredentialsResult = {
   senior?: Senior;
 };
 
-export type InterventionType = 'salpingectomie' | 'colpoclesis' | `custom-${string}`;
+export type InterventionType = 'salpingectomie' | `custom-${string}`;
 export type Indication =
   | 'geu'
   | 'ligature_tubaire'
@@ -269,6 +276,37 @@ export type SurgicalApproach =
 export type EntryTechnique = 'trocart_direct' | 'open' | 'veress';
 export type Laterality = 'droite' | 'gauche' | 'bilateral';
 export type SurgeryContext = 'urgence' | 'programme';
+export type InterventionContextVariable =
+  | 'urgence'
+  | 'antecedent_chirurgie_abdominale'
+  | 'complication_per_operatoire'
+  | 'imc_superieur_30'
+  | 'aucun_contexte_particulier';
+export type ClinicalCountCategory = '0' | '1' | '2' | '3_plus';
+export type InterventionClinicalContext = {
+  schemaVersion: 2;
+  patient: {
+    ageYears: number | null;
+    bmi: number | null;
+    tobaccoUse: boolean | null;
+    parity: ClinicalCountCategory | null;
+  };
+  history: {
+    igh: boolean | null;
+    pelvicPeritonitis: boolean | null;
+    abdominopelvicSurgery: boolean | null;
+    abdominopelvicSurgeryDetails: string;
+    cesareanCount: ClinicalCountCategory | null;
+  };
+  intraoperative: {
+    bloodLossMl: number | null;
+    complication: boolean | null;
+    complicationDetails: string;
+  };
+};
+export type InterventionContextVariables =
+  | InterventionContextVariable[]
+  | InterventionClinicalContext;
 export type Complexity = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10;
 export type GlobalRole =
   | 'operateur_principal'
@@ -281,6 +319,11 @@ export type ChecklistStep = {
   id: string;
   label: string;
   applicableApproaches?: SurgicalApproach[];
+};
+
+export type SnapshotChecklistStep = ChecklistStep & {
+  order: number;
+  scored: boolean;
 };
 
 export type InterventionStatus = 'active' | 'inactive' | 'archived';
@@ -336,6 +379,26 @@ export type SurgicalInterventionDefinition = {
   updatedAt?: string;
   archivedAt?: string | null;
   usedCount?: number;
+  ownerProfileId?: string | null;
+  updatedByProfileId?: string | null;
+  version?: number;
+};
+
+export type InterventionDefinitionSnapshot = {
+  schemaVersion: number;
+  capturedAt: string;
+  source: {
+    id: InterventionType;
+    name: string;
+    status: InterventionStatus;
+    version: number;
+  };
+  definition: SurgicalInterventionDefinition;
+  applicableChecklistSteps: SnapshotChecklistStep[];
+  legacy?: {
+    mode: 'current_catalog_assumption' | 'raw_checklist_fallback';
+    reportHash?: string;
+  };
 };
 
 export type CreateSurgicalInterventionInput = {
@@ -344,10 +407,6 @@ export type CreateSurgicalInterventionInput = {
   allowedApproaches: SurgicalApproach[];
   allowedEntryTechniques: EntryTechnique[];
   requiresLaterality: boolean;
-  customChecklistSteps: string[];
-  keyStepLabels: string[];
-  stepOrderLabels: string[];
-  stepApproachLabels: Record<string, SurgicalApproach[]>;
   status?: InterventionStatus;
   lateralityMode?: InterventionLateralityMode;
   indicationOptions?: InterventionIndicationOption[];
@@ -362,6 +421,8 @@ export type CreateSurgicalInterventionResult = {
 
 export type InterventionDraft = {
   date: string;
+  startTime?: string | null;
+  operativeDurationMinutes?: number | null;
   internalId: string | null;
   seniorId: string | null;
   procedure: InterventionType | null;
@@ -372,6 +433,7 @@ export type InterventionDraft = {
   entryTechnique: EntryTechnique | null;
   laterality: Laterality | null;
   context: SurgeryContext | null;
+  contextVariables: InterventionContextVariables;
   complexity: Complexity | null;
   role: GlobalRole | null;
   checklist: Record<string, ChecklistLevel | null>;
@@ -382,6 +444,17 @@ export type SavedIntervention = Omit<InterventionDraft, 'procedure'> & {
   procedure: InterventionType;
   savedAt: string;
   autonomyScore: number | null;
+  autonomyScoreCalculatedAt?: string | null;
+  autonomyScoreFormulaId?: string | null;
+  clientMutationId?: string | null;
+  createdByProfileId?: string;
+  definitionSnapshot?: InterventionDefinitionSnapshot | null;
+  definitionSnapshotSchemaVersion?: number | null;
+  definitionVersion?: number | null;
+  deletedAt?: string | null;
+  updatedAt?: string;
+  updatedByProfileId?: string | null;
+  version?: number;
 };
 
 export type AdminPerformanceRating = '1' | '2' | '3' | '4' | '5';
@@ -389,18 +462,23 @@ export type AdminCategoryDifficultyRating = '1' | '2' | '3';
 
 export type AdminInterventionEvaluation = {
   interventionId: string;
+  checklist?: Record<string, ChecklistLevel | null> | null;
   globalPerformance: AdminPerformanceRating | null;
   categoryDifficulty: AdminCategoryDifficultyRating | null;
   seniorComment: string;
   updatedAt: string | null;
+  createdAt?: string;
+  seniorProfileId?: string | null;
+  updatedByProfileId?: string | null;
+  version?: number;
 };
 
-export type TestFeedback = {
-  id: string;
-  message: string;
-  authorRole: SessionRole;
-  authorLabel: string;
-  createdAt: string;
+export type ActivityAnalyticsEvent = {
+  kind: 'intervention_form' | 'senior_evaluation';
+  sessionId: string;
+  durationMs: number;
+  clickCount: number;
+  completedAt: string;
 };
 
 export type ActivityLogEntry = {
@@ -411,7 +489,10 @@ export type ActivityLogEntry = {
   action: string;
   targetType: string;
   targetLabel: string;
+  updatedAt?: string;
+  version?: number;
   createdAt: string;
+  analyticsEvent?: ActivityAnalyticsEvent | null;
 };
 
 export type ChecklistProgress = {

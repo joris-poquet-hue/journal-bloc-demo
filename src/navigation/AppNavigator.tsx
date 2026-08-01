@@ -1,53 +1,55 @@
 import { Suspense, lazy } from 'react';
 
 import { BottomNavigation } from '../components/BottomNavigation';
+import { TrophyCelebration } from '../components/TrophyCelebration';
 import { useAppContext } from '../context/AppContext';
 import { LoginScreen } from '../screens/LoginScreen';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
+import { lazyImportWithReload } from '../utils/lazyImportWithReload';
 import { useScrollResetOnChange } from '../utils/useScrollResetOnChange';
 
 const AdminScreen = lazy(() =>
-  import('../screens/AdminScreen').then((module) => ({
+  lazyImportWithReload(() => import('../screens/AdminScreen')).then((module) => ({
     default: module.AdminScreen,
   }))
 );
-const ChecklistScreen = lazy(() =>
-  import('../screens/ChecklistScreen').then((module) => ({
-    default: module.ChecklistScreen,
+const ContextVariablesScreen = lazy(() =>
+  lazyImportWithReload(() => import('../screens/ContextVariablesScreen')).then((module) => ({
+    default: module.ContextVariablesScreen,
   }))
 );
 const InterventionFormScreen = lazy(() =>
-  import('../screens/InterventionFormScreen').then((module) => ({
+  lazyImportWithReload(() => import('../screens/InterventionFormScreen')).then((module) => ({
     default: module.InterventionFormScreen,
   }))
 );
 const NotebookScreen = lazy(() =>
-  import('../screens/NotebookScreen').then((module) => ({
+  lazyImportWithReload(() => import('../screens/NotebookScreen')).then((module) => ({
     default: module.NotebookScreen,
   }))
 );
 const PreBlockScreen = lazy(() =>
-  import('../screens/PreBlockScreen').then((module) => ({
+  lazyImportWithReload(() => import('../screens/PreBlockScreen')).then((module) => ({
     default: module.PreBlockScreen,
   }))
 );
 const ProfileScreen = lazy(() =>
-  import('../screens/ProfileScreen').then((module) => ({
+  lazyImportWithReload(() => import('../screens/ProfileScreen')).then((module) => ({
     default: module.ProfileScreen,
   }))
 );
 const SurgeryHistoryScreen = lazy(() =>
-  import('../screens/SurgeryHistoryScreen').then((module) => ({
+  lazyImportWithReload(() => import('../screens/SurgeryHistoryScreen')).then((module) => ({
     default: module.SurgeryHistoryScreen,
   }))
 );
 const SummaryScreen = lazy(() =>
-  import('../screens/SummaryScreen').then((module) => ({
+  lazyImportWithReload(() => import('../screens/SummaryScreen')).then((module) => ({
     default: module.SummaryScreen,
   }))
 );
 const TrophiesScreen = lazy(() =>
-  import('../screens/BadgesScreen').then((module) => ({
+  lazyImportWithReload(() => import('../screens/TrophiesScreen')).then((module) => ({
     default: module.TrophiesScreen,
   }))
 );
@@ -89,8 +91,8 @@ export function AppNavigator() {
       return <NotebookScreen />;
     }
 
-    if (screen === 'checklist') {
-      return <ChecklistScreen />;
+    if (screen === 'context-variables') {
+      return <ContextVariablesScreen />;
     }
 
     if (screen === 'summary') {
@@ -115,6 +117,7 @@ export function AppNavigator() {
       <div className="app-shell">
         {syncWarning}
         {renderedScreen}
+        <TrophyCelebration />
       </div>
     );
   }
@@ -124,6 +127,7 @@ export function AppNavigator() {
       {syncWarning}
       {renderedScreen}
       <BottomNavigation />
+      <TrophyCelebration />
     </div>
   );
 }

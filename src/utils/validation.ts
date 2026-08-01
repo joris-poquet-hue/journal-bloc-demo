@@ -31,6 +31,17 @@ export function getMissingFormFields(
     missingFields.push('date valide');
   }
 
+  if (!draft.startTime || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(draft.startTime)) {
+    missingFields.push('heure de début');
+  }
+
+  if (
+    !Number.isInteger(draft.operativeDurationMinutes) ||
+    (draft.operativeDurationMinutes ?? 0) < 1
+  ) {
+    missingFields.push('durée opératoire');
+  }
+
   if (!draft.internalId) {
     missingFields.push('interne');
   }
@@ -100,6 +111,10 @@ export function getMissingFormFields(
     missingFields.push('difficulté ressentie');
   }
 
+  if (!draft.context) {
+    missingFields.push('cadre de l’intervention');
+  }
+
   if (!draft.role) {
     missingFields.push('rôle global');
   }
@@ -145,8 +160,5 @@ export function canSaveIntervention(
   draft: InterventionDraft,
   customInterventions: SurgicalInterventionDefinition[] = []
 ) {
-  return (
-    getMissingFormFields(draft, customInterventions).length === 0 &&
-    getChecklistProgress(draft, customInterventions).isComplete
-  );
+  return getMissingFormFields(draft, customInterventions).length === 0;
 }

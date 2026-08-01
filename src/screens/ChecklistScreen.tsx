@@ -1,5 +1,4 @@
-import { BookOpen, ChevronDown, ChevronUp } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 
 import { InterventionFlowCard } from '../components/InterventionFlowCard';
 import { InterventionFlowLayout } from '../components/InterventionFlowLayout';
@@ -23,10 +22,10 @@ export function ChecklistScreen() {
     customSurgicalInterventions,
     backToForm,
     goToSummary,
+    registerInterventionFormInteraction,
     setAllChecklistLevels,
     setChecklistLevel,
   } = useAppContext();
-  const [isScaleOpen, setIsScaleOpen] = useState(false);
 
   const checklistSteps = useMemo(
     () =>
@@ -71,51 +70,22 @@ export function ChecklistScreen() {
   return (
     <InterventionFlowLayout
       onBack={backToForm}
+      onTrackInteraction={registerInterventionFormInteraction}
       step={2}
       subtitle="Renseigne ton niveau d’autonomie étape par étape."
       title="Checklist technique"
     >
-      <InterventionFlowCard
-        action={
-          <button
-            aria-label={isScaleOpen ? 'Masquer le barème' : 'Afficher le barème'}
-            aria-expanded={isScaleOpen}
-            className="flow-icon-toggle"
-            onClick={() => setIsScaleOpen((current) => !current)}
-            type="button"
-          >
-            {isScaleOpen ? (
-              <ChevronUp aria-hidden="true" strokeWidth={2.2} />
-            ) : (
-              <ChevronDown aria-hidden="true" strokeWidth={2.2} />
-            )}
-          </button>
-        }
-        className={!isScaleOpen ? 'flow-card--header-only' : undefined}
-        icon={BookOpen}
-        title="Barème d’autonomie"
-      >
-        {isScaleOpen ? (
-          <div className="flow-scale-list">
-            {checklistLevelOptions.map((level) => (
-              <article className="flow-scale-item" key={level.value}>
-                <strong>
-                  {level.label} · {level.description}
-                </strong>
-                <p>{checklistLevelDetails[level.value]}</p>
-              </article>
-            ))}
-          </div>
-        ) : null}
-      </InterventionFlowCard>
-
       {checklistProgress.applicable ? (
         <>
           <InterventionFlowCard
-            description="Applique un niveau à toutes les étapes, puis ajuste si besoin."
+            className="flow-card--quick-fill"
             title="Remplissage rapide"
           >
-            <div className="flow-level-list">
+            <p className="flow-card__lede">
+              Applique un niveau à toutes les étapes, puis affine ligne par ligne si
+              besoin.
+            </p>
+            <div className="flow-level-list flow-level-list--quick-fill">
               {checklistLevelOptions.map((level) => (
                 <ChecklistLevelButton
                   key={level.value}
@@ -126,23 +96,63 @@ export function ChecklistScreen() {
             </div>
           </InterventionFlowCard>
 
-          <InterventionFlowCard title="Étapes de l’intervention">
+          <InterventionFlowCard
+            className="flow-card--checklist"
+            title="Étapes de l’intervention"
+          >
+            <p className="flow-card__lede flow-card__lede--muted">
+              Sélectionne un niveau pour afficher immédiatement le repère associé.
+            </p>
             <div className="flow-checklist-table">
-              {checklistSteps.map((step) => (
-                <div className="flow-checklist-row" key={step.id}>
-                  <strong className="flow-checklist-row__label">{step.label}</strong>
-                  <div className="flow-checklist-row__actions">
-                    {checklistLevelOptions.map((level) => (
-                      <ChecklistLevelButton
-                        key={level.value}
-                        level={level.value}
-                        onClick={() => setChecklistLevel(step.id, level.value)}
-                        selected={draft.checklist[step.id] === level.value}
-                      />
-                    ))}
+              {checklistSteps.map((step, index) => {
+                const selectedLevel = draft.checklist[step.id];
+                const selectedLevelOption = selectedLevel
+                  ? checklistLevelOptions.find((level) => level.value === selectedLevel) ?? null
+                  : null;
+
+                return (
+                  <div
+                    className={`flow-checklist-row ${
+                      selectedLevel ? 'flow-checklist-row--selected' : ''
+                    }`.trim()}
+                    key={step.id}
+                  >
+                    <div className="flow-checklist-row__heading">
+                      <span className="flow-checklist-row__index">
+                        {(index + 1).toString().padStart(2, '0')}
+                      </span>
+                      <strong className="flow-checklist-row__label">{step.label}</strong>
+                    </div>
+                    <div className="flow-checklist-row__actions-shell">
+                      <span className="flow-checklist-row__actions-label">
+                        Niveau d’autonomie
+                      </span>
+                      <div className="flow-checklist-row__actions">
+                        {checklistLevelOptions.map((level) => (
+                          <ChecklistLevelButton
+                            key={level.value}
+                            level={level.value}
+                            onClick={() => setChecklistLevel(step.id, level.value)}
+                            selected={selectedLevel === level.value}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    {selectedLevel && selectedLevelOption ? (
+                      <div
+                        className={`flow-checklist-row__detail flow-checklist-row__detail--${getLevelColorName(
+                          selectedLevel
+                        )}`}
+                      >
+                        <strong className="flow-checklist-row__detail-title">
+                          {selectedLevelOption.label} · {selectedLevelOption.description}
+                        </strong>
+                        <p>{checklistLevelDetails[selectedLevel]}</p>
+                      </div>
+                    ) : null}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </InterventionFlowCard>
         </>
@@ -172,14 +182,7 @@ export function ChecklistScreen() {
         </div>
       </InterventionFlowCard>
 
-      <div className="flow-actions flow-actions--split">
-        <button
-          className="flow-button flow-button--secondary"
-          onClick={backToForm}
-          type="button"
-        >
-          Retour à l’étape 1
-        </button>
+      <div className="flow-actions">
         <button
           className="flow-button flow-button--primary"
           disabled={!checklistProgress.isComplete}
@@ -204,6 +207,7 @@ function ChecklistLevelButton({
 }) {
   return (
     <button
+      aria-pressed={selected}
       className={`flow-level-pill flow-level-pill--${getLevelColorName(level)} ${
         selected ? 'flow-level-pill--selected' : ''
       }`.trim()}
