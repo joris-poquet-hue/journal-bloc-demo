@@ -1,0 +1,133 @@
+name: Qualité Project1
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: project1-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Tests, typage et compilations
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          cache: npm
+          node-version: 24
+      - run: npm ci
+      - run: npm audit --audit-level=high
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm ci --prefix mobile
+      - run: npm audit --prefix mobile --audit-level=high
+      - run: npm run typecheck --prefix mobile
+      - run: npm run mobile:config:check
+
+  supabase-isolated:
+    name: Supabase croisé et migrations à blanc
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ALLOW_REMOTE_SUPABASE_TESTS: '1'
+      REQUIRE_SUPABASE_TEST_DB: '1'
+      SUPABASE_TEST_POSTGRES_URL: ${{ secrets.SUPABASE_TEST_POSTGRES_URL }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          cache: npm
+          node-version: 24
+      - run: npm ci
+      - name: Valider les migrations sans écriture
+        run: npm run db:migrate:test:dry-run
+      - name: Exécuter le parcours croisé obligatoire
+        run: npm run test:integration:supabase
+
+  e2e-public:
+    name: E2E public — ${{ matrix.project }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - project: chrome
+            browser: chrome
+          - project: edge
+            browser: msedge
+          - project: firefox
+            browser: firefox
+          - project: webkit
+            browser: webkit
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          cache: npm
+          node-version: 24
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install --with-deps ${{ matrix.browser }}
+      - run: npx playwright test e2e/public --project=${{ matrix.project }}
+      - uses: actions/upload-artifact@v5
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-public-${{ matrix.project }}
+          path: playwright-report/
+          retention-days: 14
+
+  e2e-authenticated:
+    name: E2E Interne, Senior et Administrateur
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      E2E_ADMIN_LOGIN_ID: ${{ secrets.E2E_ADMIN_LOGIN_ID }}
+      E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+      E2E_AUTH_BASE_URL: ${{ secrets.E2E_AUTH_BASE_URL }}
+      E2E_INTERNAL_LOGIN_ID: ${{ secrets.E2E_INTERNAL_LOGIN_ID }}
+      E2E_INTERNAL_PASSWORD: ${{ secrets.E2E_INTERNAL_PASSWORD }}
+      E2E_SENIOR_LOGIN_ID: ${{ secrets.E2E_SENIOR_LOGIN_ID }}
+      E2E_SENIOR_PASSWORD: ${{ secrets.E2E_SENIOR_PASSWORD }}
+      REQUIRE_AUTHENTICATED_E2E: '1'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          cache: npm
+          node-version: 24
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e:roles
+      - uses: actions/upload-artifact@v5
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-authenticated
+          path: playwright-report/
+          retention-days: 14
+
+  safari-engine:
+    name: WebKit sur macOS
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          cache: npm
+          node-version: 24
+      - run: npm ci
+      - run: npm run build
+      - run: npx playwright install webkit
+      - run: npx playwright test e2e/public --project=webkit
