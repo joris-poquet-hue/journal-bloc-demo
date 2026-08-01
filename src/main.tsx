@@ -1,7 +1,10 @@
 import ReactDOM from 'react-dom/client';
+import { injectSpeedInsights } from '@vercel/speed-insights';
 
 import App from './App';
 import './styles.css';
+
+injectSpeedInsights();
 
 type MonJdbWindow = Window & {
   __MONJDB_NATIVE_APP__?: boolean;
