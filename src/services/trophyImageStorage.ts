@@ -1,7 +1,7 @@
 import {
-  getPersistentStorageAuthHeaders,
-  isPersistentStorageConfigured,
-} from './persistentStorage';
+  getAuthenticatedApiHeaders,
+  isAuthenticatedApiAvailable,
+} from './authenticatedApi';
 
 const TROPHY_IMAGE_UPLOAD_API_PATH = '/api/trophy-image';
 const MAX_TROPHY_IMAGE_SIZE_BYTES = 4 * 1024 * 1024;
@@ -18,15 +18,20 @@ type UploadTrophyImageResult = {
   publicUrl: string;
 };
 
+type CleanupTrophyImagesResult = {
+  deleted: number;
+  retained: number;
+};
+
 export async function uploadTrophyImage({
   file,
   fileName,
   imageKey,
   trophyId,
 }: UploadTrophyImageInput): Promise<UploadTrophyImageResult> {
-  if (!isPersistentStorageConfigured()) {
+  if (!isAuthenticatedApiAvailable()) {
     throw new Error(
-      'La connexion persistante n’est pas disponible pour televerser l’image.'
+      'La connexion sécurisée n’est pas disponible pour téléverser l’image.'
     );
   }
 
@@ -44,7 +49,7 @@ export async function uploadTrophyImage({
       'X-File-Name': encodeURIComponent(fileName),
       'X-Trophy-Id': trophyId,
       'X-Image-Key': imageKey,
-      ...getPersistentStorageAuthHeaders(),
+      ...getAuthenticatedApiHeaders(),
     },
     body: file,
   });
@@ -63,5 +68,40 @@ export async function uploadTrophyImage({
   return {
     path: payload.path,
     publicUrl: payload.publicUrl,
+  };
+}
+
+export async function cleanupTrophyImages(
+  trophyId: string
+): Promise<CleanupTrophyImagesResult> {
+  if (!isAuthenticatedApiAvailable()) {
+    throw new Error(
+      'La connexion sécurisée n’est pas disponible pour nettoyer les images.'
+    );
+  }
+
+  const response = await fetch(TROPHY_IMAGE_UPLOAD_API_PATH, {
+    method: 'DELETE',
+    cache: 'no-store',
+    headers: {
+      'Content-Type': 'application/json',
+      ...getAuthenticatedApiHeaders(),
+    },
+    body: JSON.stringify({ trophyId }),
+  });
+
+  const payload = (await response.json().catch(() => null)) as
+    | { deleted?: number; error?: string; retained?: number }
+    | null;
+
+  if (!response.ok) {
+    throw new Error(
+      payload?.error ?? 'Le nettoyage des anciennes images a échoué.'
+    );
+  }
+
+  return {
+    deleted: Number(payload?.deleted ?? 0),
+    retained: Number(payload?.retained ?? 0),
   };
 }

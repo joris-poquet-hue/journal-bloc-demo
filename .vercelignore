@@ -1,0 +1,12 @@
+.git
+.vercel
+.expo
+node_modules
+mobile
+build
+dist
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
