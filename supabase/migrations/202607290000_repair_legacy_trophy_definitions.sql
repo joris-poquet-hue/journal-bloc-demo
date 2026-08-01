@@ -23,11 +23,9 @@ begin
   for update;
 
   if salpingectomy.id is null then
-    raise exception 'Le trophée historique Salpingectomie est introuvable.'
-      using errcode = 'P0002';
-  end if;
-
-  if salpingectomy.status <> 'active'
+    raise notice
+      'Le trophée historique Salpingectomie est absent : aucune réparation nécessaire.';
+  elsif salpingectomy.status <> 'active'
     or jsonb_typeof(salpingectomy.definition -> 'levels') <> 'array'
     or jsonb_array_length(salpingectomy.definition -> 'levels') <> 4
     or salpingectomy.definition #>> '{levels,3,tier}' <> 'diamond'
@@ -46,46 +44,46 @@ begin
     raise exception
       'La définition historique de Salpingectomie ne correspond pas à l’état validé.'
       using errcode = '22023';
-  end if;
+  else
+    salpingectomy_changed :=
+      coalesce(salpingectomy.definition ->> 'description', '')
+        <> 'Récompense ta progression en salpingectomie'
+      or (salpingectomy.definition #>> '{levels,3,threshold}')::numeric <> 31;
 
-  salpingectomy_changed :=
-    coalesce(salpingectomy.definition ->> 'description', '')
-      <> 'Récompense ta progression en salpingectomie'
-    or (salpingectomy.definition #>> '{levels,3,threshold}')::numeric <> 31;
+    if salpingectomy_changed then
+      update public.trophy_definitions definition
+      set definition = jsonb_set(
+        jsonb_set(
+          definition.definition,
+          '{description}',
+          to_jsonb('Récompense ta progression en salpingectomie'::text),
+          true
+        ),
+        '{levels,3,threshold}',
+        '31'::jsonb,
+        false
+      )
+      where definition.id = salpingectomy.id;
 
-  if salpingectomy_changed then
-    update public.trophy_definitions definition
-    set definition = jsonb_set(
-      jsonb_set(
-        definition.definition,
-        '{description}',
-        to_jsonb('Récompense ta progression en salpingectomie'::text),
-        true
-      ),
-      '{levels,3,threshold}',
-      '31'::jsonb,
-      false
-    )
-    where definition.id = salpingectomy.id;
-
-    insert into public.activity_log (
-      profile_id,
-      actor_role,
-      actor_label,
-      action,
-      target_type,
-      target_label,
-      created_by_profile_id
-    )
-    values (
-      null,
-      'admin'::public.app_role,
-      'Migration de conformité validée',
-      'Correction de la définition historique d’un trophée',
-      'Trophée',
-      salpingectomy.title,
-      null
-    );
+      insert into public.activity_log (
+        profile_id,
+        actor_role,
+        actor_label,
+        action,
+        target_type,
+        target_label,
+        created_by_profile_id
+      )
+      values (
+        null,
+        'admin'::public.app_role,
+        'Migration de conformité validée',
+        'Correction de la définition historique d’un trophée',
+        'Trophée',
+        salpingectomy.title,
+        null
+      );
+    end if;
   end if;
 
   select definition.*
@@ -95,11 +93,9 @@ begin
   for update;
 
   if aspiration.id is null then
-    raise exception 'Le trophée historique Aspiration est introuvable.'
-      using errcode = 'P0002';
-  end if;
-
-  if aspiration.status <> 'active'
+    raise notice
+      'Le trophée historique Aspiration est absent : aucune réparation nécessaire.';
+  elsif aspiration.status <> 'active'
     or jsonb_typeof(aspiration.definition -> 'levels') <> 'array'
     or jsonb_array_length(aspiration.definition -> 'levels') <> 4
     or aspiration.definition #>> '{levels,3,tier}' <> 'diamond'
@@ -118,48 +114,48 @@ begin
     raise exception
       'La définition historique d’Aspiration ne correspond pas à l’état validé.'
       using errcode = '22023';
-  end if;
+  else
+    aspiration_changed :=
+      coalesce(aspiration.definition ->> 'description', '')
+        <> 'Récompense ta progression en aspiration endo-utérine'
+      or (aspiration.definition #>> '{levels,3,threshold}')::numeric <> 16;
 
-  aspiration_changed :=
-    coalesce(aspiration.definition ->> 'description', '')
-      <> 'Récompense ta progression en aspiration endo-utérine'
-    or (aspiration.definition #>> '{levels,3,threshold}')::numeric <> 16;
-
-  if aspiration_changed then
-    update public.trophy_definitions definition
-    set definition = jsonb_set(
-      jsonb_set(
-        definition.definition,
-        '{description}',
-        to_jsonb(
-          'Récompense ta progression en aspiration endo-utérine'::text
+    if aspiration_changed then
+      update public.trophy_definitions definition
+      set definition = jsonb_set(
+        jsonb_set(
+          definition.definition,
+          '{description}',
+          to_jsonb(
+            'Récompense ta progression en aspiration endo-utérine'::text
+          ),
+          true
         ),
-        true
-      ),
-      '{levels,3,threshold}',
-      '16'::jsonb,
-      false
-    )
-    where definition.id = aspiration.id;
+        '{levels,3,threshold}',
+        '16'::jsonb,
+        false
+      )
+      where definition.id = aspiration.id;
 
-    insert into public.activity_log (
-      profile_id,
-      actor_role,
-      actor_label,
-      action,
-      target_type,
-      target_label,
-      created_by_profile_id
-    )
-    values (
-      null,
-      'admin'::public.app_role,
-      'Migration de conformité validée',
-      'Correction de la définition historique d’un trophée',
-      'Trophée',
-      aspiration.title,
-      null
-    );
+      insert into public.activity_log (
+        profile_id,
+        actor_role,
+        actor_label,
+        action,
+        target_type,
+        target_label,
+        created_by_profile_id
+      )
+      values (
+        null,
+        'admin'::public.app_role,
+        'Migration de conformité validée',
+        'Correction de la définition historique d’un trophée',
+        'Trophée',
+        aspiration.title,
+        null
+      );
+    end if;
   end if;
 end;
 $$;

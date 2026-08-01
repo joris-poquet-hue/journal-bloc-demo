@@ -19,7 +19,7 @@ test.describe('Parcours Administrateur', () => {
     await expect(page.locator('main.admin-workspace')).toBeVisible();
 
     await page
-      .getByRole('button', { name: /Administration des profils/ })
+      .getByRole('button', { name: /Gestion des profils/ })
       .click();
     await expect(
       page.getByRole('heading', { name: 'Gestion des profils', level: 1 })

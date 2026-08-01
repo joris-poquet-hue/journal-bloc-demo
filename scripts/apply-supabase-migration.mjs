@@ -10,6 +10,10 @@ const isDryRun = process.argv.slice(2).includes('--dry-run');
 const requireTestDatabase = process.argv
   .slice(2)
   .includes('--require-test-database');
+const applyToTestDatabase = process.argv
+  .slice(2)
+  .includes('--apply-to-test-database');
+const useTestDatabase = requireTestDatabase || applyToTestDatabase;
 const reportLegacyInterventions = process.argv
   .slice(2)
   .includes('--report-legacy-interventions');
@@ -29,7 +33,7 @@ const explicitEnvFile = process.argv
 
 loadEnv(explicitEnvFile);
 
-const connectionString = requireTestDatabase
+const connectionString = useTestDatabase
   ? process.env.SUPABASE_TEST_POSTGRES_URL
   : process.env.SUPABASE_POSTGRES_URL_NON_POOLING ||
     process.env.SUPABASE_POSTGRES_URL;
@@ -42,7 +46,7 @@ const migrationFiles = migrationFile
 
 if (!connectionString) {
   console.error(
-    requireTestDatabase
+    useTestDatabase
       ? 'SUPABASE_TEST_POSTGRES_URL est requis pour valider les migrations sur la base de test isolée.'
       : 'Missing SUPABASE_POSTGRES_URL_NON_POOLING or SUPABASE_POSTGRES_URL.'
   );
@@ -56,8 +60,15 @@ if (requireTestDatabase && !isDryRun) {
   process.exit(1);
 }
 
+if (applyToTestDatabase && isDryRun) {
+  console.error(
+    '--apply-to-test-database applique les migrations durablement et ne doit pas être combiné avec --dry-run.'
+  );
+  process.exit(1);
+}
+
 if (
-  requireTestDatabase &&
+  useTestDatabase &&
   [process.env.SUPABASE_POSTGRES_URL_NON_POOLING, process.env.SUPABASE_POSTGRES_URL]
     .filter(Boolean)
     .includes(connectionString)
@@ -68,7 +79,7 @@ if (
   process.exit(1);
 }
 
-if (requireTestDatabase) {
+if (useTestDatabase) {
   const databaseUrl = new URL(connectionString);
   const isLocalDatabase = ['127.0.0.1', '::1', 'localhost'].includes(
     databaseUrl.hostname

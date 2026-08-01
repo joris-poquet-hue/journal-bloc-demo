@@ -9,6 +9,9 @@ function readSource(path) {
 const migration = readSource(
   '../supabase/migrations/202607290001_trophy_authority_versioning_notifications.sql'
 );
+const legacyRepairMigration = readSource(
+  '../supabase/migrations/202607290000_repair_legacy_trophy_definitions.sql'
+);
 const backendRepository = readSource('../src/services/backendRepository.ts');
 const appContext = readSource('../src/context/AppContext.tsx');
 const adminScreen = readSource('../src/screens/AdminScreen.tsx');
@@ -42,6 +45,21 @@ test('Supabase est l’unique autorité des définitions et des attributions', (
   assert.doesNotMatch(
     trophyDisplay,
     /snapshot\.awardedAt[\s\S]{0,80}isEarned/
+  );
+});
+
+test('la réparation historique accepte une base sans anciens trophées', () => {
+  assert.match(
+    legacyRepairMigration,
+    /Le trophée historique Salpingectomie est absent : aucune réparation nécessaire/i
+  );
+  assert.match(
+    legacyRepairMigration,
+    /Le trophée historique Aspiration est absent : aucune réparation nécessaire/i
+  );
+  assert.doesNotMatch(
+    legacyRepairMigration,
+    /raise exception 'Le trophée historique (Salpingectomie|Aspiration) est introuvable/i
   );
 });
 

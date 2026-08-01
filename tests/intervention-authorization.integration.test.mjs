@@ -502,9 +502,14 @@ test(
         '22023',
         () =>
           createIntervention(client, fixture, {
-            checklist: { 'step-1': '3', 'step-injected': '4' },
+            contextVariables: {
+              schemaVersion: 2,
+              patient: { ageYears: 200 },
+              history: {},
+              intraoperative: {},
+            },
             interventionId: randomUUID(),
-            mutationId: `test-invalid-checklist-${randomUUID()}`,
+            mutationId: `test-invalid-context-${randomUUID()}`,
             seniorProfileId: fixture.designatedSenior.profileId,
           })
       );
@@ -1235,7 +1240,10 @@ async function runAs(client, authUserId, operation) {
   try {
     return await operation();
   } finally {
-    await client.query('reset role');
+    await client.query('reset role').catch(() => {
+      // PostgreSQL refuse RESET ROLE après une erreur non anticipée tant que la
+      // transaction n'est pas annulée. Ne masquons pas l'erreur métier initiale.
+    });
   }
 }
 
@@ -1288,28 +1296,40 @@ async function expectOwnerDatabaseError(client, expectedCode, operation) {
 async function createIntervention(
   client,
   fixture,
-  { checklist = { 'step-1': '3' }, interventionId, mutationId, seniorProfileId }
+  {
+    contextVariables = {
+      schemaVersion: 2,
+      patient: {},
+      history: {},
+      intraoperative: {},
+    },
+    interventionId,
+    mutationId,
+    seniorProfileId,
+  }
 ) {
   return client.query(
-    `select public.create_intervention(
-       $1::uuid, $2::text, $3::uuid, $4::text, current_date, null::text,
+    `select public.create_intervention_v3(
+       $1::uuid, $2::text, $3::uuid, $4::text, current_date,
+       '08:30'::time without time zone, 60::integer,
        $5::text, $6::text, $7::text, $8::text, $9::text, $10::text,
-       $11::integer, $12::text, $13::jsonb
+       $11::text, $12::jsonb, $13::integer, $14::text
      )`,
     [
       interventionId,
       mutationId,
       seniorProfileId,
       fixture.procedureId,
+      null,
       '',
       'Test',
       'voie_vaginale',
       null,
       null,
       'programme',
+      JSON.stringify(contextVariables),
       5,
       'operateur_principal',
-      JSON.stringify(checklist),
     ]
   );
 }
@@ -1321,11 +1341,15 @@ async function saveEvaluation(
   interventionVersion
 ) {
   return client.query(
-    `select public.save_intervention_evaluation(
+    `select public.save_intervention_evaluation_v2(
        $1::uuid, $2::bigint, null::bigint,
-       '4'::text, '2'::text, 'Évaluation de test'::text
+       $3::jsonb, '4'::text, '2'::text, 'Évaluation de test'::text
      )`,
-    [fixture.interventionId, interventionVersion]
+    [
+      fixture.interventionId,
+      interventionVersion,
+      JSON.stringify({ 'step-1': '3' }),
+    ]
   );
 }
 
