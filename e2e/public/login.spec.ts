@@ -25,7 +25,7 @@ test.describe('Connexion publique', () => {
     await expect(
       page.getByRole('button', { name: 'Mot de passe oublié' })
     ).toBeEnabled();
-    await expect(page.getByText('Version V0')).toBeVisible();
+    await expect(page.getByText('Version v0')).toBeVisible();
     await expect(
       page.getByRole('link', { name: 'Contacter l’assistance par e-mail' })
     ).toHaveAttribute(

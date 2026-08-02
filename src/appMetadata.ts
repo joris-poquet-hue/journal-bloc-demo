@@ -1,1 +1,1 @@
-export const PUBLIC_SITE_VERSION = 'V0';
+export const PUBLIC_SITE_VERSION = 'v0';

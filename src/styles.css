@@ -3265,8 +3265,8 @@ button {
 }
 
 .login-meta__contact {
-  color: #087b8a;
-  font-weight: 750;
+  color: inherit;
+  font-weight: inherit;
   text-decoration: none;
   text-underline-offset: 3px;
 }
