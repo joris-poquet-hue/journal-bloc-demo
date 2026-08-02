@@ -561,27 +561,94 @@ Difficulté :
 ### 8.6 Notifications de trophée
 
 - L'interne est averti lorsqu'il obtient un trophée ou un nouveau niveau.
+- Le message automatique est : « Vous avez obtenu un nouveau trophée : [Nom du
+  trophée] ! ».
 - Une célébration apparaît dans l'interface active.
 - Une notification push mobile est envoyée si l'application est fermée.
 - Aucun e-mail n'est envoyé pour les trophées.
 
-## 9. Notifications d'évaluation
+## 9. Centre de notifications commun
 
-- Lorsqu'un interne enregistre une intervention, le senior désigné reçoit une
-  notification d'évaluation en attente.
-- Lorsqu'un senior valide l'évaluation, l'interne reçoit une notification.
-- Ces notifications apparaissent dans l'interface et sont envoyées en push sur
-  mobile si l'application est fermée.
-- Aucun e-mail n'est envoyé pour ces notifications.
-- La suppression par l'interne d'une intervention non évaluée retire la demande
-  correspondante.
-- Si l'utilisateur refuse les notifications push, les notifications restent
-  visibles dans l'application et sur le web, et les évaluations en attente
-  restent signalées dans le tableau de bord.
-- L'application ne redemande pas l'autorisation à chaque ouverture. Elle propose
-  un accès aux réglages du téléphone pour permettre une activation ultérieure.
-- Le refus ou l'indisponibilité des notifications push ne déclenche aucun e-mail
-  de remplacement.
+### 9.1 Destinataires et messages automatiques
+
+- L'Interne reçoit les notifications automatiques et les messages envoyés depuis
+  l'espace Administrateur.
+- Les deux messages automatiques sont :
+  - « Vous avez obtenu un nouveau trophée : [Nom du trophée] ! » ;
+  - « Une évaluation a été complétée par [Nom du senior] ».
+- Une même obtention de trophée ou une même évaluation ne peut générer qu'une
+  seule notification, y compris après un rechargement, une reconnexion ou un
+  recalcul.
+- Le Senior ne reçoit aucune notification automatique. Les interventions qui
+  lui sont attribuées restent signalées comme tâches à évaluer dans son tableau
+  de bord. Il reçoit uniquement les messages envoyés par l'Administrateur.
+- L'Administrateur ne reçoit aucune notification. Il organise et suit les
+  messages depuis son espace de gestion.
+- Aucun e-mail n'est envoyé en remplacement d'une notification.
+
+### 9.2 Présentation et lecture
+
+- Sur le web, un liseré rouge animé lentement et un compteur de messages non lus
+  entourent la photo de profil de l'Interne.
+- Le Senior dispose du même indicateur autour d'un petit avatar placé en haut à
+  droite.
+- Un clic sur la photo ou l'avatar ouvre le centre de notifications.
+- Les messages non lus sont affichés en premier, du plus récent au plus ancien,
+  puis viennent les messages déjà lus.
+- Une notification est considérée comme lue seulement lorsque l'utilisateur
+  clique dessus, et non à la simple ouverture du centre.
+- Le centre propose l'action « Tout marquer comme lu ».
+- Le clic sur une notification de trophée ouvre le détail du trophée obtenu.
+- Le clic sur une notification d'évaluation ouvre le détail de l'intervention
+  évaluée.
+
+### 9.3 Cycle de vie des messages
+
+- Une notification automatique est retirée du centre après sa lecture.
+- Lors de la création d'un message Administrateur, l'Administrateur choisit entre
+  une suppression après lecture et une suppression manuelle par le destinataire.
+- Un message Administrateur conservé après lecture reste visible avec un style
+  atténué jusqu'à sa suppression manuelle.
+- La suppression est logique : le message disparaît pour l'utilisateur, tandis
+  qu'une trace minimale reste conservée pour l'audit.
+- « Tout marquer comme lu » applique à chaque message sa propre règle de cycle de
+  vie.
+
+### 9.4 Messages Administrateur
+
+- Les messages apparaissent comme provenant de « Mon Journal de Bloc », sans
+  afficher le nom personnel de l'Administrateur. La date et l'heure d'envoi sont
+  visibles.
+- Les quatre ciblages disponibles sont :
+  - tous les Internes et Seniors actifs ;
+  - uniquement les Internes ou uniquement les Seniors ;
+  - les utilisateurs actifs d'un établissement précis ;
+  - un utilisateur actif précis.
+- Pour un ciblage par rôle ou établissement, les destinataires sont déterminés
+  au moment réel de l'envoi. Les comptes désactivés sont toujours exclus.
+- Le formulaire exige un titre, un message et les destinataires.
+- L'envoi peut être immédiat ou programmé à une date et une heure.
+- Un bouton facultatif peut contenir un libellé et un lien interne ou externe.
+  Un lien externe est clairement signalé et s'ouvre séparément dans le
+  navigateur.
+- Un aperçu final indique notamment le nombre de destinataires avant la
+  confirmation.
+- Un message programmé peut être modifié ou annulé jusqu'à son envoi.
+- Après l'envoi, son contenu et ses destinataires deviennent immuables.
+  L'Administrateur peut néanmoins le retirer des centres de notifications.
+- Le suivi Administrateur affiche seulement le nombre de destinataires, le
+  nombre de messages non lus et le nombre de messages lus.
+
+### 9.5 Mobile et notifications système
+
+- Le centre de notifications utilise les mêmes données sur le web, iPhone, iPad
+  et Android.
+- Les notifications système Apple et Android sont prévues dans une étape mobile
+  dédiée. Leur refus ou leur indisponibilité ne retire jamais les messages du
+  centre commun.
+- L'application ne redemande pas l'autorisation système à chaque ouverture et
+  propose un accès aux réglages du téléphone pour permettre une activation
+  ultérieure.
 
 ## 10. Exports, bloc-notes et support
 

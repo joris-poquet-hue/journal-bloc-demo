@@ -1,6 +1,7 @@
 import {
   Archive,
   BarChart3,
+  Bell,
   Building2,
   CalendarDays,
   Check,
@@ -129,6 +130,7 @@ import {
 } from './admin/seniorDashboardModel';
 import { SeniorDashboard } from './admin/SeniorDashboard';
 import { AdminPageShell } from './admin/AdminPageShell';
+import { AdminNotificationsManager } from './admin/AdminNotificationsManager';
 import { hasCompleteAdminEvaluation } from './admin/adminEvaluationModel';
 import {
   AdminFeedbackMessage as FeedbackMessage,
@@ -146,7 +148,8 @@ type AdminView =
   | 'profile'
   | 'profiles'
   | 'institutions'
-  | 'interventions';
+  | 'interventions'
+  | 'notifications';
 type AdminActivityRange = 'day' | 'week' | 'month';
 type AdminActivityAnalyticsPeriod = '7d' | '30d' | '6m' | '1y';
 type AdminInterventionStatusFilter = 'all' | 'evaluated' | 'pending';
@@ -1341,6 +1344,7 @@ export function AdminScreen() {
     renameInstitution,
     savedInterventions,
     trophyAwards,
+    userNotifications,
     saveSeniorEvaluation,
     saveAdminTrophy,
     deleteAdminTrophy,
@@ -1353,6 +1357,9 @@ export function AdminScreen() {
     updateSeniorManagedInternals,
     updateSeniorCredentials,
     updateSurgicalIntervention,
+    deleteUserNotification,
+    markAllUserNotificationsRead,
+    markUserNotificationRead,
   } = useAppContext();
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [view, setView] = useState<AdminView>('home');
@@ -7091,6 +7098,23 @@ export function AdminScreen() {
     );
   }
 
+  if (isAdmin && view === 'notifications') {
+    return (
+      <AdminPageShell
+        backLabel="Retour à l’espace administrateur"
+        onBack={() => setView('home')}
+        subtitle="Rédigez, programmez et suivez les messages destinés aux Internes et aux Seniors."
+        title="Centre de notifications"
+      >
+        <AdminNotificationsManager
+          institutions={institutions}
+          internalProfiles={internalProfiles}
+          seniors={selectableSeniors}
+        />
+      </AdminPageShell>
+    );
+  }
+
   if (isAdmin && view === 'trophies') {
     return (
       <AdminPageShell
@@ -8377,6 +8401,20 @@ export function AdminScreen() {
           </div>
           <ChevronRight aria-hidden="true" />
         </button>
+
+        <button
+          className="admin-shortcut-card admin-shortcut-card--compact"
+          onClick={() => setView('notifications')}
+          type="button"
+        >
+          <span className="admin-shortcut-card__icon admin-shortcut-card__icon--violet">
+            <Bell aria-hidden="true" />
+          </span>
+          <div className="admin-shortcut-card__copy">
+            <strong>Notifications</strong>
+          </div>
+          <ChevronRight aria-hidden="true" />
+        </button>
       </div>
     </section>
   );
@@ -8397,6 +8435,10 @@ export function AdminScreen() {
         requestEmailChange={requestEmailChange}
         updateSeniorCredentials={updateSeniorCredentials}
         updateSeniorManagedInternals={updateSeniorManagedInternals}
+        userNotifications={userNotifications}
+        deleteUserNotification={deleteUserNotification}
+        markAllUserNotificationsRead={markAllUserNotificationsRead}
+        markUserNotificationRead={markUserNotificationRead}
       />
     );
   }

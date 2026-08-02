@@ -224,7 +224,7 @@ test('les obtentions génèrent une notification durable et une célébration li
   );
   assert.match(
     backendRepository,
-    /user_notifications[\s\S]*read_at: 'is\.null'/
+    /user_notifications[\s\S]*deleted_at: 'is\.null'[\s\S]*read_at\.asc\.nullsfirst,created_at\.desc/
   );
   assert.match(
     appContext,

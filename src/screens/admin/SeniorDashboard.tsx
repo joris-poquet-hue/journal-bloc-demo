@@ -22,6 +22,8 @@ import {
 } from 'react';
 
 import { ApproachIcon } from '../../components/ApproachIcon';
+import { NotificationAvatarButton } from '../../components/NotificationAvatarButton';
+import { NotificationCenter } from '../../components/NotificationCenter';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { SectionCard } from '../../components/SectionCard';
@@ -42,6 +44,7 @@ import type {
   UpdateSeniorCredentialsInput,
   UpdateSeniorCredentialsResult,
 } from '../../types';
+import type { BackendUserNotification } from '../../shared/backendTypes';
 import { downloadSeniorInstitutionInterventionsExcel } from '../../utils/export';
 import { PASSWORD_POLICY_HELP, validatePasswordStrength } from '../../utils/passwordPolicy';
 import { type AdminFeedback as FeedbackState } from './AdminFeedbackMessage';
@@ -74,6 +77,10 @@ export function SeniorDashboard({
   requestEmailChange,
   updateSeniorCredentials,
   updateSeniorManagedInternals,
+  userNotifications,
+  deleteUserNotification,
+  markAllUserNotificationsRead,
+  markUserNotificationRead,
 }: {
   adminEvaluations: Record<string, AdminInterventionEvaluation>;
   customSurgicalInterventions: SurgicalInterventionDefinition[];
@@ -97,6 +104,10 @@ export function SeniorDashboard({
     seniorId: string,
     internalIds: string[]
   ) => Promise<void>;
+  userNotifications: BackendUserNotification[];
+  deleteUserNotification: (notificationId: string) => Promise<void>;
+  markAllUserNotificationsRead: () => Promise<void>;
+  markUserNotificationRead: (notificationId: string) => Promise<void>;
 }) {
   const seniorName = formatDisplayName(
     selectedSenior.firstName,
@@ -115,6 +126,7 @@ export function SeniorDashboard({
   const [isPendingEvaluationsSheetOpen, setIsPendingEvaluationsSheetOpen] =
     useState(false);
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
+  const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
   const [managedInternalIdsDraft, setManagedInternalIdsDraft] = useState<string[]>(
     selectedSenior.managedInternalIds ?? []
   );
@@ -141,6 +153,9 @@ export function SeniorDashboard({
     SENIOR_FALLBACK_INTERVENTION_KEY
   );
   const [selectedInternalId, setSelectedInternalId] = useState<string | null>(null);
+  const unreadNotificationCount = userNotifications.filter(
+    (notification) => !notification.readAt
+  ).length;
   const internalStripRef = useRef<HTMLDivElement | null>(null);
   const populationChangeScrollYRef = useRef<number | null>(null);
 
@@ -720,127 +735,169 @@ export function SeniorDashboard({
     </div>
   );
 
-  return (
-    <ScreenContainer
-      bodyClassName={
-        isNativeApp ? undefined : 'senior-screen__body senior-screen__body--web-panorama'
-      }
-      eyebrow={isNativeApp ? undefined : 'Espace senior'}
-      frameWidth="wide"
-      heroClassName="senior-screen__hero"
-      shellClassName={`dashboard-screen senior-screen ${
-        isNativeApp
-          ? 'monjdb-native-senior-screen'
-          : 'senior-screen--web-panorama'
-      }`.trim()}
-      title={`Dr ${seniorName}`}
-      subtitle={`Service de gynécologie-obstétrique – ${selectedSenior.institution}`}
-      headerAction={
-        <div className="senior-header-actions">
-          {isNativeApp ? null : (
-            <button
-              className="senior-header-support-button"
-              onClick={handleSupportClick}
-              type="button"
-            >
-              <Mail aria-hidden="true" />
-              <span>Support</span>
-            </button>
-          )}
-          <div className="senior-settings">
-            <button
-              aria-expanded={isSettingsMenuOpen}
-              aria-haspopup="menu"
-              aria-label="Ouvrir le menu senior"
-              className="senior-settings__button"
-              onClick={() => setIsSettingsMenuOpen((current) => !current)}
-              type="button"
-            >
-              <Settings aria-hidden="true" />
-            </button>
+  const renderSettingsMenu = (includeLogout: boolean) =>
+    isSettingsMenuOpen ? (
+      <div className="senior-settings__menu" role="menu">
+        <button
+          className={`senior-settings__menu-item ${
+            isNativeApp ? 'monjdb-native-internal-settings-button' : ''
+          }`.trim()}
+          onClick={() => {
+            setIsSettingsMenuOpen(false);
+            setIsInternalSettingsSheetOpen(true);
+          }}
+          role="menuitem"
+          type="button"
+        >
+          <Users aria-hidden="true" />
+          <span>Configurer mes internes</span>
+        </button>
+        <button
+          className="senior-settings__menu-item"
+          onClick={() => {
+            setIsSettingsMenuOpen(false);
+            setEmailForm({ contactEmail: '', currentPassword: '' });
+            setEmailFeedback(null);
+            setIsEmailSheetOpen(true);
+          }}
+          role="menuitem"
+          type="button"
+        >
+          <Mail aria-hidden="true" />
+          <span>Modifier l’adresse e-mail</span>
+        </button>
+        <button
+          className="senior-settings__menu-item"
+          onClick={() => {
+            setIsSettingsMenuOpen(false);
+            setIsPasswordSheetOpen(true);
+          }}
+          role="menuitem"
+          type="button"
+        >
+          <Pencil aria-hidden="true" />
+          <span>Modifier le mot de passe</span>
+        </button>
+        <button
+          className="senior-settings__menu-item"
+          onClick={handleInstitutionExport}
+          role="menuitem"
+          type="button"
+        >
+          <FileDown aria-hidden="true" />
+          <span>Exporter les interventions</span>
+        </button>
+        <button
+          className={`senior-settings__menu-item ${
+            isNativeApp ? 'monjdb-native-support-button' : ''
+          }`.trim()}
+          onClick={handleSupportClick}
+          role="menuitem"
+          type="button"
+        >
+          <Mail aria-hidden="true" />
+          <span>Contacter le support</span>
+        </button>
+        {includeLogout ? (
+          <button
+            className={`senior-settings__menu-item senior-settings__menu-item--danger ${
+              isNativeApp ? 'monjdb-native-logout-button' : ''
+            }`.trim()}
+            onClick={() => {
+              setIsSettingsMenuOpen(false);
+              onLogout();
+            }}
+            role="menuitem"
+            type="button"
+          >
+            <LogOut aria-hidden="true" />
+            <span>Déconnexion</span>
+          </button>
+        ) : null}
+      </div>
+    ) : null;
 
-            {isSettingsMenuOpen ? (
-              <div className="senior-settings__menu" role="menu">
+  return (
+    <>
+      <ScreenContainer
+        bodyClassName={
+          isNativeApp
+            ? undefined
+            : 'senior-screen__body senior-screen__body--web-panorama'
+        }
+        eyebrow={isNativeApp ? undefined : 'Bonjour'}
+        frameWidth="wide"
+        heroClassName="senior-screen__hero"
+        heroTop={
+          isNativeApp ? undefined : (
+            <div className="senior-web-hero-controls">
+              <div className="senior-settings">
                 <button
-                  className={`senior-settings__menu-item ${
-                    isNativeApp ? 'monjdb-native-internal-settings-button' : ''
-                  }`.trim()}
-                  onClick={() => {
-                    setIsSettingsMenuOpen(false);
-                    setIsInternalSettingsSheetOpen(true);
-                  }}
-                  role="menuitem"
+                  aria-expanded={isSettingsMenuOpen}
+                  aria-haspopup="menu"
+                  className="senior-web-hero-control"
+                  onClick={() => setIsSettingsMenuOpen((current) => !current)}
                   type="button"
                 >
-                  <Users aria-hidden="true" />
-                  <span>Configurer mes internes</span>
+                  <Settings aria-hidden="true" />
+                  <span>Paramètres</span>
                 </button>
+                {renderSettingsMenu(false)}
+              </div>
+              <button
+                className="senior-web-hero-control senior-web-hero-control--logout"
+                onClick={onLogout}
+                type="button"
+              >
+                <LogOut aria-hidden="true" />
+                <span>Déconnexion</span>
+              </button>
+            </div>
+          )
+        }
+        shellClassName={`dashboard-screen senior-screen ${
+          isNativeApp
+            ? 'monjdb-native-senior-screen'
+            : 'senior-screen--web-panorama'
+        }`.trim()}
+        title={`Dr ${seniorName}`}
+        subtitle={
+          isNativeApp ? (
+            `Service de gynécologie-obstétrique – ${selectedSenior.institution}`
+          ) : (
+            <>
+              <strong className="senior-web-hero-role">Senior</strong>
+              <span>Service de gynécologie-obstétrique · {selectedSenior.institution}</span>
+            </>
+          )
+        }
+        headerAction={
+          <div className="senior-header-actions">
+            <NotificationAvatarButton
+              className="senior-notification-avatar"
+              firstName={selectedSenior.firstName}
+              lastName={selectedSenior.lastName}
+              onClick={() => setIsNotificationCenterOpen(true)}
+              unreadCount={unreadNotificationCount}
+            />
+            {isNativeApp ? (
+              <div className="senior-settings">
                 <button
-                  className="senior-settings__menu-item"
-                  onClick={() => {
-                    setIsSettingsMenuOpen(false);
-                    setEmailForm({ contactEmail: '', currentPassword: '' });
-                    setEmailFeedback(null);
-                    setIsEmailSheetOpen(true);
-                  }}
-                  role="menuitem"
+                  aria-expanded={isSettingsMenuOpen}
+                  aria-haspopup="menu"
+                  aria-label="Ouvrir le menu senior"
+                  className="senior-settings__button"
+                  onClick={() => setIsSettingsMenuOpen((current) => !current)}
                   type="button"
                 >
-                  <Mail aria-hidden="true" />
-                  <span>Modifier l’adresse e-mail</span>
+                  <Settings aria-hidden="true" />
                 </button>
-                <button
-                  className="senior-settings__menu-item"
-                  onClick={() => {
-                    setIsSettingsMenuOpen(false);
-                    setIsPasswordSheetOpen(true);
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <Pencil aria-hidden="true" />
-                  <span>Modifier le mot de passe</span>
-                </button>
-                <button
-                  className="senior-settings__menu-item"
-                  onClick={handleInstitutionExport}
-                  role="menuitem"
-                  type="button"
-                >
-                  <FileDown aria-hidden="true" />
-                  <span>Exporter les interventions</span>
-                </button>
-                {isNativeApp ? (
-                  <button
-                    className="senior-settings__menu-item monjdb-native-support-button"
-                    onClick={handleSupportClick}
-                    role="menuitem"
-                    type="button"
-                  >
-                    <Mail aria-hidden="true" />
-                    <span>Contacter le support</span>
-                  </button>
-                ) : null}
-                <button
-                  className={`senior-settings__menu-item senior-settings__menu-item--danger ${
-                    isNativeApp ? 'monjdb-native-logout-button' : ''
-                  }`.trim()}
-                  onClick={() => {
-                    setIsSettingsMenuOpen(false);
-                    onLogout();
-                  }}
-                  role="menuitem"
-                  type="button"
-                >
-                  <LogOut aria-hidden="true" />
-                  <span>Déconnexion</span>
-                </button>
+                {renderSettingsMenu(true)}
               </div>
             ) : null}
           </div>
-        </div>
-      }
-    >
+        }
+      >
       {isNativeApp ? (
         <div aria-hidden="true" className="monjdb-native-safe-area-shield" />
       ) : null}
@@ -1325,6 +1382,23 @@ export function SeniorDashboard({
           </div>
         </div>
       ) : null}
-    </ScreenContainer>
+      </ScreenContainer>
+      <NotificationCenter
+        isOpen={isNotificationCenterOpen}
+        notifications={userNotifications}
+        onClose={() => setIsNotificationCenterOpen(false)}
+        onDelete={deleteUserNotification}
+        onNavigate={(notification) => {
+          if (
+            notification.actionType === 'internal_path' &&
+            notification.actionTarget === '/profil'
+          ) {
+            setIsSettingsMenuOpen(true);
+          }
+        }}
+        onRead={markUserNotificationRead}
+        onReadAll={markAllUserNotificationsRead}
+      />
+    </>
   );
 }

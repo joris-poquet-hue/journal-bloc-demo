@@ -18,6 +18,8 @@ import type {
   SurgicalInterventionDefinition,
 } from '../types';
 import type {
+  BackendAdminNotificationMessage,
+  BackendAdminNotificationMessageInput,
   BackendActivityLogEntry,
   BackendBootstrapPayload,
   BackendInterventionEvaluation,
@@ -216,15 +218,43 @@ type TrophyAwardRow = {
 };
 
 type UserNotificationRow = {
+  action_label: string | null;
+  action_target: string | null;
+  action_type: BackendUserNotification['actionType'];
+  admin_message_id: string | null;
   body: string;
+  celebrated_at: string | null;
   created_at: string;
+  deletion_policy: BackendUserNotification['deletionPolicy'];
+  evaluation_id: string | null;
   id: string;
-  kind: 'trophy_awarded';
+  kind: BackendUserNotification['kind'];
   profile_id: string;
   read_at: string | null;
   tier: string | null;
   title: string;
-  trophy_id: string;
+  trophy_id: string | null;
+};
+
+type AdminNotificationMessageRow = {
+  action_label: string | null;
+  action_target: string | null;
+  action_type: BackendAdminNotificationMessage['actionType'];
+  audience_institution_id: string | null;
+  audience_profile_id: string | null;
+  audience_role: BackendAdminNotificationMessage['audienceRole'];
+  audience_type: BackendAdminNotificationMessage['audienceType'];
+  body: string;
+  cancelled_at: string | null;
+  created_at: string;
+  deletion_policy: BackendAdminNotificationMessage['deletionPolicy'];
+  id: string;
+  retracted_at: string | null;
+  scheduled_at: string;
+  sent_at: string | null;
+  status: BackendAdminNotificationMessage['status'];
+  title: string;
+  updated_at: string;
 };
 
 type ActivityLogRow = {
@@ -615,8 +645,15 @@ function toUserNotification(
   row: UserNotificationRow
 ): BackendUserNotification {
   return {
+    actionLabel: row.action_label,
+    actionTarget: row.action_target,
+    actionType: row.action_type,
+    adminMessageId: row.admin_message_id,
     body: row.body,
+    celebratedAt: row.celebrated_at,
     createdAt: row.created_at,
+    deletionPolicy: row.deletion_policy,
+    evaluationId: row.evaluation_id,
     id: row.id,
     kind: row.kind,
     profileId: row.profile_id,
@@ -1015,13 +1052,13 @@ export async function loadBackendUserData(
         }
       ),
       loadBackendTrophyAwards(readableInternalIds, signal),
-      profile.role === 'internal'
+      profile.role === 'internal' || profile.role === 'senior'
         ? selectSupabaseRows<UserNotificationRow>('user_notifications', {
             filters: {
               profile_id: `eq.${profile.id}`,
-              read_at: 'is.null',
+              deleted_at: 'is.null',
             },
-            order: 'created_at.desc',
+            order: 'read_at.asc.nullsfirst,created_at.desc',
             signal,
           })
         : Promise.resolve([]),
@@ -1071,6 +1108,190 @@ export async function markBackendUserNotificationRead(
     body: {
       p_notification_id: notificationId,
     },
+    method: 'POST',
+    signal,
+  });
+}
+
+export async function markBackendTrophyNotificationCelebrated(
+  notificationId: string,
+  signal?: AbortSignal
+) {
+  await supabaseRestRequest<null>('rpc/mark_trophy_notification_celebrated', {
+    body: {
+      p_notification_id: notificationId,
+    },
+    method: 'POST',
+    signal,
+  });
+}
+
+export async function markAllBackendUserNotificationsRead(
+  signal?: AbortSignal
+) {
+  return supabaseRestRequest<number>('rpc/mark_all_user_notifications_read', {
+    body: {},
+    method: 'POST',
+    signal,
+  });
+}
+
+export async function deleteBackendUserNotification(
+  notificationId: string,
+  signal?: AbortSignal
+) {
+  await supabaseRestRequest<null>('rpc/delete_user_notification', {
+    body: {
+      p_notification_id: notificationId,
+    },
+    method: 'POST',
+    signal,
+  });
+}
+
+function toAdminNotificationMessage(
+  row: AdminNotificationMessageRow,
+  notifications: UserNotificationRow[]
+): BackendAdminNotificationMessage {
+  const recipients = notifications.filter(
+    (notification) => notification.admin_message_id === row.id
+  );
+
+  return {
+    actionLabel: row.action_label,
+    actionTarget: row.action_target,
+    actionType: row.action_type,
+    audienceInstitutionId: row.audience_institution_id,
+    audienceProfileId: row.audience_profile_id,
+    audienceRole: row.audience_role,
+    audienceType: row.audience_type,
+    body: row.body,
+    cancelledAt: row.cancelled_at,
+    createdAt: row.created_at,
+    deletionPolicy: row.deletion_policy,
+    id: row.id,
+    readCount: recipients.filter((notification) => notification.read_at).length,
+    recipientCount: recipients.length,
+    retractedAt: row.retracted_at,
+    scheduledAt: row.scheduled_at,
+    sentAt: row.sent_at,
+    status: row.status,
+    title: row.title,
+    unreadCount: recipients.filter((notification) => !notification.read_at).length,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function loadBackendAdminNotificationMessages(
+  signal?: AbortSignal
+) {
+  const [messageRows, notificationRows] = await Promise.all([
+    selectSupabaseRows<AdminNotificationMessageRow>(
+      'admin_notification_messages',
+      { order: 'created_at.desc', signal }
+    ),
+    selectSupabaseRows<UserNotificationRow>('user_notifications', {
+      filters: { admin_message_id: 'not.is.null' },
+      signal,
+    }),
+  ]);
+
+  return messageRows.map((row) =>
+    toAdminNotificationMessage(row, notificationRows)
+  );
+}
+
+export async function countBackendAdminNotificationRecipients(
+  input: Pick<
+    BackendAdminNotificationMessageInput,
+    | 'audienceInstitutionId'
+    | 'audienceProfileId'
+    | 'audienceRole'
+    | 'audienceType'
+  >,
+  signal?: AbortSignal
+) {
+  return supabaseRestRequest<number>('rpc/count_admin_notification_recipients', {
+    body: {
+      p_audience_institution_id: input.audienceInstitutionId ?? null,
+      p_audience_profile_id: input.audienceProfileId ?? null,
+      p_audience_role: input.audienceRole ?? null,
+      p_audience_type: input.audienceType,
+    },
+    method: 'POST',
+    signal,
+  });
+}
+
+export async function createBackendAdminNotificationMessage(
+  input: BackendAdminNotificationMessageInput,
+  signal?: AbortSignal
+) {
+  await supabaseRestRequest<unknown>('rpc/create_admin_notification_message', {
+    body: {
+      p_action_label: input.actionLabel ?? null,
+      p_action_target: input.actionTarget ?? null,
+      p_action_type: input.actionType ?? null,
+      p_audience_institution_id: input.audienceInstitutionId ?? null,
+      p_audience_profile_id: input.audienceProfileId ?? null,
+      p_audience_role: input.audienceRole ?? null,
+      p_audience_type: input.audienceType,
+      p_body: input.body,
+      p_deletion_policy: input.deletionPolicy,
+      p_scheduled_at: input.scheduledAt ?? null,
+      p_title: input.title,
+    },
+    method: 'POST',
+    signal,
+  });
+
+  return loadBackendAdminNotificationMessages(signal);
+}
+
+export async function updateBackendAdminNotificationMessage(
+  messageId: string,
+  input: BackendAdminNotificationMessageInput,
+  signal?: AbortSignal
+) {
+  await supabaseRestRequest<unknown>('rpc/update_admin_notification_message', {
+    body: {
+      p_action_label: input.actionLabel ?? null,
+      p_action_target: input.actionTarget ?? null,
+      p_action_type: input.actionType ?? null,
+      p_audience_institution_id: input.audienceInstitutionId ?? null,
+      p_audience_profile_id: input.audienceProfileId ?? null,
+      p_audience_role: input.audienceRole ?? null,
+      p_audience_type: input.audienceType,
+      p_body: input.body,
+      p_deletion_policy: input.deletionPolicy,
+      p_message_id: messageId,
+      p_scheduled_at: input.scheduledAt ?? null,
+      p_title: input.title,
+    },
+    method: 'POST',
+    signal,
+  });
+
+  return loadBackendAdminNotificationMessages(signal);
+}
+
+export async function cancelBackendAdminNotificationMessage(
+  messageId: string,
+  signal?: AbortSignal
+) {
+  await supabaseRestRequest<null>('rpc/cancel_admin_notification_message', {
+    body: { p_message_id: messageId },
+    method: 'POST',
+    signal,
+  });
+}
+
+export async function retractBackendAdminNotificationMessage(
+  messageId: string,
+  signal?: AbortSignal
+) {
+  await supabaseRestRequest<null>('rpc/retract_admin_notification_message', {
+    body: { p_message_id: messageId },
     method: 'POST',
     signal,
   });

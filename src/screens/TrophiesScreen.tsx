@@ -70,10 +70,14 @@ function TrophyHeroIllustration() {
 }
 
 function TrophyCollectionCard({
+  autoOpen,
   item,
+  onAutoOpen,
   onOpenTierGallery,
 }: {
+  autoOpen?: boolean;
   item: TrophyDisplayModel;
+  onAutoOpen?: () => void;
   onOpenTierGallery: (
     item: TrophyDisplayModel,
     trigger: HTMLButtonElement
@@ -83,7 +87,9 @@ function TrophyCollectionCard({
 
   return (
     <InternalTrophyCard
+      autoOpen={autoOpen}
       item={item}
+      onAutoOpen={onAutoOpen}
       onOpenDetails={
         hasSeveralEarnedTiers
           ? (trigger) => onOpenTierGallery(item, trigger)
@@ -224,6 +230,8 @@ export function TrophiesScreen() {
     savedInterventions,
     trophyAwards,
     backToWelcome,
+    clearTrophyNavigationId,
+    trophyNavigationId,
   } = useAppContext();
   const [activeSectionSheet, setActiveSectionSheet] = useState<TrophySectionId | null>(
     null
@@ -267,6 +275,33 @@ export function TrophiesScreen() {
       trophyAwards,
     ]
   );
+
+  useEffect(() => {
+    if (!trophyNavigationId) {
+      return;
+    }
+
+    const target = [...trophyDisplay.earned, ...trophyDisplay.progress].find(
+      (item) => item.id === trophyNavigationId
+    );
+
+    if (!target) {
+      clearTrophyNavigationId();
+      return;
+    }
+
+    if (isNativeApp) {
+      setActiveSectionSheet(target.isUnlocked ? 'earned' : 'progress');
+    } else if (target.section === 'earned') {
+      setIsWebCollectionOpen(true);
+    }
+  }, [
+    clearTrophyNavigationId,
+    isNativeApp,
+    trophyDisplay.earned,
+    trophyDisplay.progress,
+    trophyNavigationId,
+  ]);
 
   if (!selectedInternal) {
     return (
@@ -355,8 +390,10 @@ export function TrophiesScreen() {
             <div className="trophy-collection-page__grid">
               {trophyDisplay.earned.map((item) => (
                 <TrophyCollectionCard
+                  autoOpen={trophyNavigationId === item.id}
                   item={item}
                   key={item.id}
+                  onAutoOpen={clearTrophyNavigationId}
                   onOpenTierGallery={(selectedItem, trigger) =>
                     setTierGallery({
                       item: selectedItem,
@@ -463,8 +500,10 @@ export function TrophiesScreen() {
             >
               {latestEarnedTrophy ? (
                 <InternalTrophyCard
+                  autoOpen={trophyNavigationId === latestEarnedTrophy.id}
                   item={latestEarnedTrophy}
                   kicker="Dernier trophée obtenu"
+                  onAutoOpen={clearTrophyNavigationId}
                   presentation="feature"
                 />
               ) : (
@@ -514,9 +553,11 @@ export function TrophiesScreen() {
                   {sortedProgressTrophies.map((item) => (
                     <InternalTrophyCard
                       actionLabel="Voir le détail"
+                      autoOpen={trophyNavigationId === item.id}
                       item={item}
                       key={item.id}
                       kicker="Progression actuelle"
+                      onAutoOpen={clearTrophyNavigationId}
                       presentation="wide"
                       supportingText={item.subtitle}
                     />
@@ -571,8 +612,10 @@ export function TrophiesScreen() {
             <div className="trophy-section-sheet__grid">
               {activeSheetSection.items.map((item) => (
                 <InternalTrophyCard
+                  autoOpen={trophyNavigationId === item.id}
                   item={item}
                   key={item.id}
+                  onAutoOpen={clearTrophyNavigationId}
                 />
               ))}
             </div>

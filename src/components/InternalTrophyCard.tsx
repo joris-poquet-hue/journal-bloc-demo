@@ -12,7 +12,9 @@ import { TrophyDisplayModel } from '../utils/trophyDisplay';
 
 type InternalTrophyCardProps = {
   actionLabel?: string;
+  autoOpen?: boolean;
   item: TrophyDisplayModel;
+  onAutoOpen?: () => void;
   kicker?: string;
   onOpenDetails?: (trigger: HTMLButtonElement) => void;
   presentation?: 'default' | 'feature' | 'wide';
@@ -21,8 +23,10 @@ type InternalTrophyCardProps = {
 
 export function InternalTrophyCard({
   actionLabel,
+  autoOpen = false,
   item,
   kicker,
+  onAutoOpen,
   onOpenDetails,
   presentation = 'default',
   supportingText,
@@ -32,6 +36,7 @@ export function InternalTrophyCard({
   const dialogTitleId = useId();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const autoOpenHandledRef = useRef(false);
   const detailDescription = item.isSecret
     ? item.subtitle
     : item.description || (item.section === 'progress' ? item.subtitle : '');
@@ -76,6 +81,16 @@ export function InternalTrophyCard({
 
     setIsDetailsOpen(true);
   };
+
+  useEffect(() => {
+    if (!autoOpen || autoOpenHandledRef.current || !triggerRef.current) {
+      return;
+    }
+
+    autoOpenHandledRef.current = true;
+    openDetails(triggerRef.current);
+    onAutoOpen?.();
+  }, [autoOpen, onAutoOpen]);
 
   useEffect(() => {
     if (!isDetailsOpen || onOpenDetails) {

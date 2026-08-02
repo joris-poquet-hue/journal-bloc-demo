@@ -87,6 +87,9 @@ import {
   loadBackendVisibleInternalProfiles,
   loadBackendSeniorAssignments,
   loadBackendTrophyAwards,
+  deleteBackendUserNotification,
+  markAllBackendUserNotificationsRead,
+  markBackendTrophyNotificationCelebrated,
   markBackendUserNotificationRead,
   moveBackendProfileToInstitution,
   recordBackendProfileLogin,
@@ -153,6 +156,8 @@ type AppContextValue = {
   sessionRole: SessionRole | null;
   summaryMode: SummaryMode;
   historyNavigationView: 'calendar' | 'progress' | null;
+  historyNavigationInterventionId: string | null;
+  trophyNavigationId: string | null;
   internalProfiles: InternalProfile[];
   institutions: Institution[];
   selectedInternal: InternalProfile | null;
@@ -167,6 +172,7 @@ type AppContextValue = {
   adminEvaluations: Record<string, AdminInterventionEvaluation>;
   adminTrophies: AdminTrophyDefinition[];
   trophyAwards: TrophyAward[];
+  userNotifications: BackendUserNotification[];
   trophyCelebration: {
     awardedAt: string;
     imageSrc: string | null;
@@ -229,8 +235,13 @@ type AppContextValue = {
   goToSurgeryPortal: () => void;
   historyNavigationDate: string | null;
   clearHistoryNavigationDate: () => void;
-  goToSurgeryHistory: (targetDate?: string, targetView?: 'calendar' | 'progress') => void;
-  goToTrophies: () => void;
+  clearTrophyNavigationId: () => void;
+  goToSurgeryHistory: (
+    targetDate?: string,
+    targetView?: 'calendar' | 'progress',
+    targetInterventionId?: string
+  ) => void;
+  goToTrophies: (targetTrophyId?: string) => void;
   goToProfile: () => void;
   goToNotebook: () => void;
   goToPreBlock: () => void;
@@ -243,6 +254,9 @@ type AppContextValue = {
   startNewIntervention: () => void;
   saveIntervention: () => Promise<SavedIntervention | null>;
   refreshBackendData: () => Promise<void>;
+  markUserNotificationRead: (notificationId: string) => Promise<void>;
+  markAllUserNotificationsRead: () => Promise<void>;
+  deleteUserNotification: (notificationId: string) => Promise<void>;
   createInstitution: (name: string) => Promise<Institution>;
   renameInstitution: (
     institutionId: string,
@@ -909,6 +923,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [historyNavigationView, setHistoryNavigationView] = useState<
     'calendar' | 'progress' | null
   >(null);
+  const [historyNavigationInterventionId, setHistoryNavigationInterventionId] =
+    useState<string | null>(null);
+  const [trophyNavigationId, setTrophyNavigationId] = useState<string | null>(null);
   const [sessionRole, setSessionRole] = useState<SessionRole | null>(
     isChecklistPreviewEnabled ? 'internal' : null
   );
@@ -957,6 +974,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     hydrateAdminTrophies([])
   );
   const [trophyAwards, setTrophyAwards] = useState<TrophyAward[]>([]);
+  const [userNotifications, setUserNotifications] = useState<
+    BackendUserNotification[]
+  >([]);
   const [trophyCelebration, setTrophyCelebration] = useState<
     AppContextValue['trophyCelebration']
   >(null);
@@ -1066,6 +1086,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const notification =
       notifications.find(
         (candidate) =>
+          candidate.kind === 'trophy_awarded' &&
+          !candidate.celebratedAt &&
           candidate.trophyId === latestAward.trophyId &&
           (candidate.tier ?? 'bronze') ===
             (latestAward.tier ?? 'bronze') &&
@@ -1094,8 +1116,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTrophyCelebration(null);
 
     if (notificationId) {
-      void markBackendUserNotificationRead(notificationId).catch((error) => {
-        console.warn('Unable to mark the trophy notification as read.', error);
+      void markBackendTrophyNotificationCelebrated(notificationId).catch((error) => {
+        console.warn('Unable to mark the trophy celebration as shown.', error);
       });
     }
   }, []);
@@ -1107,6 +1129,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       definitions: AdminTrophyDefinition[]
     ) => {
       notifications.forEach((candidate) => {
+        if (candidate.kind !== 'trophy_awarded' || candidate.celebratedAt) {
+          return;
+        }
         const hasAward = awards.some(
           (award) =>
             award.trophyId === candidate.trophyId &&
@@ -1123,7 +1148,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           (!hasAward || !hasActiveDefinition)
         ) {
           seenTrophyNotificationIdsRef.current.add(candidate.id);
-          void markBackendUserNotificationRead(candidate.id).catch(() => {
+          void markBackendTrophyNotificationCelebrated(candidate.id).catch(() => {
             // A later refresh can retry without exposing an obsolete trophy.
           });
         }
@@ -1131,6 +1156,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
       const notification = notifications.find(
         (candidate) =>
+          candidate.kind === 'trophy_awarded' &&
+          !candidate.celebratedAt &&
           !seenTrophyNotificationIdsRef.current.has(candidate.id) &&
           awards.some(
             (award) =>
@@ -1413,6 +1440,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAdminTrophies(
       hydrateAdminTrophies(payload.referenceData.trophyDefinitions)
     );
+    setUserNotifications(payload.userData.userNotifications);
     if (previousTrophyAwards) {
       knownTrophyAwardKeysRef.current = new Set(
         previousTrophyAwards.map(getTrophyAwardKey)
@@ -1609,6 +1637,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
       seedTrophyAwards(payload.userData.trophyAwards);
       setActivityLog(payload.userData.activityLog.map(toLocalActivityEntry));
+      setUserNotifications(payload.userData.userNotifications);
 
       const visibleInternals = visibleProfiles
         .filter((profile) => profile.role === 'internal')
@@ -1674,6 +1703,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
     seedTrophyAwards(payload.userData.trophyAwards);
     setActivityLog(payload.userData.activityLog.map(toLocalActivityEntry));
+    setUserNotifications([]);
 
     authenticateAdmin(backendProfile.id);
     return 'authenticated' as const;
@@ -1744,6 +1774,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           payload.referenceData.trophyDefinitions,
           payload.userData.userNotifications
         );
+        setUserNotifications(payload.userData.userNotifications);
         setActivityLog(
           payload.userData.activityLog
             .map(toLocalActivityEntry)
@@ -1790,6 +1821,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           hydrateAdminTrophies(payload.referenceData.trophyDefinitions)
         );
         seedTrophyAwards(payload.userData.trophyAwards);
+        setUserNotifications(payload.userData.userNotifications);
         setActivityLog(payload.userData.activityLog.map(toLocalActivityEntry));
       } else if (sessionRole === 'admin') {
         const [profiles, assignments, payload] = await Promise.all([
@@ -1843,6 +1875,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         );
         seedTrophyAwards(payload.userData.trophyAwards);
         setActivityLog(payload.userData.activityLog.map(toLocalActivityEntry));
+        setUserNotifications([]);
       }
 
       setBackendRefreshWarning(null);
@@ -1872,6 +1905,51 @@ export function AppProvider({ children }: { children: ReactNode }) {
     selectedSeniorId,
     sessionRole,
   ]);
+
+  const markUserNotificationRead = useCallback(
+    async (notificationId: string) => {
+      await markBackendUserNotificationRead(notificationId);
+      const readAt = new Date().toISOString();
+      setUserNotifications((current) =>
+        current.flatMap((notification) => {
+          if (notification.id !== notificationId) {
+            return [notification];
+          }
+
+          return notification.deletionPolicy === 'on_read'
+            ? []
+            : [{ ...notification, readAt }];
+        })
+      );
+    },
+    []
+  );
+
+  const markAllUserNotificationsRead = useCallback(async () => {
+    await markAllBackendUserNotificationsRead();
+    const readAt = new Date().toISOString();
+    setUserNotifications((current) =>
+      current.flatMap((notification) => {
+        if (notification.readAt) {
+          return [notification];
+        }
+
+        return notification.deletionPolicy === 'on_read'
+          ? []
+          : [{ ...notification, readAt }];
+      })
+    );
+  }, []);
+
+  const deleteUserNotification = useCallback(
+    async (notificationId: string) => {
+      await deleteBackendUserNotification(notificationId);
+      setUserNotifications((current) =>
+        current.filter((notification) => notification.id !== notificationId)
+      );
+    },
+    []
+  );
 
   const login = async (loginId: string, password: string) => {
     activeBackendIdentityRef.current = null;
@@ -2175,6 +2253,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAdminEvaluations({});
     setAdminTrophies([]);
     setTrophyAwards([]);
+    setUserNotifications([]);
     knownTrophyAwardKeysRef.current = new Set();
     seenTrophyNotificationIdsRef.current = new Set();
     activeTrophyNotificationIdRef.current = null;
@@ -2328,7 +2407,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const goToSurgeryHistory = (
     targetDate?: string,
-    targetView: 'calendar' | 'progress' = 'calendar'
+    targetView: 'calendar' | 'progress' = 'calendar',
+    targetInterventionId?: string
   ) => {
     if (!selectedInternal) {
       return;
@@ -2341,20 +2421,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
     );
     setHistoryNavigationDate(targetDate ?? null);
     setHistoryNavigationView(targetView);
+    setHistoryNavigationInterventionId(targetInterventionId ?? null);
     setScreen('surgery-history');
   };
 
   const clearHistoryNavigationDate = () => {
     setHistoryNavigationDate(null);
     setHistoryNavigationView(null);
+    setHistoryNavigationInterventionId(null);
   };
 
-  const goToTrophies = () => {
+  const clearTrophyNavigationId = () => {
+    setTrophyNavigationId(null);
+  };
+
+  const goToTrophies = (targetTrophyId?: string) => {
     if (!selectedInternal) {
       return;
     }
 
     recordActivity('Consultation de ses trophées', 'Trophées', 'Mes trophées');
+    setTrophyNavigationId(targetTrophyId ?? null);
     setScreen('trophies');
   };
 
@@ -3852,6 +3939,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         adminEvaluations,
         adminTrophies,
         trophyAwards,
+        userNotifications,
         trophyCelebration,
         adminTrophyStorageWarning,
         persistentSyncWarning,
@@ -3870,6 +3958,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         checklistProgress,
         historyNavigationDate,
         historyNavigationView,
+        historyNavigationInterventionId,
+        trophyNavigationId,
         login,
         logout,
         recordActivity,
@@ -3884,6 +3974,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         goToSurgeryPortal,
         goToSurgeryHistory,
         clearHistoryNavigationDate,
+        clearTrophyNavigationId,
         goToTrophies,
         goToProfile,
         goToNotebook,
@@ -3897,6 +3988,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         startNewIntervention,
         saveIntervention,
         refreshBackendData,
+        markUserNotificationRead,
+        markAllUserNotificationsRead,
+        deleteUserNotification,
         createInstitution,
         renameInstitution,
         archiveInstitution,

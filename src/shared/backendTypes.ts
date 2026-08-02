@@ -93,15 +93,60 @@ export type BackendTrophyAward = TrophyAward & {
 };
 
 export type BackendUserNotification = {
+  actionLabel: string | null;
+  actionTarget: string | null;
+  actionType: 'external_url' | 'internal_path' | 'intervention' | 'trophy' | null;
+  adminMessageId: string | null;
   body: string;
+  celebratedAt: string | null;
   createdAt: string;
+  deletionPolicy: 'manual' | 'on_read';
+  evaluationId: string | null;
   id: string;
-  kind: 'trophy_awarded';
+  kind: 'admin_message' | 'evaluation_completed' | 'trophy_awarded';
   profileId: string;
   readAt: string | null;
-  tier: TrophyAward['tier'];
+  tier: TrophyAward['tier'] | null;
   title: string;
-  trophyId: string;
+  trophyId: string | null;
+};
+
+export type BackendAdminNotificationMessage = {
+  actionLabel: string | null;
+  actionTarget: string | null;
+  actionType: 'external_url' | 'internal_path' | null;
+  audienceInstitutionId: string | null;
+  audienceProfileId: string | null;
+  audienceRole: 'internal' | 'senior' | null;
+  audienceType: 'all' | 'institution' | 'profile' | 'role';
+  body: string;
+  cancelledAt: string | null;
+  createdAt: string;
+  deletionPolicy: 'manual' | 'on_read';
+  id: string;
+  readCount: number;
+  recipientCount: number;
+  retractedAt: string | null;
+  scheduledAt: string;
+  sentAt: string | null;
+  status: 'cancelled' | 'retracted' | 'scheduled' | 'sending' | 'sent';
+  title: string;
+  unreadCount: number;
+  updatedAt: string;
+};
+
+export type BackendAdminNotificationMessageInput = {
+  actionLabel?: string | null;
+  actionTarget?: string | null;
+  actionType?: 'external_url' | 'internal_path' | null;
+  audienceInstitutionId?: string | null;
+  audienceProfileId?: string | null;
+  audienceRole?: 'internal' | 'senior' | null;
+  audienceType: BackendAdminNotificationMessage['audienceType'];
+  body: string;
+  deletionPolicy: BackendAdminNotificationMessage['deletionPolicy'];
+  scheduledAt?: string | null;
+  title: string;
 };
 
 export type BackendActivityLogEntry = ActivityLogEntry & {

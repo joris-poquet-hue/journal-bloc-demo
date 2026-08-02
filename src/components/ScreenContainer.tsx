@@ -6,7 +6,7 @@ const CHU_NANTES_LOGO_URI =
 type ScreenContainerProps = {
   eyebrow?: string;
   title?: string;
-  subtitle?: string;
+  subtitle?: ReactNode;
   frameWidth?: 'default' | 'wide';
   hideBrandmark?: boolean;
   shellClassName?: string;

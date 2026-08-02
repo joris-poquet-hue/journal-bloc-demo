@@ -1,8 +1,9 @@
 import { ChevronRight, NotebookTabs, Trophy } from 'lucide-react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 
-import { InternalAvatar } from '../components/InternalAvatar';
 import { InternalTrophyCard } from '../components/InternalTrophyCard';
+import { NotificationAvatarButton } from '../components/NotificationAvatarButton';
+import { NotificationCenter } from '../components/NotificationCenter';
 import {
   formatInterventionCardDate,
   SurgeryInterventionCard,
@@ -83,10 +84,16 @@ export function WelcomeScreen() {
     savedInterventions,
     selectableSeniors,
     trophyAwards,
+    userNotifications,
+    deleteUserNotification,
+    goToProfile,
     goToTrophies,
     goToNotebook,
     goToSurgeryHistory,
+    markAllUserNotificationsRead,
+    markUserNotificationRead,
   } = useAppContext();
+  const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
 
   if (!selectedInternal) {
     return null;
@@ -131,6 +138,49 @@ export function WelcomeScreen() {
         .sort(comparePreviewTrophies)[0] ?? null
     );
   }, [trophyDisplay.earned, trophyDisplay.progress]);
+  const unreadNotificationCount = userNotifications.filter(
+    (notification) => !notification.readAt
+  ).length;
+  const handleNotificationNavigation = (
+    notification: (typeof userNotifications)[number]
+  ) => {
+    if (notification.actionType === 'trophy') {
+      goToTrophies(notification.trophyId ?? notification.actionTarget ?? undefined);
+      return;
+    }
+
+    if (notification.actionType === 'intervention' && notification.actionTarget) {
+      const intervention = savedInterventions.find(
+        (candidate) => candidate.id === notification.actionTarget
+      );
+
+      if (intervention) {
+        goToSurgeryHistory(intervention.date, 'calendar', intervention.id);
+      }
+      return;
+    }
+
+    if (notification.actionType !== 'internal_path') {
+      return;
+    }
+
+    switch (notification.actionTarget) {
+      case '/profil':
+        goToProfile();
+        break;
+      case '/progression':
+        goToSurgeryHistory(undefined, 'progress');
+        break;
+      case '/historique':
+        goToSurgeryHistory();
+        break;
+      case '/trophees':
+        goToTrophies();
+        break;
+      default:
+        break;
+    }
+  };
   const isInterventionValidated = (intervention: SavedIntervention) => {
     const evaluation = adminEvaluations[intervention.id];
 
@@ -179,11 +229,13 @@ export function WelcomeScreen() {
               {selectedInternal.institution}
             </p>
           </div>
-          <InternalAvatar
+          <NotificationAvatarButton
             className="dashboard-profile-card__avatar"
             firstName={selectedInternal.firstName}
             imageSrc={selectedInternal.avatarImageSrc}
             lastName={selectedInternal.lastName}
+            onClick={() => setIsNotificationCenterOpen(true)}
+            unreadCount={unreadNotificationCount}
           />
         </section>
 
@@ -269,7 +321,11 @@ export function WelcomeScreen() {
         <section className="dashboard-card dashboard-card--trophies">
           <header className="dashboard-card__header">
             <h2>Derniers trophées</h2>
-            <button className="dashboard-card__link" onClick={goToTrophies} type="button">
+            <button
+              className="dashboard-card__link"
+              onClick={() => goToTrophies()}
+              type="button"
+            >
               Voir la vitrine
               <ChevronRight aria-hidden="true" />
             </button>
@@ -331,6 +387,15 @@ export function WelcomeScreen() {
           )}
         </section>
       </div>
+      <NotificationCenter
+        isOpen={isNotificationCenterOpen}
+        notifications={userNotifications}
+        onClose={() => setIsNotificationCenterOpen(false)}
+        onDelete={deleteUserNotification}
+        onNavigate={handleNotificationNavigation}
+        onRead={markUserNotificationRead}
+        onReadAll={markAllUserNotificationsRead}
+      />
     </main>
   );
 }

@@ -778,6 +778,7 @@ export function SurgeryHistoryScreen() {
     clearHistoryNavigationDate,
     customSurgicalInterventions,
     historyNavigationDate,
+    historyNavigationInterventionId,
     historyNavigationView,
     selectedInternal,
     savedInterventions,
@@ -826,29 +827,42 @@ export function SurgeryHistoryScreen() {
   });
 
   useLayoutEffect(() => {
-    if (!historyNavigationDate && !historyNavigationView) {
+    if (
+      !historyNavigationDate &&
+      !historyNavigationView &&
+      !historyNavigationInterventionId
+    ) {
       return;
     }
 
     if (historyNavigationView) {
       setViewMode(historyNavigationView);
-      setSelectedDetailId(null);
+      setSelectedDetailId(historyNavigationInterventionId);
     }
 
     if (historyNavigationDate) {
       const targetDate = parseIsoDate(historyNavigationDate);
 
-      setSelectedDetailId(null);
+      setSelectedDetailId(historyNavigationInterventionId);
       setSelectedDate(historyNavigationDate);
       setVisibleMonth(new Date(targetDate.getFullYear(), targetDate.getMonth(), 1));
     }
 
     if (historyNavigationView === 'calendar' && !historyNavigationDate) {
-      setSelectedDetailId(null);
+      setSelectedDetailId(historyNavigationInterventionId);
+    }
+
+    if (historyNavigationInterventionId) {
+      setSelectedDetailId(historyNavigationInterventionId);
     }
 
     clearHistoryNavigationDate();
-  }, [clearHistoryNavigationDate, historyNavigationDate, historyNavigationView]);
+  }, [
+    clearHistoryNavigationDate,
+    historyNavigationDate,
+    historyNavigationInterventionId,
+    historyNavigationView,
+  ]);
 
   const scoredInterventions = useMemo<ScoredHistoryIntervention[]>(
     () =>
