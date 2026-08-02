@@ -1,6 +1,8 @@
 import { FormEvent, useEffect, useState } from 'react';
 
+import { PUBLIC_SITE_VERSION } from '../appMetadata';
 import { useAppContext } from '../context/AppContext';
+import { buildSupportMailto } from '../supportConfig';
 import { PASSWORD_POLICY_HELP } from '../utils/passwordPolicy';
 
 function UserIcon() {
@@ -90,6 +92,15 @@ export function LoginScreen() {
   const [statusMessage, setStatusMessage] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const isPasswordChangeMode = passwordChangeChallenge != null;
+  const contactHref = buildSupportMailto({
+    subject: 'Contact — Mon Journal de Bloc',
+    body: [
+      'Bonjour,',
+      '',
+      'Je souhaite vous contacter au sujet de Mon Journal de Bloc.',
+      '',
+    ].join('\n'),
+  });
 
   useEffect(() => {
     if (!passwordChangeChallenge) {
@@ -411,10 +422,25 @@ export function LoginScreen() {
               </button>
             )}
 
-            <p className="login-note">
-              <ShieldIcon />
-              <span>Accès gérés par administrateur local</span>
-            </p>
+            <div className="login-footer">
+              <p className="login-note">
+                <ShieldIcon />
+                <span>Accès gérés par administrateur local</span>
+              </p>
+              <p className="login-meta">
+                <a
+                  aria-label="Contacter l’assistance par e-mail"
+                  className="login-meta__contact"
+                  href={contactHref}
+                >
+                  Contact
+                </a>
+                <span aria-hidden="true" className="login-meta__separator">
+                  ·
+                </span>
+                <span>Version {PUBLIC_SITE_VERSION}</span>
+              </p>
+            </div>
           </form>
         </section>
       </div>

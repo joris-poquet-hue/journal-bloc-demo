@@ -25,6 +25,13 @@ test.describe('Connexion publique', () => {
     await expect(
       page.getByRole('button', { name: 'Mot de passe oublié' })
     ).toBeEnabled();
+    await expect(page.getByText('Version V0')).toBeVisible();
+    await expect(
+      page.getByRole('link', { name: 'Contacter l’assistance par e-mail' })
+    ).toHaveAttribute(
+      'href',
+      /^mailto:contact@monjournaldebloc\.fr\?subject=Contact/
+    );
 
     await page.keyboard.press('Tab');
     await expect(page.getByLabel('Identifiant')).toBeFocused();
