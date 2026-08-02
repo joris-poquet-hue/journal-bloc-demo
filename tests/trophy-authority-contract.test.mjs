@@ -178,7 +178,11 @@ test('un trophée actif est édité en brouillon puis publié atomiquement', () 
   );
   assert.match(
     adminScreen,
-    /existingTrophy\.pendingDraft[\s\S]*status: 'draft' as const/
+    /const targetStatus(?:: TrophyStatus)? =[\s\S]*existingTrophy\.status === 'draft'[\s\S]*existingTrophy\.pendingDraft[\s\S]*status: targetStatus/
+  );
+  assert.match(
+    adminScreen,
+    /Version non publiée reprise[\s\S]*Publier la version/
   );
 });
 

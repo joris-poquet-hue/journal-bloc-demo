@@ -3513,6 +3513,9 @@ export function AdminScreen() {
       return;
     }
 
+    const targetStatus: TrophyStatus =
+      existingTrophy.status === 'draft' ? 'draft' : existingTrophy.status;
+
     const editableDefinition = existingTrophy.pendingDraft
       ? {
           ...existingTrophy.pendingDraft,
@@ -3522,11 +3525,12 @@ export function AdminScreen() {
           version: existingTrophy.version,
           everActivated: existingTrophy.everActivated,
           activatedAt: existingTrophy.activatedAt,
+          status: targetStatus,
         }
       : {
           ...existingTrophy,
           pendingDraft: null,
-          status: 'draft' as const,
+          status: targetStatus,
         };
 
     setTrophyDraft(ensureTrophyDefinitionShape(editableDefinition));
@@ -7320,9 +7324,10 @@ export function AdminScreen() {
   }
 
   if (isAdmin && view === 'trophy-editor' && trophyDraft) {
-    const isEditingExistingTrophy = adminTrophies.some(
+    const existingEditedTrophy = adminTrophies.find(
       (trophy) => trophy.id === trophyDraft.id
     );
+    const isEditingExistingTrophy = Boolean(existingEditedTrophy);
     const previewProfile = internalProfiles[0] ?? null;
     const previewUnlockedTier = previewProfile
       ? getUnlockedTrophyTierForProfile(
@@ -7405,6 +7410,17 @@ export function AdminScreen() {
           </div>
         ) : null}
 
+        {existingEditedTrophy?.pendingDraft ? (
+          <div className="validation-box admin-validation-box">
+            <strong>Version non publiée reprise</strong>
+            <span>
+              Les modifications enregistrées précédemment étaient encore en
+              brouillon. Le bouton « Publier la version » les rendra visibles
+              pour les utilisateurs.
+            </span>
+          </div>
+        ) : null}
+
         {trophyStorageWarning ? (
           <div className="auth-error">{trophyStorageWarning}</div>
         ) : null}
@@ -7467,7 +7483,7 @@ export function AdminScreen() {
                       }
                       value={trophyDraft.status}
                     >
-                      <option value="draft">Brouillon</option>
+                      <option value="draft">Brouillon non publié</option>
                       <option value="active">Actif</option>
                       {trophyDraft.everActivated ? (
                         <option value="inactive">Inactif</option>
