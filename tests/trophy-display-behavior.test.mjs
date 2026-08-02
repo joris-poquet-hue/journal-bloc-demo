@@ -157,3 +157,28 @@ test('un trophée à niveaux reste en collection et progresse vers le palier sui
     await server.close();
   }
 });
+
+test('une description vide ne bloque pas la validation d’un trophée', async () => {
+  const server = await createServer({
+    appType: 'custom',
+    logLevel: 'silent',
+    server: { middlewareMode: true },
+  });
+
+  try {
+    const {
+      createEmptyTrophyDefinition,
+      validateTrophyDefinition,
+    } = await server.ssrLoadModule('/src/utils/adminTrophies.ts');
+    const trophy = createEmptyTrophyDefinition('special');
+
+    trophy.title = 'Première connexion';
+    trophy.description = '';
+    trophy.visibility = 'visible';
+    trophy.images.single = '/images/trophies/first-login.png';
+
+    assert.deepEqual(validateTrophyDefinition(trophy), []);
+  } finally {
+    await server.close();
+  }
+});

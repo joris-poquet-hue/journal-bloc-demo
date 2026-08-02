@@ -69,7 +69,7 @@ function TrophyHeroIllustration() {
   );
 }
 
-function TrophyCollectionStack({
+function TrophyCollectionCard({
   item,
   onOpenTierGallery,
 }: {
@@ -79,40 +79,17 @@ function TrophyCollectionStack({
     trigger: HTMLButtonElement
   ) => void;
 }) {
-  const historicalTiers = item.earnedTiers.slice(1, 4);
-  const stackDepth = historicalTiers.length;
+  const hasSeveralEarnedTiers = item.earnedTiers.length > 1;
 
   return (
-    <div
-      className={`trophy-collection-stack${
-        stackDepth > 0 ? ' trophy-collection-stack--layered' : ''
-      }`}
-      data-depth={stackDepth}
-    >
-      {historicalTiers.map((tier, index) => (
-        <div
-          aria-hidden="true"
-          className="trophy-collection-stack__layer"
-          data-tier={tier.tier ?? 'unique'}
-          key={`${tier.tier ?? 'unique'}:${tier.awardedAt}`}
-          style={
-            {
-              '--trophy-stack-x': `${12 + index * 9}px`,
-              zIndex: 3 - index,
-            } as CSSProperties
-          }
-        />
-      ))}
-
-      <InternalTrophyCard
-        item={item}
-        onOpenDetails={
-          stackDepth > 0
-            ? (trigger) => onOpenTierGallery(item, trigger)
-            : undefined
-        }
-      />
-    </div>
+    <InternalTrophyCard
+      item={item}
+      onOpenDetails={
+        hasSeveralEarnedTiers
+          ? (trigger) => onOpenTierGallery(item, trigger)
+          : undefined
+      }
+    />
   );
 }
 
@@ -193,7 +170,7 @@ function TrophyTierGallery({
               </div>
               <div className="trophy-tier-gallery__copy">
                 <h2>{item.title}</h2>
-                <p>{item.description || item.subtitle}</p>
+                {item.description ? <p>{item.description}</p> : null}
                 <time dateTime={tier.awardedAt}>
                   {formatIsoDate(tier.awardedAt)}
                 </time>
@@ -377,7 +354,7 @@ export function TrophiesScreen() {
 
             <div className="trophy-collection-page__grid">
               {trophyDisplay.earned.map((item) => (
-                <TrophyCollectionStack
+                <TrophyCollectionCard
                   item={item}
                   key={item.id}
                   onOpenTierGallery={(selectedItem, trigger) =>

@@ -495,8 +495,9 @@ Difficulté :
 
 ### 8.2 Configuration
 
-- Un trophée possède un titre, une description, une ou plusieurs images, un
-  format unique ou à niveaux, une visibilité et une ou plusieurs conditions.
+- Un trophée possède un titre, une description facultative, une ou plusieurs
+  images, un format unique ou à niveaux, une visibilité et une ou plusieurs
+  conditions.
 - Les conditions disponibles couvrent notamment : première intervention, nombre
   enregistré ou évalué, procédure, voie d'abord, rôle, moyenne d'autonomie,
   autonomie sur plusieurs procédures, procédures distinctes, horaire
@@ -505,8 +506,8 @@ Difficulté :
 - Un trophée unique exige une image.
 - Un trophée à niveaux exige qu'une image soit renseignée pour chacun des niveaux
   Bronze, Argent, Or et Diamant.
-- L'activation est impossible si le titre, la description, les conditions, les
-  images ou les seuils manquent.
+- L'activation est impossible si le titre, les conditions, les images ou les
+  seuils manquent. Une description vide n'empêche jamais l'activation.
 - Les seuils Bronze, Argent, Or et Diamant sont strictement croissants.
 - Les niveaux concernent la même règle métier ; seuls les seuils, le minimum
   d'autonomie et l'image du niveau évoluent.
@@ -520,7 +521,7 @@ Difficulté :
 - Aucune carte « Trophée secret », aucun indice, aucun compteur et aucune
   progression ne doivent révéler son existence.
 - Une fois obtenu, le trophée surprise apparaît parmi les trophées remportés avec
-  son nom, son image et sa description.
+  son nom, son image et, si elle a été renseignée, sa description.
 
 ### 8.4 Trophées à niveaux
 
@@ -528,6 +529,9 @@ Difficulté :
 - Une seule carte est affichée dans la vitrine et la collection : celle du plus
   haut niveau obtenu.
 - Le nouveau niveau remplace visuellement le précédent.
+- Aucun effet d'empilement ne représente les anciens niveaux dans la collection.
+- Un clic sur la carte du plus haut niveau ouvre tous les niveaux obtenus, rangés
+  du niveau le plus élevé au niveau le plus bas.
 - Chaque niveau obtenu compte séparément dans le total des trophées remportés.
 - Exemple : un trophée au niveau Or compte pour trois trophées remportés, mais une
   seule carte Or est affichée.

@@ -34,7 +34,7 @@ export function InternalTrophyCard({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const detailDescription = item.isSecret
     ? item.subtitle
-    : item.description || item.subtitle || 'Aucune description disponible.';
+    : item.description || (item.section === 'progress' ? item.subtitle : '');
   const isNativeApp =
     typeof window !== 'undefined' &&
     Boolean(
@@ -198,7 +198,9 @@ export function InternalTrophyCard({
         ? createPortal(
             <div className="trophy-detail-backdrop" onClick={closeDetails}>
               <section
-                aria-describedby={dialogDescriptionId}
+                aria-describedby={
+                  detailDescription ? dialogDescriptionId : undefined
+                }
                 aria-labelledby={dialogTitleId}
                 aria-modal="true"
                 className="trophy-detail-dialog"
@@ -237,7 +239,9 @@ export function InternalTrophyCard({
 
                 <div className="trophy-detail-dialog__copy">
                   <h2 id={dialogTitleId}>{item.title}</h2>
-                  <p id={dialogDescriptionId}>{detailDescription}</p>
+                  {detailDescription ? (
+                    <p id={dialogDescriptionId}>{detailDescription}</p>
+                  ) : null}
                   {item.isUnlocked && item.awardedAt ? (
                     <time
                       aria-label={`Obtenu le ${formatIsoDate(item.awardedAt)}`}

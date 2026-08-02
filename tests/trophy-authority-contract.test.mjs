@@ -9,6 +9,9 @@ function readSource(path) {
 const migration = readSource(
   '../supabase/migrations/202607290001_trophy_authority_versioning_notifications.sql'
 );
+const optionalDescriptionMigration = readSource(
+  '../supabase/migrations/202608020001_optional_trophy_descriptions.sql'
+);
 const legacyRepairMigration = readSource(
   '../supabase/migrations/202607290000_repair_legacy_trophy_definitions.sql'
 );
@@ -16,6 +19,7 @@ const backendRepository = readSource('../src/services/backendRepository.ts');
 const appContext = readSource('../src/context/AppContext.tsx');
 const adminScreen = readSource('../src/screens/AdminScreen.tsx');
 const trophyDisplay = readSource('../src/utils/trophyDisplay.ts');
+const trophiesScreen = readSource('../src/screens/TrophiesScreen.tsx');
 const trophyRules = readSource('../src/utils/adminTrophies.ts');
 const legacyMobile = readSource('../mobile/App.tsx');
 const imageApi = readSource('../api/trophy-image.js');
@@ -121,6 +125,27 @@ test('les quatre niveaux sont stricts, homogènes et comptés séparément', () 
   assert.match(
     trophyDisplay,
     /const highestAward = \[\.\.\.definitionAwards\]\.sort/
+  );
+});
+
+test('la collection reste simple tout en ouvrant les niveaux déjà obtenus', () => {
+  assert.doesNotMatch(trophiesScreen, /trophy-collection-stack__layer/);
+  assert.match(trophiesScreen, /item\.earnedTiers\.length > 1/);
+  assert.match(trophiesScreen, /function TrophyTierGallery/);
+});
+
+test('la description est facultative côté client et côté Supabase', () => {
+  assert.doesNotMatch(
+    trophyRules,
+    /errors\.push\('La description du trophée est obligatoire\.'\)/
+  );
+  assert.match(
+    optionalDescriptionMigration,
+    /updated_body := replace\([\s\S]*required_description_block/
+  );
+  assert.match(
+    optionalDescriptionMigration,
+    /la description est facultative/i
   );
 });
 

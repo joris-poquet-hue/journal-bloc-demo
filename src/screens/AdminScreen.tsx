@@ -7441,7 +7441,7 @@ export function AdminScreen() {
 
                 <label className="field-stack admin-create-form__field--full">
                   <span className="field-stack__label">
-                    Description courte
+                    Description courte (facultative)
                   </span>
                   <input
                     className="field-input"
@@ -7453,7 +7453,7 @@ export function AdminScreen() {
                     value={trophyDraft.description}
                   />
                   <small className="field-stack__hint">
-                    Cette description est obligatoire avant publication.
+                    Si elle est renseignée, elle apparaît dans le détail du trophée.
                   </small>
                 </label>
 
@@ -8213,10 +8213,9 @@ export function AdminScreen() {
                     )}
                   </div>
                   <strong>{trophyDraft.title || 'Titre du trophée'}</strong>
-                  <p>
-                    {trophyDraft.description ||
-                      'La description apparaîtra ici dans l’espace interne.'}
-                  </p>
+                  {trophyDraft.description ? (
+                    <p>{trophyDraft.description}</p>
+                  ) : null}
 
                   {trophyDraft.format === 'levels' ? (
                     <div className="admin-editor-preview-levels">
