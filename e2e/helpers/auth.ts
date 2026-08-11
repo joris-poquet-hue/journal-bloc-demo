@@ -63,7 +63,13 @@ export async function loginAs(page: Page, credentials: Credentials) {
   await page.getByRole('button', { name: 'Se connecter' }).click();
 
   const loginResponse = await loginResponsePromise;
-  expect(loginResponse.ok()).toBe(true);
+  if (!loginResponse.ok()) {
+    const responseText = (await loginResponse.text()).trim().slice(0, 300);
+    throw new Error(
+      `La connexion E2E a échoué avec le statut ${loginResponse.status()}` +
+        (responseText ? ` : ${responseText}` : '.')
+    );
+  }
   await expect(page.getByRole('region', { name: 'Connexion' })).toBeHidden({
     timeout: 20_000,
   });
