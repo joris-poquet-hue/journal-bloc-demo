@@ -104,8 +104,15 @@ npm run backup:restore -- \
   --file=/chemin/vers/project1-supabase-date.p1backup \
   --target-env=/chemin/vers/.env.restore-test.local \
   --apply \
-  --replace-existing
+  --replace-existing \
+  --rebuild-public-schema
 ```
+
+L'option `--rebuild-public-schema` remet intégralement à zéro le schéma
+`public` de la cible avant de rejouer les migrations. Elle est réservée à une
+cible de test isolée : le fichier d'environnement doit aussi contenir
+`PROJECT1_RESTORE_DRILL=1`. Sans cette double confirmation, le script refuse la
+reconstruction.
 
 La procédure :
 
@@ -123,8 +130,8 @@ autorisation spécifique ; le test normal utilise donc un jeu synthétique.
 
 Pour un exercice d'effacement-restauration sur ce même projet isolé, le fichier
 d'environnement de test doit contenir `PROJECT1_RESTORE_DRILL=1` et la commande
-doit recevoir `--allow-same-project-drill`. Cette double exception ne doit jamais
-être configurée dans l'environnement de production.
+doit recevoir `--allow-same-project-drill`. Cette exception supplémentaire ne
+doit jamais être configurée dans l'environnement de production.
 
 ## Clé de récupération
 

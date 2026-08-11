@@ -762,15 +762,15 @@ une action. Elle est informative et ne constitue jamais une autorisation de
 modifier la production ou les données. Les preuves détaillées restent conservées
 dans les rapports versionnés du dossier `docs`.
 
-1. **Socle métier Supabase — conforme, contrôle croisé à rétablir** :
+1. **Socle métier Supabase — conforme, contrôle croisé restauré** :
    l'enregistrement atomique des interventions, les autorisations par
    établissement, l'évaluation réservée au Senior désigné, l'immutabilité des
    évaluations, les instantanés historiques et le calcul serveur du score sont
-   actifs. Le test croisé automatisé reste obligatoire. Il ne peut toutefois
-   plus être exécuté dans la CI depuis la suppression du projet Supabase isolé
-   `luedugesmybmvppdplaa`. Une nouvelle base de test isolée et de nouveaux
-   comptes E2E doivent être créés avant de considérer cette protection comme de
-   nouveau opérationnelle.
+   actifs. Le test croisé automatisé reste obligatoire. Le projet isolé
+   `project1-integration-test-20260811` et ses comptes synthétiques permettent
+   de nouveau de l'exécuter sans toucher à la production. Le parcours connecté
+   Interne–Seniors, l'évaluation par le Senior désigné et le changement
+   d'établissement ont été validés le 11 août 2026.
 2. **Web et logique commune — conformes sur les parcours publics testés** :
    la présentation web a été adaptée à l'ordinateur tout en conservant la même
    logique métier que l'application. Les tests publics passent sous Chrome,
@@ -790,15 +790,15 @@ dans les rapports versionnés du dossier `docs`.
    administratifs ciblés sont disponibles dans le centre commun. Les
    notifications système Apple et Android lorsque l'application est fermée
    restent un chantier distinct à réaliser ultérieurement.
-5. **Sauvegarde externe — archive courante vérifiée, restauration à
-   requalifier** : la sauvegarde chiffrée couvre PostgreSQL, Auth, Storage et les
+5. **Sauvegarde externe — archive courante et restauration vérifiées** : la
+   sauvegarde chiffrée couvre PostgreSQL, Auth, Storage et les
    migrations, avec rétention et exécution quotidienne. Le mécanisme réessaie
    désormais pendant environ une heure. Une archive fraîche du 11 août 2026 a
-   été produite et son intégrité vérifiée. L'exercice de restauration complet a
-   été arrêté avant toute écriture car l'ancien projet Supabase isolé a été
-   supprimé. Une nouvelle cible isolée doit être provisionnée pour vérifier à
-   nouveau la restauration complète ; aucune restauration ne doit être testée
-   sur la production.
+   été produite et son intégrité vérifiée. Elle a été restaurée intégralement le
+   11 août 2026 dans le projet Supabase isolé
+   `project1-integration-test-20260811` : 1 222 lignes applicatives et 9 objets
+   Storage ont été contrôlés. Aucune restauration d'exercice ne doit viser la
+   production.
 6. **Dépendances web — conformes ; dépendances mobiles sous surveillance** :
    l'audit web ne signale aucune vulnérabilité. Les versions Expo et React
    Native sont alignées sur les versions compatibles et CocoaPods s'installe de
@@ -813,13 +813,14 @@ dans les rapports versionnés du dossier `docs`.
    d'un binaire iOS signé et toute publication TestFlight ou App Store restent
    différées tant que le propriétaire ne dispose pas d'une équipe Apple
    Developer active.
-8. **Qualité et CI — socle actif, environnement connecté indisponible** :
+8. **Qualité et CI — socle actif, environnement connecté rétabli** :
    ESLint, les tests, le typage, les compilations, les audits de dépendances et
    les contrôles Expo sont exécutés par la CI. Au 11 août 2026, ces contrôles et
-   les cinq emplois navigateur réussissent. Les emplois Supabase croisé et E2E
-   authentifiés échouent uniquement parce que leur ancienne base isolée et leurs
-   comptes de test ne sont plus disponibles. Ils ne doivent pas être rendus
-   facultatifs pour masquer cet écart.
+   les cinq emplois navigateur réussissent. La base isolée et les comptes de
+   test ont été recréés. Le test Supabase croisé connecté réussit localement ;
+   les secrets GitHub et l'adresse du déploiement E2E isolé doivent rester
+   valides pour que les emplois connectés soient obligatoires et verts dans la
+   CI.
 9. **Dette de maintenance — réduction commencée** : ESLint ne signale aucune
    erreur bloquante mais conserve un ensemble d'avertissements historiques à
    traiter progressivement. Les premières extractions ont été réalisées dans
