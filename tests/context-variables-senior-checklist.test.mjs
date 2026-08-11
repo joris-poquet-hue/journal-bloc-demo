@@ -27,6 +27,9 @@ const complexitySlider = readSource('../src/components/ComplexitySlider.tsx');
 const contextScreen = readSource('../src/screens/ContextVariablesScreen.tsx');
 const summary = readSource('../src/screens/SummaryScreen.tsx');
 const adminScreen = readSource('../src/screens/AdminScreen.tsx');
+const seniorChecklistEditor = readSource(
+  '../src/screens/admin/SeniorChecklistEditor.tsx'
+);
 const clinicalContextOverview = readSource(
   '../src/components/ClinicalContextOverview.tsx'
 );
@@ -179,12 +182,12 @@ test('la checklist complète appartient au Senior désigné', () => {
   assert.match(repository, /rpc\/save_intervention_evaluation_v2/);
   assert.match(repository, /p_checklist: evaluation\.checklist/);
   assert.match(adminScreen, /Autonomie par temps opératoire/);
-  assert.match(adminScreen, /function SeniorChecklistEditor/);
-  assert.match(adminScreen, /type="range"/);
-  assert.match(adminScreen, /Assistance active du senior/);
-  assert.match(adminScreen, /NA/);
+  assert.match(seniorChecklistEditor, /function SeniorChecklistEditor/);
+  assert.match(seniorChecklistEditor, /type="range"/);
+  assert.match(seniorChecklistEditor, /Assistance active du senior/);
+  assert.match(seniorChecklistEditor, /NA/);
   assert.match(
-    adminScreen,
+    seniorChecklistEditor,
     /selectedLevel === 'NA' \? null : 'NA'/
   );
   assert.match(adminScreen, /missingChecklistSteps/);

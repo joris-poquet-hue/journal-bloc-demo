@@ -95,7 +95,52 @@ export function WelcomeScreen() {
   } = useAppContext();
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
 
-  if (!selectedInternal) {
+  const trophyDisplay = useMemo(
+    () => {
+      if (!selectedInternal) {
+        return null;
+      }
+
+      return buildTrophyDisplayModels({
+        adminEvaluations,
+        adminTrophies,
+        customSurgicalInterventions,
+        profile: selectedInternal,
+        savedInterventions,
+        trophyAwards,
+      });
+    },
+    [
+      adminEvaluations,
+      adminTrophies,
+      customSurgicalInterventions,
+      savedInterventions,
+      selectedInternal,
+      trophyAwards,
+    ]
+  );
+  const trophyPreview = useMemo(() => {
+    if (!trophyDisplay) {
+      return [];
+    }
+
+    return [...trophyDisplay.earned, ...trophyDisplay.progress]
+      .sort(comparePreviewTrophies)
+      .slice(0, 3);
+  }, [trophyDisplay]);
+  const desktopTrophyFocus = useMemo(() => {
+    if (!trophyDisplay) {
+      return null;
+    }
+
+    return (
+      [...trophyDisplay.earned, ...trophyDisplay.progress]
+        .filter((item) => !item.isSecret || item.isUnlocked)
+        .sort(comparePreviewTrophies)[0] ?? null
+    );
+  }, [trophyDisplay]);
+
+  if (!selectedInternal || !trophyDisplay) {
     return null;
   }
 
@@ -107,37 +152,6 @@ export function WelcomeScreen() {
     selectedInternal.firstName,
     selectedInternal.lastName
   );
-  const trophyDisplay = useMemo(
-    () =>
-      buildTrophyDisplayModels({
-        adminEvaluations,
-        adminTrophies,
-        customSurgicalInterventions,
-        profile: selectedInternal,
-        savedInterventions,
-        trophyAwards,
-    }),
-    [
-      adminEvaluations,
-      adminTrophies,
-      customSurgicalInterventions,
-      savedInterventions,
-      selectedInternal,
-      trophyAwards,
-    ]
-  );
-  const trophyPreview = useMemo(() => {
-    return [...trophyDisplay.earned, ...trophyDisplay.progress]
-      .sort(comparePreviewTrophies)
-      .slice(0, 3);
-  }, [trophyDisplay.earned, trophyDisplay.progress]);
-  const desktopTrophyFocus = useMemo(() => {
-    return (
-      [...trophyDisplay.earned, ...trophyDisplay.progress]
-        .filter((item) => !item.isSecret || item.isUnlocked)
-        .sort(comparePreviewTrophies)[0] ?? null
-    );
-  }, [trophyDisplay.earned, trophyDisplay.progress]);
   const unreadNotificationCount = userNotifications.filter(
     (notification) => !notification.readAt
   ).length;

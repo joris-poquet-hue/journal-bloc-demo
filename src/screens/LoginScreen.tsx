@@ -259,7 +259,7 @@ export function LoginScreen() {
                 {passwordChangeChallenge?.isFirstLogin ? (
                   <>
                     <p className="login-note login-note--compact">
-                      Première connexion : renseigne ton adresse e-mail puis
+                      Première connexion : renseigne ton adresse e-mail puis
                       choisis ton mot de passe personnel. Un lien te sera envoyé
                       pour activer le compte.
                     </p>

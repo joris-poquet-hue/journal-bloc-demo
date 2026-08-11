@@ -66,6 +66,18 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
+import {
+  APPROACH_LABELS,
+  DEFAULT_APPROACHES,
+  DEFAULT_ENTRY_TECHNIQUES,
+  DEFAULT_INDICATIONS,
+  DEFAULT_LATERALITIES,
+  DEFAULT_ROLES,
+  ENTRY_TECHNIQUE_LABELS,
+  INDICATION_LABELS,
+  INTERVENTION_ROLE_LABELS,
+  LATERALITY_LABELS,
+} from './interventionOptions';
 
 type SessionRole = 'internal' | 'senior' | 'admin';
 
@@ -685,50 +697,6 @@ const TABLE_LABELS = {
   trophies: 'Trophées',
 };
 
-const APPROACH_LABELS: Record<string, string> = {
-  coelioscopie: 'Cœlioscopie',
-  hysteroscopie: 'Hystéroscopie',
-  laparotomie: 'Laparotomie',
-  robot: 'Robot',
-  voie_vaginale: 'Voie vaginale',
-  vnotes: 'vNotes',
-};
-
-const INDICATION_LABELS: Record<string, string> = {
-  autre: 'Autre',
-  geu: 'GEU',
-  ligature_tubaire: 'Contraception définitive',
-};
-
-const INTERVENTION_ROLE_LABELS: Record<string, string> = {
-  aide_principal: 'Aide principal',
-  aide_secondaire: 'Aide secondaire',
-  observateur: 'Observateur',
-  operateur_principal: 'Opérateur principal',
-};
-
-const ENTRY_TECHNIQUE_LABELS: Record<string, string> = {
-  open: 'Open',
-  trocart_direct: 'Trocart direct',
-  veress: 'Aiguille de Veress',
-};
-
-const LATERALITY_LABELS: Record<string, string> = {
-  bilateral: 'Bilatéral',
-  droite: 'Droite',
-  gauche: 'Gauche',
-};
-
-const DEFAULT_APPROACHES = ['coelioscopie', 'laparotomie', 'voie_vaginale'];
-const DEFAULT_ENTRY_TECHNIQUES = ['trocart_direct', 'open', 'veress'];
-const DEFAULT_INDICATIONS = ['geu', 'ligature_tubaire', 'autre'];
-const DEFAULT_LATERALITIES = ['gauche', 'bilateral', 'droite'];
-const DEFAULT_ROLES = [
-  'operateur_principal',
-  'aide_principal',
-  'aide_secondaire',
-  'observateur',
-];
 const OTHER_SENIOR_OPTION_ID = 'sen-other';
 const SEMESTER_OPTIONS = Array.from({ length: 12 }, (_, index) => ({
   label: `S${index + 1}`,

@@ -2,6 +2,7 @@ import ReactDOM from 'react-dom/client';
 
 import App from './App';
 import './styles.css';
+import './notification-avatar.css';
 
 type MonJdbWindow = Window & {
   __MONJDB_NATIVE_APP__?: boolean;
