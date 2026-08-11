@@ -757,207 +757,89 @@ version avant de modifier le code mobile.
 
 ## 15. État de conformité et écarts encore ouverts
 
-Cette liste distingue les écarts encore ouverts des règles désormais conformes.
-Elle est informative et ne doit jamais être traitée comme une autorisation de
-modifier le code, la production ou les données. Les preuves détaillées restent
-conservées dans les rapports versionnés du dossier `docs`.
+Cette liste distingue les fonctions conformes des écarts qui nécessitent encore
+une action. Elle est informative et ne constitue jamais une autorisation de
+modifier la production ou les données. Les preuves détaillées restent conservées
+dans les rapports versionnés du dossier `docs`.
 
-1. **Présentation web transitoire** : la version application Interne/Senior est
-   aujourd'hui la référence visuelle et fonctionnelle la plus avancée, proche de
-   la version mobile définitive souhaitée. Le web reprend encore largement cette
-   présentation pensée comme une application. La prochaine étape consistera à
-   adapter l'interface web à un véritable usage sur ordinateur, sans modifier les
-   fonctions, les données ni les règles communes avec l'application.
-2. **Accès Senior — backend et correctif client actifs** : la migration
-   `202607200001_atomic_intervention_realtime_authorization.sql` applique la même
-   règle dans les politiques Supabase du projet principal depuis le 20 juillet
-   2026. Les lectures authentifiées de la recette réelle du 20 juillet 2026 ont
-   confirmé qu'un Senior voit tous les Internes de son établissement dans
-   Supabase, indépendamment de « Mes internes ». La version de production testée
-   ne montrait qu'un filtre cyclique initialisé sur « Relations récentes » : un
-   Senior autorisé pouvait donc obtenir « Aucun interne disponible » sans voir
-   immédiatement la vue complète. Le code source conserve désormais les trois
-   filtres mais restaure, à la demande du propriétaire, leur carte cyclique
-   historique. « Tous les internes » reste la vue initiale, puis la carte permet
-   de passer à « Mes internes » et « Relations récentes ». Le conteneur mobile qui
-   sélectionne « Mes internes » après sa configuration a été adapté à ce cycle.
-   Les tests, les contrôles TypeScript web et mobile et la compilation web
-   réussissent. La préversion Vercel `dpl_RQr3dA7NCBUSX82hnRCwD8gwo92K` a été
-   vérifiée puis promue en production sous
-   `dpl_Bq1xX25qoVKhWnHdQxPMm4NB3FQG` le 20 juillet 2026.
-   `https://monjournaldebloc.fr` sert désormais le bundle contenant ce visuel. Le
-   conteneur mobile consomme cette interface web commune, mais toute nouvelle
-   diffusion native en boutique reste une opération distincte.
-3. **Stockage local — conforme avec récupération historique contrôlée** :
-   aucune collection métier active ni aucun jeton Supabase n'est chargé ou écrit
-   dans le stockage persistant du navigateur. Au démarrage, le client supprime
-   les anciennes clés connues de profils, interventions, évaluations, trophées,
-   journaux, retours de test et sessions. Seule une ancienne copie de bloc-notes
-   encore valide peut être conservée temporairement afin que l'Interne choisisse
-   explicitement de la restaurer dans Supabase ou de conserver la version
-   Supabase. Cette clé est supprimée après la décision ; une copie illisible est
-   supprimée automatiquement. La session web reste gérée côté serveur et la
-   session mobile uniquement dans SecureStore/Keychain/Keystore.
-4. **Interventions — suppression en attente active en production** : depuis le
-   20 juillet 2026, la migration
-   `202607200002_pending_intervention_deletion.sql` réserve la suppression à
-   l'Interne propriétaire tant que l'intervention n'a reçu aucune évaluation.
-   La fonction Supabase supprime atomiquement l'intervention et sa demande
-   d'évaluation, écrit une trace d'audit et refuse les Seniors, l'Administrateur
-   et toute suppression directe. Dans le client commun, l'action se trouve dans
-   `Paramètres > Mes données > Interventions en attente` ; les cartes en attente
-   restent verrouillées dans l'historique. Une recette authentifiée sur le site
-   public a confirmé l'enregistrement, la visibilité pour tous les Seniors du
-   même établissement, l'absence d'accès depuis un autre établissement, la
-   suppression après confirmation Supabase et l'ouverture d'une nouvelle saisie
-   vierge. Les comptes et données synthétiques ont ensuite été supprimés et les
-   compteurs de production sont revenus exactement à leur état initial.
-5. **Évaluations — backend et client web actifs** : le client réserve désormais
-   la validation au senior désigné. La migration versionnée bloque les écritures
-   directes, retire ce droit à l'administrateur et rend la validation atomique et
-   non modifiable. Ces règles ont réussi le parcours d'intégration sur le projet
-   isolé puis sur le projet principal dans une transaction entièrement annulée.
-   Elles sont actives en production depuis le 20 juillet 2026. Leur diffusion en
-   boutique mobile reste soumise à la procédure propre à chaque plateforme.
-6. **Historique des checklists et formule — conforme** : chaque nouvelle
-   intervention reçoit dans la transaction atomique un instantané versionné de
-   sa définition et de ses étapes applicables. Les anciennes interventions ont
-   reçu un instantané « historique hérité » après rapport, validation et
-   sauvegarde. Le score est calculé exclusivement côté serveur avec une formule
-   officielle versionnée. Les migrations `202607270006`, `202607270007` et
-   `202607270008` sont actives en production.
-7. **Trophées surprises** : le code affiche actuellement des cartes génériques
-   « Trophée secret ». La cible les rend entièrement invisibles avant obtention.
-8. **Trophées actifs** : la suppression et l'édition directe doivent être
-   remplacées par la désactivation et la publication versionnée.
-9. **Authentification initiale — conforme** : l'Administrateur crée le compte
-   avec un identifiant et une clé provisoire aléatoire au format `XXXX-XXXX`,
-   générée côté serveur et affichée une seule fois. À la première connexion,
-   l'utilisateur confirme son adresse e-mail et remplace la clé par son mot de
-   passe. Une clé régénérée invalide immédiatement la précédente.
-10. **Sessions web — actives en production** : le code utilise désormais un
-    registre serveur et un cookie non persistant `HttpOnly`, `Secure`,
-    `SameSite`, avec expiration atomique après trente minutes d'inactivité. La
-    déconnexion volontaire et la désactivation révoquent toutes les sessions.
-    Les migrations `202607270004` et `202607270005` ont été appliquées en deux
-    étapes le 27 juillet 2026 autour du déploiement Vercel
-    `dpl_4ddUnCg5wCNade9NhmE9YjtMwSbo`. Une recette réelle avec deux sessions web
-    et deux sessions mobiles a confirmé la coexistence, l'expiration isolée et
-    la révocation globale. Un second scénario réel a confirmé que la
-    désactivation administrative révoque immédiatement les sessions web et
-    mobile du compte. Les données synthétiques ont ensuite été supprimées.
-11. **Biométrie — code prêt mais non diffusé en nouvelle version native** : la coque mobile active conserve
-    uniquement le jeton opaque dans SecureStore et propose Face ID, Touch ID ou
-    la biométrie Android après une connexion classique. La WebView est
-    éphémère et son script injecté ne contient plus de logique métier. Les
-    contrôles TypeScript réussissent, mais une nouvelle version native et des
-    essais sur appareils physiques restent nécessaires.
-12. **Notifications** : les notifications push pour évaluations et trophées ne
-    sont pas encore garanties par le socle actuel.
-13. **Support — fonction conforme, adresse définitive encore à configurer** :
-    les espaces Interne, Senior et Administrateur ouvrent l'application de
-    messagerie avec destinataire, objet et corps préremplis, sans stocker le
-    message dans Project1. L'adresse est centralisée et configurable ; l'adresse
-    définitive décidée par le propriétaire devra être renseignée lorsqu'elle
-    existera. L'ancienne fonctionnalité « Remarques de test » n'est plus
-    référencée par le client ni par les scripts opérationnels. La migration
-    `202607270009_retire_test_feedback_operations.sql`, appliquée le 27 juillet
-    2026, retire ses droits et mécanismes applicatifs tout en conservant la table
-    et tous les anciens enregistrements.
-14. **Établissements — conforme** : le référentiel officiel `institutions`
-    possède des identifiants stables, un nom officiel, un statut et une date
-    d'archivage. L'Administrateur crée, renomme, archive et sélectionne les
-    établissements dans cette liste. Le déplacement d'un compte est atomique,
-    audité et révoque les anciens accès Senior. Les politiques Senior comparent
-    les identifiants stables et non les anciens textes.
-15. **Cohérence Interne-Senior — backend et interface web conformes** : le
-    client attend désormais la confirmation de la fonction atomique Supabase avant
-    d'afficher le succès. La production actuelle écoute Realtime et recharge les
-    données au retour au premier plan. Le Lot 3 déployé le 27 juillet 2026 remplace
-    l'exposition d'un jeton Realtime dans le navigateur par une réconciliation
-    serveur automatique toutes les cinq secondes, ainsi qu'au focus, au retour
-    du réseau et au retour de l'application. La publication Realtime et les politiques associées sont dans la
-    migration versionnée. Le parcours croisé réel, y compris le changement
-    d'établissement et la révocation des anciens accès, a réussi le 20 juillet 2026
-    sur `project1-integration-test`. Après sauvegarde supplémentaire, simulation et
-    autorisation explicite du propriétaire, la migration a été appliquée au projet
-    principal le 20 juillet 2026. Les tables, fonctions, politiques et publications
-    Realtime attendues ont été contrôlées. Le même parcours croisé a ensuite réussi
-    dans une transaction de production entièrement annulée. Les trois comptes,
-    trois profils, trois interventions et trois évaluations réels sont restés
-    intacts et aucun compte, profil ou acte synthétique ne subsiste. Le client web
-    correspondant a été déployé le 20 juillet 2026 sur
-    `https://monjournaldebloc.fr` après préversion, compilation distante et
-    contrôles HTTP et visuels sur ordinateur et téléphone. Le premier binaire
-    Android de production, version `1.0.0 (2)`, a également été construit et son
-    intégrité vérifiée, mais il n'est pas encore soumis à Google Play. Aucun
-    binaire iOS n'existe encore : le compte Apple du propriétaire a été accepté
-    par l'assistant EAS mais n'est associé à aucune équipe Apple Developer. La
-    création du premier fichier signé exige donc d'abord une adhésion active à
-    l'Apple Developer Program ou une invitation dans l'équipe d'une organisation
-    déjà inscrite. Le 20 juillet 2026, le propriétaire a décidé de rester sans
-    abonnement Apple pour le moment. Aucun nouveau build iOS ni aucune opération
-    TestFlight/App Store ne doit donc être lancé sans une nouvelle décision
-    explicite. Le web est actif ; la diffusion mobile en boutique reste incomplète
-    et ne doit pas être présentée comme terminée. Une recette réelle supplémentaire
-    a été exécutée le 20 juillet 2026 sur le site de production, après une nouvelle
-    sauvegarde externe, avec quatre comptes et une intervention entièrement
-    synthétiques. L'enregistrement atomique, l'évaluation par le Senior désigné,
-    la restitution du score à l'Interne, les droits RLS du même établissement, le
-    déplacement d'établissement et la révocation des anciens accès ont réussi.
-    Cette recette a toutefois révélé deux écarts bloquants : l'interface Senior
-    masquait les Internes autorisés lorsqu'ils ne figuraient pas dans ses relations
-    récentes, et l'Interne ne peut pas supprimer sa propre intervention avant
-    évaluation. Le premier écart a été corrigé dans le code source le 20 juillet
-    2026 en conservant les trois filtres dans une carte cyclique et « Tous les
-    internes » comme vue initiale. La préversion vérifiée a été promue sur
-    `https://monjournaldebloc.fr` le 20 juillet 2026 et le bundle public a été
-    contrôlé. Le second écart a été corrigé dans le code source le 20 juillet
-    2026 : une fonction Supabase atomique réserve la suppression à l'Interne
-    propriétaire tant que l'intervention n'est pas évaluée, supprime aussi la
-    demande d'évaluation, écrit une trace d'audit et retire tout droit de
-    suppression directe, notamment à l'Administrateur. Dans l'interface, cette
-    action se trouve dans `Paramètres > Mes données > Interventions en attente` ;
-    l'historique conserve ses cartes en attente verrouillées. Après sauvegarde
-    externe fraîche, simulation SQL et autorisation explicite du propriétaire,
-    la migration a été appliquée au projet principal le 20 juillet 2026. Le test
-    transactionnel complet de production a réussi puis a été annulé. Le même
-    client a été construit en préversion, contrôlé puis promu sans reconstruction
-    sur `https://monjournaldebloc.fr`. Une recette authentifiée supplémentaire a
-    ensuite confirmé dans l'interface publique l'enregistrement atomique, la
-    visibilité simultanée pour le Senior désigné et l'autre Senior du même
-    établissement, l'absence d'accès depuis un autre établissement, le
-    verrouillage de l'historique et la suppression depuis `Mes données`. Après
-    cette suppression, Supabase contenait zéro intervention et zéro demande
-    d'évaluation synthétiques. Le nettoyage final a ramené exactement les comptes
-    Auth, profils, interventions, évaluations et demandes à leurs compteurs
-    initiaux, sans résidu synthétique. Les preuves figurent dans
-    `docs/RAPPORT_SUPPRESSION_INTERVENTION_2026-07-20.md` et
-    `docs/RAPPORT_RECETTE_PRODUCTION_2026-07-20.md`.
-16. **Sauvegardes Supabase — mécanisme externe actif** : le projet Supabase
-    principal utilise l'offre gratuite, qui ne fournit ni sauvegarde planifiée ni
-    restauration vers un nouveau projet. Depuis le 20 juillet 2026, le mécanisme
-    externe chiffré couvre PostgreSQL, Auth, les fichiers Storage et les migrations
-    avec une rétention de trente jours. La destination iCloud a été explicitement
-    autorisée, deux archives de production ont été créées et vérifiées, et l'agent
-    quotidien est actif à 03 h 15. Un exercice d'effacement-restauration utilisant
-    uniquement des données synthétiques a réussi deux fois sur le projet isolé,
-    y compris la reconnexion avec le mot de passe d'origine et le contrôle du
-    fichier Storage. Aucune donnée de production n'a été copiée dans ce projet de
-    test. La clé reste protégée dans le Trousseau macOS et le propriétaire a
-    confirmé le 20 juillet 2026 en avoir conservé une copie de récupération sur un
-    support séparé du Mac et d'iCloud. Le blocage propre aux sauvegardes est donc
-    levé. Toute migration de production reste néanmoins soumise à une demande
-    explicite distincte, une simulation sans écriture et une validation finale.
-17. **Fonctions restantes du Lot 7 — conformes sur le web commun** : le Senior
-    peut exporter les données pédagogiques de tous les Internes actifs de son
-    établissement, indépendamment des filtres d'affichage. Cet export exclut les
-    e-mails, identifiants de connexion, bloc-notes et secrets. L'Administrateur
-    dispose d'une vue historique en lecture seule des comptes désactivés. Le
-    client a été construit, vérifié en préversion puis promu sans reconstruction
-    le 27 juillet 2026. Le déploiement de production
-    `dpl_HzB1EiBif83RiRJj3YnFHVZkqkLU` sert `https://monjournaldebloc.fr` et
-    `https://www.monjournaldebloc.fr`.
+1. **Socle métier Supabase — conforme, contrôle croisé à rétablir** :
+   l'enregistrement atomique des interventions, les autorisations par
+   établissement, l'évaluation réservée au Senior désigné, l'immutabilité des
+   évaluations, les instantanés historiques et le calcul serveur du score sont
+   actifs. Le test croisé automatisé reste obligatoire. Il ne peut toutefois
+   plus être exécuté dans la CI depuis la suppression du projet Supabase isolé
+   `luedugesmybmvppdplaa`. Une nouvelle base de test isolée et de nouveaux
+   comptes E2E doivent être créés avant de considérer cette protection comme de
+   nouveau opérationnelle.
+2. **Web et logique commune — conformes sur les parcours publics testés** :
+   la présentation web a été adaptée à l'ordinateur tout en conservant la même
+   logique métier que l'application. Les tests publics passent sous Chrome,
+   Edge, Firefox et WebKit, y compris WebKit sur macOS. Une validation manuelle
+   périodique sur les appareils et navigateurs réels reste nécessaire pour les
+   évolutions visuelles importantes.
+3. **Authentification, sessions, comptes et établissements — conformes** :
+   la session web est gérée côté serveur, la session mobile dans le stockage
+   sécurisé natif, la déconnexion et la désactivation révoquent les sessions,
+   la désactivation est réversible lorsque l'identité Auth existe encore, les
+   adresses e-mail sont confirmées et modifiables, et les établissements
+   utilisent un référentiel officiel à identifiants stables.
+4. **Trophées et centre de notifications web — conformes** : les trophées
+   secrets restent invisibles avant obtention, les niveaux sont versionnés et
+   seul le meilleur niveau est utilisé lorsque la règle de présentation le
+   demande. Les notifications automatiques Interne et les messages
+   administratifs ciblés sont disponibles dans le centre commun. Les
+   notifications système Apple et Android lorsque l'application est fermée
+   restent un chantier distinct à réaliser ultérieurement.
+5. **Sauvegarde externe — archive courante vérifiée, restauration à
+   requalifier** : la sauvegarde chiffrée couvre PostgreSQL, Auth, Storage et les
+   migrations, avec rétention et exécution quotidienne. Le mécanisme réessaie
+   désormais pendant environ une heure. Une archive fraîche du 11 août 2026 a
+   été produite et son intégrité vérifiée. L'exercice de restauration complet a
+   été arrêté avant toute écriture car l'ancien projet Supabase isolé a été
+   supprimé. Une nouvelle cible isolée doit être provisionnée pour vérifier à
+   nouveau la restauration complète ; aucune restauration ne doit être testée
+   sur la production.
+6. **Dépendances web — conformes ; dépendances mobiles sous surveillance** :
+   l'audit web ne signale aucune vulnérabilité. Les versions Expo et React
+   Native sont alignées sur les versions compatibles et CocoaPods s'installe de
+   nouveau correctement. Deux avis de sécurité amont concernant `image-size`
+   restent présents dans l'arbre Expo sans version corrigée compatible. Ils sont
+   limités par des correctifs locaux versionnés, des tests dédiés et une liste
+   d'exceptions exacte. Cette exception doit être supprimée dès qu'une version
+   Expo compatible apporte le correctif amont.
+7. **Diffusion mobile — incomplète** : le code Expo passe le typage, le contrôle
+   de configuration et la vérification des versions. La validation Android sur
+   appareil réel et la soumission en boutique restent à faire. La production
+   d'un binaire iOS signé et toute publication TestFlight ou App Store restent
+   différées tant que le propriétaire ne dispose pas d'une équipe Apple
+   Developer active.
+8. **Qualité et CI — socle actif, environnement connecté indisponible** :
+   ESLint, les tests, le typage, les compilations, les audits de dépendances et
+   les contrôles Expo sont exécutés par la CI. Au 11 août 2026, ces contrôles et
+   les cinq emplois navigateur réussissent. Les emplois Supabase croisé et E2E
+   authentifiés échouent uniquement parce que leur ancienne base isolée et leurs
+   comptes de test ne sont plus disponibles. Ils ne doivent pas être rendus
+   facultatifs pour masquer cet écart.
+9. **Dette de maintenance — réduction commencée** : ESLint ne signale aucune
+   erreur bloquante mais conserve un ensemble d'avertissements historiques à
+   traiter progressivement. Les premières extractions ont été réalisées dans
+   `src/styles.css`, `mobile/App.tsx` et `src/screens/AdminScreen.tsx`. Ces trois
+   fichiers restent volumineux et doivent continuer à être découpés par petits
+   lots testés, sans réécriture globale risquée.
+10. **Exports — contenu à valider avec le propriétaire** : les exports existants
+    respectent les exclusions de secrets et de données privées déjà définies,
+    mais la liste exacte des colonnes utiles pour les exports Interne, Senior et
+    Administrateur doit encore être relue et validée fonction par fonction.
+11. **Support — mécanisme conforme, destinataire définitif à confirmer** : les
+    demandes ouvrent l'application de messagerie avec destinataire, objet et
+    corps préremplis sans conserver le message dans Project1. L'adresse de
+    support reste configurable et devra être remplacée par l'adresse définitive
+    décidée par le propriétaire.
+12. **Exécution locale du web — limite connue** : le serveur Vite seul ne fournit
+    pas les fonctions `/api` de Vercel. Les parcours d'authentification complets
+   doivent être vérifiés avec `vercel dev`, une préversion Vercel ou un
+   environnement équivalent relié à une base de test, jamais en utilisant la
+   production comme environnement E2E automatisé.
 
 ## 16. Sujet futur non bloquant
 
