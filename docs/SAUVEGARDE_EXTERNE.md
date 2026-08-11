@@ -72,8 +72,11 @@ Activer ensuite la sauvegarde quotidienne à 03 h 15 :
 npm run backup:schedule:enable -- --env-file=.env.production.local
 ```
 
-Le LaunchAgent utilise un lanceur résilient : en cas de coupure réseau au réveil
-du Mac, il réessaie automatiquement après une minute puis après trois minutes.
+Le LaunchAgent utilise un lanceur résilient : en cas de coupure réseau ou de DNS
+au réveil du Mac, il effectue cinq tentatives réparties sur environ une heure
+(immédiatement, puis après 1, 5, 15 et 45 minutes). Le calendrier peut être
+adapté avec `PROJECT1_BACKUP_RETRY_DELAYS_MS`, sous la forme d'une liste de
+délais en millisecondes séparés par des virgules.
 
 La désactiver :
 

@@ -17,7 +17,10 @@ const retrySource = await readFile(
 
 test('la sauvegarde quotidienne utilise le lanceur avec nouvelles tentatives', () => {
   assert.match(setupSource, /run-external-backup-with-retry\.mjs/);
-  assert.match(retrySource, /\[0,\s*60_000,\s*180_000\]/);
+  assert.match(retrySource, /5 \* 60_000/);
+  assert.match(retrySource, /15 \* 60_000/);
+  assert.match(retrySource, /45 \* 60_000/);
+  assert.match(retrySource, /PROJECT1_BACKUP_RETRY_DELAYS_MS/);
   assert.match(retrySource, /Toutes les tentatives de sauvegarde ont échoué/);
 });
 
