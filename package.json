@@ -40,6 +40,8 @@
     "test:a11y": "npm run build && playwright test e2e/public/accessibility.spec.ts --project=chromium",
     "db:migrate:test:dry-run": "node scripts/apply-supabase-migration.mjs --dry-run --require-test-database",
     "mobile:config:check": "node scripts/validate-mobile-config.mjs",
+    "audit:dependencies": "node scripts/audit-compatible-dependencies.mjs",
+    "lint": "eslint \"src/**/*.{ts,tsx}\" \"mobile/**/*.{ts,tsx}\"",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -50,12 +52,17 @@
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.12.1",
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.62.0",
     "@types/react": "~19.2.2",
     "@types/react-dom": "^19.2.2",
     "@vitejs/plugin-react": "^5.1.0",
+    "eslint": "^10.8.1",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.9.0",
     "pg": "^8.22.0",
     "typescript": "~5.9.2",
+    "typescript-eslint": "^8.67.0",
     "vite": "^7.1.0"
   }
 }

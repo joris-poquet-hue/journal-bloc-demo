@@ -1,0 +1,32 @@
+diff --git a/node_modules/image-size/dist/types/icns.js b/node_modules/image-size/dist/types/icns.js
+index f2bfafe..bffa040 100644
+--- a/node_modules/image-size/dist/types/icns.js
++++ b/node_modules/image-size/dist/types/icns.js
+@@ -70,6 +70,11 @@ function readImageHeader(input, imageOffset) {
+         (0, utils_1.readUInt32BE)(input, imageLengthOffset),
+     ];
+ }
++function assertValidEntryLength(entryLength, imageOffset, inputLength) {
++    if (entryLength < SIZE_HEADER || imageOffset + entryLength > inputLength) {
++        throw new TypeError('Invalid ICNS entry length');
++    }
++}
+ function getImageSize(type) {
+     const size = ICON_TYPE_SIZE[type];
+     return { width: size, height: size, type };
+@@ -81,6 +86,7 @@ exports.ICNS = {
+         const fileLength = (0, utils_1.readUInt32BE)(input, FILE_LENGTH_OFFSET);
+         let imageOffset = SIZE_HEADER;
+         let imageHeader = readImageHeader(input, imageOffset);
++        assertValidEntryLength(imageHeader[1], imageOffset, inputLength);
+         let imageSize = getImageSize(imageHeader[0]);
+         imageOffset += imageHeader[1];
+         if (imageOffset === fileLength)
+@@ -92,6 +98,7 @@ exports.ICNS = {
+         };
+         while (imageOffset < fileLength && imageOffset < inputLength) {
+             imageHeader = readImageHeader(input, imageOffset);
++            assertValidEntryLength(imageHeader[1], imageOffset, inputLength);
+             imageSize = getImageSize(imageHeader[0]);
+             imageOffset += imageHeader[1];
+             result.images.push(imageSize);
