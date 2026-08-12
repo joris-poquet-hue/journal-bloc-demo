@@ -20763,7 +20763,7 @@ fieldset.clinical-context-field {
   min-width: 0;
   flex: 1;
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
+  grid-template-columns: 8px minmax(0, 1fr);
   align-items: center;
   gap: 13px;
   padding: 18px 14px;
@@ -20797,7 +20797,7 @@ fieldset.clinical-context-field {
   font-weight: 880;
 }
 
-.notification-center__item-copy > span:not(.notification-center__sender) {
+.notification-center__body {
   color: #50627f;
   font-size: 0.9rem;
   line-height: 1.42;
@@ -20817,9 +20817,25 @@ fieldset.clinical-context-field {
   font-weight: 650;
 }
 
-.notification-center__external {
-  width: 18px;
+.notification-center__action {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 4px;
+  padding: 7px 10px;
+  border: 1px solid rgba(8, 121, 138, 0.2);
+  border-radius: 11px;
+  background: rgba(229, 248, 250, 0.72);
   color: #08798a;
+  font-size: 0.78rem;
+  font-weight: 850;
+  line-height: 1;
+}
+
+.notification-center__action svg {
+  width: 15px;
+  height: 15px;
 }
 
 .notification-center__delete {

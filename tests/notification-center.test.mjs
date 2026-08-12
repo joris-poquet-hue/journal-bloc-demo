@@ -12,6 +12,9 @@ const migration = readSource(
 const internalLinkRemovalMigration = readSource(
   '../supabase/migrations/202608120001_remove_admin_internal_notification_links.sql'
 );
+const notificationStatisticsMigration = readSource(
+  '../supabase/migrations/202608120002_admin_notification_statistics.sql'
+);
 const context = readSource('../CONTEXTE_PROJET.md');
 const appContext = readSource('../src/context/AppContext.tsx');
 const repository = readSource('../src/services/backendRepository.ts');
@@ -112,10 +115,43 @@ test('l’Interne et le Senior partagent le centre, sans centre Administrateur',
 test('les actions ouvrent les détails métier et signalent les liens externes', () => {
   assert.match(notificationCenter, /window\.open\([^)]*'_blank'/s);
   assert.match(notificationCenter, /<ExternalLink/);
+  assert.match(notificationCenter, /notification\.actionLabel/);
+  assert.match(notificationCenter, /notification-center__action/);
+  assert.ok(
+    notificationCenter.indexOf('window.open(') <
+      notificationCenter.indexOf('await onRead(notification.id)')
+  );
   assert.match(welcomeScreen, /notification\.actionType === 'trophy'/);
   assert.match(welcomeScreen, /notification\.actionType === 'intervention'/);
   assert.match(appContext, /historyNavigationInterventionId/);
   assert.match(appContext, /trophyNavigationId/);
+});
+
+test('les statistiques Administrateur sont agrégées côté Supabase', () => {
+  assert.match(
+    repository,
+    /rpc\/list_admin_notification_messages_with_stats/
+  );
+  assert.match(
+    notificationStatisticsMigration,
+    /message\.status = 'scheduled'[\s\S]*admin_notification_recipient_ids/
+  );
+  assert.match(
+    notificationStatisticsMigration,
+    /count\(\*\) filter \(where notification\.read_at is null\)/
+  );
+  assert.match(
+    notificationStatisticsMigration,
+    /count\(\*\) filter \(where notification\.read_at is not null\)/
+  );
+
+  const loaderSource = repository.slice(
+    repository.indexOf('export async function loadBackendAdminNotificationMessages'),
+    repository.indexOf('export async function countBackendAdminNotificationRecipients')
+  );
+
+  assert.doesNotMatch(loaderSource, /selectSupabaseRows/);
+  assert.doesNotMatch(loaderSource, /user_notifications/);
 });
 
 test('les messages Administrateur ne proposent plus de destination interne', () => {

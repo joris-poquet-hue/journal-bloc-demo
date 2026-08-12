@@ -79,13 +79,18 @@ export function NotificationCenter({
   }
 
   const openNotification = async (notification: BackendUserNotification) => {
-    if (!notification.readAt) {
-      await onRead(notification.id);
-    }
-
     if (notification.actionType === 'external_url' && notification.actionTarget) {
       window.open(notification.actionTarget, '_blank', 'noopener,noreferrer');
+
+      if (!notification.readAt) {
+        await onRead(notification.id);
+      }
+
       return;
+    }
+
+    if (!notification.readAt) {
+      await onRead(notification.id);
     }
 
     if (notification.actionType && notification.actionTarget) {
@@ -168,17 +173,23 @@ export function NotificationCenter({
                         </span>
                       ) : null}
                       <strong>{notification.title}</strong>
-                      <span>{notification.body}</span>
+                      <span className="notification-center__body">
+                        {notification.body}
+                      </span>
+                      {notification.actionType === 'external_url' &&
+                      notification.actionLabel ? (
+                        <span className="notification-center__action">
+                          {notification.actionLabel}
+                          <span className="visually-hidden">
+                            (ouvre un nouvel onglet)
+                          </span>
+                          <ExternalLink aria-hidden="true" />
+                        </span>
+                      ) : null}
                       <time dateTime={notification.createdAt}>
                         {formatNotificationDate(notification.createdAt)}
                       </time>
                     </span>
-                    {notification.actionType === 'external_url' ? (
-                      <ExternalLink
-                        aria-label="Ce lien s’ouvre dans un nouvel onglet"
-                        className="notification-center__external"
-                      />
-                    ) : null}
                   </button>
 
                   {isManualMessage ? (

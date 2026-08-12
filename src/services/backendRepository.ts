@@ -257,6 +257,12 @@ type AdminNotificationMessageRow = {
   updated_at: string;
 };
 
+type AdminNotificationMessageStatsRow = AdminNotificationMessageRow & {
+  read_count: number | string | null;
+  recipient_count: number | string | null;
+  unread_count: number | string | null;
+};
+
 type ActivityLogRow = {
   action: string;
   analytics_event: BackendActivityLogEntry['analyticsEvent'];
@@ -1149,14 +1155,15 @@ export async function deleteBackendUserNotification(
   });
 }
 
-function toAdminNotificationMessage(
-  row: AdminNotificationMessageRow,
-  notifications: UserNotificationRow[]
-): BackendAdminNotificationMessage {
-  const recipients = notifications.filter(
-    (notification) => notification.admin_message_id === row.id
-  );
+function toAdminNotificationCount(value: number | string | null) {
+  const count = Number(value);
 
+  return Number.isSafeInteger(count) && count >= 0 ? count : 0;
+}
+
+function toAdminNotificationMessage(
+  row: AdminNotificationMessageStatsRow
+): BackendAdminNotificationMessage {
   return {
     actionLabel: row.action_label,
     actionTarget: row.action_target,
@@ -1170,14 +1177,14 @@ function toAdminNotificationMessage(
     createdAt: row.created_at,
     deletionPolicy: row.deletion_policy,
     id: row.id,
-    readCount: recipients.filter((notification) => notification.read_at).length,
-    recipientCount: recipients.length,
+    readCount: toAdminNotificationCount(row.read_count),
+    recipientCount: toAdminNotificationCount(row.recipient_count),
     retractedAt: row.retracted_at,
     scheduledAt: row.scheduled_at,
     sentAt: row.sent_at,
     status: row.status,
     title: row.title,
-    unreadCount: recipients.filter((notification) => !notification.read_at).length,
+    unreadCount: toAdminNotificationCount(row.unread_count),
     updatedAt: row.updated_at,
   };
 }
@@ -1185,20 +1192,15 @@ function toAdminNotificationMessage(
 export async function loadBackendAdminNotificationMessages(
   signal?: AbortSignal
 ) {
-  const [messageRows, notificationRows] = await Promise.all([
-    selectSupabaseRows<AdminNotificationMessageRow>(
-      'admin_notification_messages',
-      { order: 'created_at.desc', signal }
-    ),
-    selectSupabaseRows<UserNotificationRow>('user_notifications', {
-      filters: { admin_message_id: 'not.is.null' },
-      signal,
-    }),
-  ]);
+  const messageRows = await supabaseRestRequest<
+    AdminNotificationMessageStatsRow[]
+  >('rpc/list_admin_notification_messages_with_stats', {
+    body: {},
+    method: 'POST',
+    signal,
+  });
 
-  return messageRows.map((row) =>
-    toAdminNotificationMessage(row, notificationRows)
-  );
+  return messageRows.map(toAdminNotificationMessage);
 }
 
 export async function countBackendAdminNotificationRecipients(
