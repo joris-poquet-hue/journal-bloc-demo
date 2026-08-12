@@ -1,11 +1,12 @@
 import {
   Bell,
   CalendarClock,
+  CircleAlert,
   ExternalLink,
   Pencil,
   Send,
-  Trash2,
   Users,
+  X,
   XCircle,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -15,7 +16,6 @@ import {
   countBackendAdminNotificationRecipients,
   createBackendAdminNotificationMessage,
   loadBackendAdminNotificationMessages,
-  retractBackendAdminNotificationMessage,
   updateBackendAdminNotificationMessage,
 } from '../../services/backendRepository';
 import type {
@@ -45,6 +45,12 @@ type MessageForm = {
   isScheduled: boolean;
   time: string;
   title: string;
+};
+
+type PendingMessageConfirmation = {
+  input: BackendAdminNotificationMessageInput;
+  messageId: string | null;
+  recipientCount: number;
 };
 
 function formatLocalDateInput(date: Date) {
@@ -106,6 +112,25 @@ function getStatusLabel(status: BackendAdminNotificationMessage['status']) {
   }
 }
 
+function getAudienceLabel(
+  input: BackendAdminNotificationMessageInput,
+  institutions: Institution[],
+  profiles: Array<{ id: string; label: string }>
+) {
+  switch (input.audienceType) {
+    case 'role':
+      return input.audienceRole === 'senior' ? 'Tous les Seniors actifs' : 'Tous les Internes actifs';
+    case 'institution':
+      return institutions.find((institution) => institution.id === input.audienceInstitutionId)?.name
+        ?? 'Établissement sélectionné';
+    case 'profile':
+      return profiles.find((profile) => profile.id === input.audienceProfileId)?.label
+        ?? 'Utilisateur sélectionné';
+    case 'all':
+      return 'Tous les Internes et Seniors actifs';
+  }
+}
+
 export function AdminNotificationsManager({
   institutions,
   internalProfiles,
@@ -118,6 +143,8 @@ export function AdminNotificationsManager({
   const [feedback, setFeedback] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [pendingConfirmation, setPendingConfirmation] =
+    useState<PendingMessageConfirmation | null>(null);
 
   const activeInstitutions = institutions.filter(
     (institution) => institution.status === 'active'
@@ -157,6 +184,27 @@ export function AdminNotificationsManager({
   useEffect(() => {
     void loadMessages();
   }, [loadMessages]);
+
+  useEffect(() => {
+    if (!pendingConfirmation) {
+      return undefined;
+    }
+
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !isSaving) {
+        setPendingConfirmation(null);
+      }
+    };
+
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', closeOnEscape);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [isSaving, pendingConfirmation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -265,32 +313,52 @@ export function AdminNotificationsManager({
     };
   };
 
-  const submitMessage = async () => {
+  const requestMessageConfirmation = () => {
     const input = buildInput();
     if (!input) {
       return;
     }
 
+    setFeedback(null);
+    setPendingConfirmation({
+      input,
+      messageId: editingMessageId,
+      recipientCount,
+    });
+  };
+
+  const submitMessage = async () => {
+    if (!pendingConfirmation) {
+      return;
+    }
+
+    const confirmation = pendingConfirmation;
+
     setIsSaving(true);
     setFeedback(null);
     try {
-      const nextMessages = editingMessageId
-        ? await updateBackendAdminNotificationMessage(editingMessageId, input)
-        : await createBackendAdminNotificationMessage(input);
+      const nextMessages = confirmation.messageId
+        ? await updateBackendAdminNotificationMessage(
+            confirmation.messageId,
+            confirmation.input
+          )
+        : await createBackendAdminNotificationMessage(confirmation.input);
       setMessages(nextMessages);
       setFeedback(
-        editingMessageId
+        confirmation.messageId
           ? 'Le message programmé a été mis à jour.'
-          : form.isScheduled
+          : confirmation.input.scheduledAt
             ? 'Le message a été programmé.'
             : 'Le message a été envoyé.'
       );
       setEditingMessageId(null);
       setForm(emptyForm());
+      setPendingConfirmation(null);
     } catch (error) {
       setFeedback(
         error instanceof Error ? error.message : 'Impossible d’enregistrer le message.'
       );
+      setPendingConfirmation(null);
     } finally {
       setIsSaving(false);
     }
@@ -329,19 +397,6 @@ export function AdminNotificationsManager({
     } catch (error) {
       setFeedback(
         error instanceof Error ? error.message : 'Impossible d’annuler le message.'
-      );
-    }
-  };
-
-  const retractMessage = async (messageId: string) => {
-    setFeedback(null);
-    try {
-      await retractBackendAdminNotificationMessage(messageId);
-      await loadMessages();
-      setFeedback('Le message a été retiré des centres de notifications.');
-    } catch (error) {
-      setFeedback(
-        error instanceof Error ? error.message : 'Impossible de retirer le message.'
       );
     }
   };
@@ -565,7 +620,7 @@ export function AdminNotificationsManager({
               <button
                 className="flow-button flow-button--primary"
                 disabled={isSaving}
-                onClick={() => void submitMessage()}
+                onClick={requestMessageConfirmation}
                 type="button"
               >
                 <Send aria-hidden="true" />
@@ -636,11 +691,6 @@ export function AdminNotificationsManager({
                       </button>
                     </>
                   ) : null}
-                  {message.status === 'sent' ? (
-                    <button onClick={() => void retractMessage(message.id)} type="button">
-                      <Trash2 aria-hidden="true" /> Retirer
-                    </button>
-                  ) : null}
                 </div>
               </article>
             ))}
@@ -652,6 +702,131 @@ export function AdminNotificationsManager({
           </div>
         )}
       </section>
+
+      {pendingConfirmation ? (
+        <div
+          className="admin-notification-confirmation-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !isSaving) {
+              setPendingConfirmation(null);
+            }
+          }}
+        >
+          <section
+            aria-describedby="admin-notification-confirmation-description"
+            aria-labelledby="admin-notification-confirmation-title"
+            aria-modal="true"
+            className="admin-notification-confirmation"
+            role="dialog"
+          >
+            <header>
+              <span className="admin-notification-confirmation__icon">
+                <Send aria-hidden="true" />
+              </span>
+              <div>
+                <span>Vérification finale</span>
+                <h3 id="admin-notification-confirmation-title">
+                  {pendingConfirmation.messageId
+                    ? 'Confirmer la modification'
+                    : pendingConfirmation.input.scheduledAt
+                      ? 'Confirmer la programmation'
+                      : 'Confirmer l’envoi'}
+                </h3>
+              </div>
+              <button
+                aria-label="Fermer la confirmation"
+                disabled={isSaving}
+                onClick={() => setPendingConfirmation(null)}
+                type="button"
+              >
+                <X aria-hidden="true" />
+              </button>
+            </header>
+
+            <div className="admin-notification-confirmation__body">
+              <dl>
+                <div>
+                  <dt>Cible</dt>
+                  <dd>
+                    {getAudienceLabel(
+                      pendingConfirmation.input,
+                      activeInstitutions,
+                      activeProfiles
+                    )}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Destinataires estimés</dt>
+                  <dd>{pendingConfirmation.recipientCount}</dd>
+                </div>
+                <div>
+                  <dt>Envoi</dt>
+                  <dd>
+                    {pendingConfirmation.input.scheduledAt
+                      ? formatAdminMessageDate(pendingConfirmation.input.scheduledAt)
+                      : 'Immédiatement'}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Après lecture</dt>
+                  <dd>
+                    {pendingConfirmation.input.deletionPolicy === 'on_read'
+                      ? 'Suppression automatique'
+                      : 'Suppression manuelle par le destinataire'}
+                  </dd>
+                </div>
+              </dl>
+
+              <article className="admin-notification-confirmation__message">
+                <span>Message envoyé</span>
+                <strong>{pendingConfirmation.input.title}</strong>
+                <p>{pendingConfirmation.input.body}</p>
+                {pendingConfirmation.input.actionLabel ? (
+                  <small>{pendingConfirmation.input.actionLabel}</small>
+                ) : null}
+              </article>
+
+              <p
+                className="admin-notification-confirmation__warning"
+                id="admin-notification-confirmation-description"
+              >
+                <CircleAlert aria-hidden="true" />
+                <span>
+                  {pendingConfirmation.input.scheduledAt
+                    ? 'La programmation pourra être modifiée ou annulée jusqu’à l’envoi. Une fois distribué, le message ne pourra plus être retiré.'
+                    : 'Après confirmation, ce message sera définitivement envoyé et ne pourra plus être retiré.'}
+                </span>
+              </p>
+            </div>
+
+            <footer>
+              <button
+                className="admin-secondary-button"
+                disabled={isSaving}
+                onClick={() => setPendingConfirmation(null)}
+                type="button"
+              >
+                Retour
+              </button>
+              <button
+                className="flow-button flow-button--primary"
+                disabled={isSaving}
+                onClick={() => void submitMessage()}
+                type="button"
+              >
+                <Send aria-hidden="true" />
+                {isSaving
+                  ? 'Enregistrement…'
+                  : pendingConfirmation.messageId
+                    ? 'Confirmer la modification'
+                    : pendingConfirmation.input.scheduledAt
+                      ? 'Confirmer la programmation'
+                      : 'Confirmer l’envoi'}
+              </button>
+            </footer>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

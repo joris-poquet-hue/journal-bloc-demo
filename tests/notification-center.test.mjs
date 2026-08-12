@@ -15,6 +15,9 @@ const internalLinkRemovalMigration = readSource(
 const notificationStatisticsMigration = readSource(
   '../supabase/migrations/202608120002_admin_notification_statistics.sql'
 );
+const irreversibleMessagesMigration = readSource(
+  '../supabase/migrations/202608120003_irreversible_admin_notifications.sql'
+);
 const context = readSource('../CONTEXTE_PROJET.md');
 const appContext = readSource('../src/context/AppContext.tsx');
 const repository = readSource('../src/services/backendRepository.ts');
@@ -70,7 +73,6 @@ test('les messages Administrateur couvrent les quatre ciblages et la programmati
   assert.match(migration, /create_admin_notification_message/);
   assert.match(migration, /update_admin_notification_message/);
   assert.match(migration, /cancel_admin_notification_message/);
-  assert.match(migration, /retract_admin_notification_message/);
   assert.match(migration, /dispatch_due_admin_notification_messages/);
   assert.match(migration, /cron\.schedule/);
   assert.match(migration, /action_type = 'external_url' and action_target ~\* '\^https:\/\/'/);
@@ -80,6 +82,27 @@ test('les messages Administrateur couvrent les quatre ciblages et la programmati
   assert.match(adminManager, /Programmer/);
   assert.match(adminManager, /Aperçu/);
   assert.match(adminManager, /destinataire/);
+});
+
+test('un message Administrateur exige une confirmation et devient définitif après envoi', () => {
+  assert.match(adminManager, /aria-modal="true"/);
+  assert.match(adminManager, /Confirmer l’envoi/);
+  assert.match(adminManager, /Confirmer la programmation/);
+  assert.match(adminManager, /Destinataires estimés/);
+  assert.match(adminManager, /ne pourra plus être retiré/);
+  assert.doesNotMatch(adminManager, /retractBackendAdminNotificationMessage/);
+  assert.doesNotMatch(adminManager, />\s*Retirer\s*</);
+  assert.doesNotMatch(repository, /retractBackendAdminNotificationMessage/);
+  assert.match(
+    irreversibleMessagesMigration,
+    /revoke all on function public\.retract_admin_notification_message\(uuid\)/
+  );
+  assert.match(
+    irreversibleMessagesMigration,
+    /drop function if exists public\.retract_admin_notification_message\(uuid\)/
+  );
+  assert.match(context, /fenêtre récapitulative[\s\S]*confirmation explicite/);
+  assert.match(context, /il ne peut plus être retiré des centres de notifications/);
 });
 
 test('la lecture respecte les deux politiques de conservation', () => {

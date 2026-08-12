@@ -21064,6 +21064,191 @@ fieldset.clinical-context-field {
   width: 18px;
 }
 
+.admin-notification-confirmation-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(16, 38, 64, 0.42);
+  backdrop-filter: blur(8px);
+}
+
+.admin-notification-confirmation {
+  width: min(650px, 100%);
+  max-height: min(820px, calc(100vh - 48px));
+  overflow: auto;
+  border: 1px solid rgba(190, 217, 227, 0.96);
+  border-radius: 30px;
+  background: #fff;
+  box-shadow: 0 30px 80px rgba(7, 26, 61, 0.24);
+}
+
+.admin-notification-confirmation > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 23px 25px;
+  border-bottom: 1px solid rgba(190, 217, 227, 0.72);
+  background: linear-gradient(105deg, rgba(232, 248, 250, 0.88), #fffaf6);
+}
+
+.admin-notification-confirmation > header > div {
+  display: grid;
+  gap: 3px;
+}
+
+.admin-notification-confirmation > header span:not(.admin-notification-confirmation__icon),
+.admin-notification-confirmation__message > span {
+  color: #08798a;
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-notification-confirmation h3 {
+  margin: 0;
+  color: #071a3d;
+  font-size: 1.35rem;
+}
+
+.admin-notification-confirmation__icon {
+  width: 48px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 16px;
+  background: #dff5f7;
+  color: #08798a;
+}
+
+.admin-notification-confirmation__icon svg,
+.admin-notification-confirmation__warning svg {
+  width: 20px;
+}
+
+.admin-notification-confirmation > header > button {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(170, 209, 224, 0.94);
+  border-radius: 14px;
+  background: #fff;
+  color: #526580;
+}
+
+.admin-notification-confirmation > header > button svg {
+  width: 20px;
+}
+
+.admin-notification-confirmation__body {
+  display: grid;
+  gap: 18px;
+  padding: 24px 25px;
+}
+
+.admin-notification-confirmation__body dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.admin-notification-confirmation__body dl > div {
+  display: grid;
+  gap: 4px;
+  padding: 13px 14px;
+  border: 1px solid rgba(190, 217, 227, 0.8);
+  border-radius: 15px;
+  background: #f8fcfd;
+}
+
+.admin-notification-confirmation__body dt {
+  color: #687993;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.admin-notification-confirmation__body dd {
+  margin: 0;
+  color: #071a3d;
+  font-size: 0.86rem;
+  font-weight: 820;
+}
+
+.admin-notification-confirmation__message {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border: 1px solid rgba(190, 217, 227, 0.86);
+  border-radius: 20px;
+  background: linear-gradient(145deg, #eefafb, #fffaf6);
+}
+
+.admin-notification-confirmation__message strong {
+  color: #071a3d;
+  font-size: 1.02rem;
+}
+
+.admin-notification-confirmation__message p {
+  margin: 0;
+  color: #526580;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.admin-notification-confirmation__message small {
+  width: fit-content;
+  color: #08798a;
+  font-size: 0.8rem;
+  font-weight: 850;
+}
+
+.admin-notification-confirmation__warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 0;
+  padding: 13px 14px;
+  border-radius: 15px;
+  background: #fff5e6;
+  color: #855315;
+  font-size: 0.82rem;
+  font-weight: 720;
+  line-height: 1.45;
+}
+
+.admin-notification-confirmation__warning svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.admin-notification-confirmation > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 0 25px 25px;
+}
+
+.admin-notification-confirmation > footer button {
+  min-height: 48px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 18px;
+}
+
+.admin-notification-confirmation > footer svg {
+  width: 18px;
+}
+
 .admin-notification-preview {
   position: sticky;
   top: 24px;
@@ -21320,8 +21505,33 @@ html.monjdb-web-app .admin-shortcut-grid--home {
   }
 
   .admin-notification-form__grid,
-  .admin-notification-history__stats {
+  .admin-notification-history__stats,
+  .admin-notification-confirmation__body dl {
     grid-template-columns: 1fr;
+  }
+
+  .admin-notification-confirmation-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+
+  .admin-notification-confirmation {
+    width: 100%;
+    max-height: 90vh;
+    border-radius: 28px 28px 0 0;
+  }
+
+  .admin-notification-confirmation > header,
+  .admin-notification-confirmation__body {
+    padding: 20px 18px;
+  }
+
+  .admin-notification-confirmation > footer {
+    padding: 0 18px 20px;
+  }
+
+  .admin-notification-confirmation > footer button {
+    flex: 1;
   }
 
   .admin-notification-history__stats span {

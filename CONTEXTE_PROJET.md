@@ -634,9 +634,11 @@ Difficulté :
   séparément dans le navigateur.
 - Un aperçu final indique notamment le nombre de destinataires avant la
   confirmation.
+- Avant tout envoi immédiat ou toute programmation, une fenêtre récapitulative
+  demande une confirmation explicite de l'Administrateur.
 - Un message programmé peut être modifié ou annulé jusqu'à son envoi.
-- Après l'envoi, son contenu et ses destinataires deviennent immuables.
-  L'Administrateur peut néanmoins le retirer des centres de notifications.
+- Dès sa distribution, le message et ses destinataires deviennent définitifs et
+  il ne peut plus être retiré des centres de notifications par l'Administrateur.
 - Le suivi Administrateur affiche seulement le nombre de destinataires, le
   nombre de messages non lus et le nombre de messages lus.
 

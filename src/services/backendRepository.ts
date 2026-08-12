@@ -1288,17 +1288,6 @@ export async function cancelBackendAdminNotificationMessage(
   });
 }
 
-export async function retractBackendAdminNotificationMessage(
-  messageId: string,
-  signal?: AbortSignal
-) {
-  await supabaseRestRequest<null>('rpc/retract_admin_notification_message', {
-    body: { p_message_id: messageId },
-    method: 'POST',
-    signal,
-  });
-}
-
 export async function loadBackendBootstrapPayload(
   profileId: string,
   signal?: AbortSignal
