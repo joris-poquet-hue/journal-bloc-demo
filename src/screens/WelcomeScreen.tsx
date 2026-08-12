@@ -86,7 +86,6 @@ export function WelcomeScreen() {
     trophyAwards,
     userNotifications,
     deleteUserNotification,
-    goToProfile,
     goToTrophies,
     goToNotebook,
     goToSurgeryHistory,
@@ -172,27 +171,6 @@ export function WelcomeScreen() {
         goToSurgeryHistory(intervention.date, 'calendar', intervention.id);
       }
       return;
-    }
-
-    if (notification.actionType !== 'internal_path') {
-      return;
-    }
-
-    switch (notification.actionTarget) {
-      case '/profil':
-        goToProfile();
-        break;
-      case '/progression':
-        goToSurgeryHistory(undefined, 'progress');
-        break;
-      case '/historique':
-        goToSurgeryHistory();
-        break;
-      case '/trophees':
-        goToTrophies();
-        break;
-      default:
-        break;
     }
   };
   const isInterventionValidated = (intervention: SavedIntervention) => {

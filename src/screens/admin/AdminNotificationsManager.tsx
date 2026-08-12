@@ -34,7 +34,7 @@ type AdminNotificationsManagerProps = {
 type MessageForm = {
   actionLabel: string;
   actionTarget: string;
-  actionType: 'external_url' | 'internal_path' | 'none';
+  actionType: 'external_url' | 'none';
   audienceInstitutionId: string;
   audienceProfileId: string;
   audienceRole: 'internal' | 'senior';
@@ -237,16 +237,14 @@ export function AdminNotificationsManager({
         return null;
       }
 
-      if (form.actionType === 'external_url') {
-        try {
-          const url = new URL(form.actionTarget);
-          if (url.protocol !== 'https:') {
-            throw new Error('unsupported protocol');
-          }
-        } catch {
-          setFeedback('Le lien externe doit être une adresse https:// valide.');
-          return null;
+      try {
+        const url = new URL(form.actionTarget);
+        if (url.protocol !== 'https:') {
+          throw new Error('unsupported protocol');
         }
+      } catch {
+        setFeedback('Le lien externe doit être une adresse https:// valide.');
+        return null;
       }
     }
 
@@ -300,11 +298,12 @@ export function AdminNotificationsManager({
 
   const editMessage = (message: BackendAdminNotificationMessage) => {
     const scheduledDate = new Date(message.scheduledAt);
+    const hasExternalAction = message.actionType === 'external_url';
     setEditingMessageId(message.id);
     setForm({
-      actionLabel: message.actionLabel ?? '',
-      actionTarget: message.actionTarget ?? '',
-      actionType: message.actionType ?? 'none',
+      actionLabel: hasExternalAction ? message.actionLabel ?? '' : '',
+      actionTarget: hasExternalAction ? message.actionTarget ?? '' : '',
+      actionType: hasExternalAction ? 'external_url' : 'none',
       audienceInstitutionId: message.audienceInstitutionId ?? '',
       audienceProfileId: message.audienceProfileId ?? '',
       audienceRole: message.audienceRole ?? 'internal',
@@ -529,7 +528,6 @@ export function AdminNotificationsManager({
                 value={form.actionType}
               >
                 <option value="none">Aucun bouton</option>
-                <option value="internal_path">Page de l’application</option>
                 <option value="external_url">Lien externe</option>
               </select>
             </label>
@@ -545,27 +543,13 @@ export function AdminNotificationsManager({
                   />
                 </label>
                 <label>
-                  {form.actionType === 'external_url' ? 'Adresse du lien' : 'Page'}
-                  {form.actionType === 'internal_path' ? (
-                    <select
-                      onChange={(event) => setForm((current) => ({ ...current, actionTarget: event.target.value }))}
-                      value={form.actionTarget}
-                    >
-                      <option value="">Choisir</option>
-                      <option value="/accueil">Accueil</option>
-                      <option value="/progression">Progression</option>
-                      <option value="/historique">Historique</option>
-                      <option value="/trophees">Trophées</option>
-                      <option value="/profil">Profil</option>
-                    </select>
-                  ) : (
-                    <input
-                      onChange={(event) => setForm((current) => ({ ...current, actionTarget: event.target.value }))}
-                      placeholder="https://…"
-                      type="url"
-                      value={form.actionTarget}
-                    />
-                  )}
+                  Adresse du lien
+                  <input
+                    onChange={(event) => setForm((current) => ({ ...current, actionTarget: event.target.value }))}
+                    placeholder="https://…"
+                    type="url"
+                    value={form.actionTarget}
+                  />
                 </label>
               </div>
             ) : null}

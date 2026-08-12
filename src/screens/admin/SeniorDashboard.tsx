@@ -1388,14 +1388,7 @@ export function SeniorDashboard({
         notifications={userNotifications}
         onClose={() => setIsNotificationCenterOpen(false)}
         onDelete={deleteUserNotification}
-        onNavigate={(notification) => {
-          if (
-            notification.actionType === 'internal_path' &&
-            notification.actionTarget === '/profil'
-          ) {
-            setIsSettingsMenuOpen(true);
-          }
-        }}
+        onNavigate={() => undefined}
         onRead={markUserNotificationRead}
         onReadAll={markAllUserNotificationsRead}
       />

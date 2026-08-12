@@ -9,6 +9,9 @@ function readSource(path) {
 const migration = readSource(
   '../supabase/migrations/202608020002_common_notification_center.sql'
 );
+const internalLinkRemovalMigration = readSource(
+  '../supabase/migrations/202608120001_remove_admin_internal_notification_links.sql'
+);
 const context = readSource('../CONTEXTE_PROJET.md');
 const appContext = readSource('../src/context/AppContext.tsx');
 const repository = readSource('../src/services/backendRepository.ts');
@@ -113,4 +116,19 @@ test('les actions ouvrent les détails métier et signalent les liens externes',
   assert.match(welcomeScreen, /notification\.actionType === 'intervention'/);
   assert.match(appContext, /historyNavigationInterventionId/);
   assert.match(appContext, /trophyNavigationId/);
+});
+
+test('les messages Administrateur ne proposent plus de destination interne', () => {
+  assert.doesNotMatch(adminManager, /internal_path|Page de l.application/);
+  assert.doesNotMatch(welcomeScreen, /internal_path/);
+  assert.doesNotMatch(seniorDashboard, /internal_path/);
+  assert.match(
+    internalLinkRemovalMigration,
+    /where action_type = 'internal_path'/
+  );
+  assert.match(
+    internalLinkRemovalMigration,
+    /action_type in \('trophy', 'intervention', 'external_url'\)/
+  );
+  assert.match(context, /ne proposent aucun lien interne/);
 });

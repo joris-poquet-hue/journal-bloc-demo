@@ -628,9 +628,10 @@ Difficulté :
   au moment réel de l'envoi. Les comptes désactivés sont toujours exclus.
 - Le formulaire exige un titre, un message et les destinataires.
 - L'envoi peut être immédiat ou programmé à une date et une heure.
-- Un bouton facultatif peut contenir un libellé et un lien interne ou externe.
-  Un lien externe est clairement signalé et s'ouvre séparément dans le
-  navigateur.
+- Un bouton facultatif peut contenir un libellé et un lien externe sécurisé en
+  `https://`. Les messages Administrateur ne proposent aucun lien interne vers
+  une page de l'application. Le lien externe est clairement signalé et s'ouvre
+  séparément dans le navigateur.
 - Un aperçu final indique notamment le nombre de destinataires avant la
   confirmation.
 - Un message programmé peut être modifié ou annulé jusqu'à son envoi.
