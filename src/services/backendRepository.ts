@@ -26,6 +26,7 @@ import type {
   BackendNotebookDocument,
   BackendProfile,
   BackendReferenceData,
+  BackendSeniorAssignment,
   BackendSavedIntervention,
   BackendSurgicalInterventionDefinition,
   BackendTrophyAward,
@@ -330,26 +331,6 @@ function toBackendProfile(row: ProfileRow): BackendProfile {
     promotion: row.promotion,
     role: row.role,
     semester: row.semester,
-    updatedAt: row.updated_at,
-    updatedByProfileId: row.updated_by_profile_id,
-    version: row.version,
-  };
-}
-
-function toSenior(row: ProfileRow): Senior {
-  return {
-    contactEmail: getProfileContactEmail(row.metadata),
-    createdAt: row.created_at,
-    firstName: row.first_name,
-    id: row.id,
-    institution: row.institution?.trim() || 'CHU de Nantes',
-    institutionId: row.institution_id,
-    isActive: row.is_active,
-    isCustom: true,
-    lastLoginAt: row.last_login_at,
-    lastName: row.last_name,
-    loginId: row.login_id,
-    mustChangePassword: row.must_change_password,
     updatedAt: row.updated_at,
     updatedByProfileId: row.updated_by_profile_id,
     version: row.version,
@@ -993,35 +974,47 @@ export async function loadBackendReferenceData(
 
 export async function loadBackendUserData(
   profileId: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  initialProfile?: BackendProfile
 ): Promise<BackendUserData | null> {
-  const profile = await loadBackendProfile(profileId, signal);
+  const profile =
+    initialProfile?.id === profileId
+      ? initialProfile
+      : await loadBackendProfile(profileId, signal);
 
   if (!profile) {
     return null;
   }
 
-  const assignmentRows =
+  const [assignmentRows, directoryProfiles] = await Promise.all([
     profile.role === 'senior'
-      ? await selectSupabaseRows<AssignmentRow>('senior_internal_assignments', {
+      ? selectSupabaseRows<AssignmentRow>('senior_internal_assignments', {
           filters: {
             senior_profile_id: `eq.${profile.id}`,
           },
           signal,
         })
-      : [];
+      : profile.role === 'admin'
+        ? selectSupabaseRows<AssignmentRow>('senior_internal_assignments', {
+            signal,
+          })
+        : Promise.resolve([]),
+    profile.role === 'senior'
+      ? loadBackendVisibleInternalProfiles(signal)
+      : profile.role === 'admin'
+        ? loadBackendProfiles(signal)
+        : Promise.resolve([]),
+  ]);
   const managedInternalIds = assignmentRows.map(
     (assignment) => assignment.internal_profile_id
   );
   const seniorInternalIds =
     profile.role === 'senior'
-      ? (await loadBackendVisibleInternalProfiles(signal)).map(
-          (candidate) => candidate.id
-        )
+      ? directoryProfiles.map((candidate) => candidate.id)
       : [];
   const adminInternalIds =
     profile.role === 'admin'
-      ? (await loadBackendProfiles(signal))
+      ? directoryProfiles
           .filter((candidate) => candidate.role === 'internal')
           .map((candidate) => candidate.id)
       : [];
@@ -1049,14 +1042,16 @@ export async function loadBackendUserData(
           signal,
         }
       ),
-      selectRowsByIds<NotebookRow>(
-        'notebook_documents',
-        'profile_id',
-        readableInternalIds,
-        {
-          signal,
-        }
-      ),
+      profile.role === 'internal'
+        ? selectRowsByIds<NotebookRow>(
+            'notebook_documents',
+            'profile_id',
+            readableInternalIds,
+            {
+              signal,
+            }
+          )
+        : Promise.resolve([]),
       loadBackendTrophyAwards(readableInternalIds, signal),
       profile.role === 'internal' || profile.role === 'senior'
         ? selectSupabaseRows<UserNotificationRow>('user_notifications', {
@@ -1096,10 +1091,21 @@ export async function loadBackendUserData(
 
   return {
     activityLog: activityRows.map(toActivityLogEntry),
+    directoryProfiles,
     evaluations: evaluationRows.map(toEvaluation),
     managedInternalIds,
     notebookDocuments: notebookRows.map(toNotebookDocument),
     profile,
+    seniorAssignments: assignmentRows.map(
+      (row): BackendSeniorAssignment => ({
+        createdAt: row.created_at,
+        internalProfileId: row.internal_profile_id,
+        seniorProfileId: row.senior_profile_id,
+        updatedAt: row.updated_at,
+        updatedByProfileId: row.updated_by_profile_id,
+        version: row.version,
+      })
+    ),
     savedInterventions: interventionRows.map(toSavedIntervention),
     trophyAwards: trophyAwardRows,
     userNotifications: userNotificationRows.map(toUserNotification),
@@ -1290,11 +1296,12 @@ export async function cancelBackendAdminNotificationMessage(
 
 export async function loadBackendBootstrapPayload(
   profileId: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  initialProfile?: BackendProfile
 ): Promise<BackendBootstrapPayload | null> {
   const [referenceData, userData] = await Promise.all([
     loadBackendReferenceData(signal),
-    loadBackendUserData(profileId, signal),
+    loadBackendUserData(profileId, signal, initialProfile),
   ]);
 
   if (!userData) {

@@ -71,7 +71,7 @@ test('les données Supabase historiques ne sont pas supprimées par ce lot', () 
 
 test('le bootstrap Admin doit être complet avant toute authentification', () => {
   const adminLoadStart = appContext.indexOf(
-    'const [profiles, assignments, payload] = await Promise.all(['
+    'const payload = await loadBackendBootstrapPayload(\n      backendProfile.id,'
   );
   const adminAuthentication = appContext.indexOf(
     'authenticateAdmin(backendProfile.id);',
@@ -83,9 +83,12 @@ test('le bootstrap Admin doit être complet avant toute authentification', () =>
 
   assert.ok(adminLoadStart >= 0, 'le chargement Admin doit être identifiable');
   assert.ok(adminAuthentication > adminLoadStart);
-  assert.match(adminBlock, /loadBackendProfiles\(\)/);
-  assert.match(adminBlock, /loadBackendSeniorAssignments\(\)/);
-  assert.match(adminBlock, /loadBackendBootstrapPayload\(backendProfile\.id\)/);
+  assert.match(adminBlock, /payload\.userData\.directoryProfiles/);
+  assert.match(adminBlock, /payload\.userData\.seniorAssignments/);
+  assert.match(
+    adminBlock,
+    /loadBackendBootstrapPayload\([\s\S]*backendProfile\.id[\s\S]*backendProfile/
+  );
   assert.doesNotMatch(
     adminBlock,
     /loadBackend(?:Profiles|SeniorAssignments|BootstrapPayload)[\s\S]*?\.catch\(/

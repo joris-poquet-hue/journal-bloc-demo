@@ -163,7 +163,9 @@ export type BackendReferenceData = {
 
 export type BackendUserData = {
   profile: BackendProfile;
+  directoryProfiles: BackendProfile[];
   managedInternalIds: string[];
+  seniorAssignments: BackendSeniorAssignment[];
   savedInterventions: BackendSavedIntervention[];
   evaluations: BackendInterventionEvaluation[];
   notebookDocuments: BackendNotebookDocument[];

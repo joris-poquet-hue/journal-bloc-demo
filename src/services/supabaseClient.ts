@@ -13,13 +13,25 @@ export type SupabaseAuthUser = {
 
 export type SupabaseLoginProfile = {
   authUserId: string;
+  avatarImageSrc: string | null;
   contactEmail: string | null;
+  createdAt: string;
   firstName: string;
   id: string;
+  institution: string | null;
+  institutionId: string | null;
+  isActive: boolean;
   lastName: string;
+  lastLoginAt: string | null;
+  loginCount: number;
   loginId: string;
   mustChangePassword: boolean;
+  promotion: string | null;
   role: 'internal' | 'senior' | 'admin';
+  semester: string | null;
+  updatedAt: string;
+  updatedByProfileId: string | null;
+  version: number;
 };
 
 export type SupabaseAuthSession = {

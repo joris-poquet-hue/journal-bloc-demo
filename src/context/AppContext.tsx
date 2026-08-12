@@ -91,9 +91,6 @@ import {
   isDurableBackendConfigured,
   loadBackendBootstrapPayload,
   loadBackendProfileByAuthUserId,
-  loadBackendProfiles,
-  loadBackendVisibleInternalProfiles,
-  loadBackendSeniorAssignments,
   loadBackendTrophyAwards,
   deleteBackendUserNotification,
   markAllBackendUserNotificationsRead,
@@ -119,6 +116,7 @@ import {
   startApplicationSessionActivityTracking,
   subscribeToBackendRealtime,
   updateSupabasePassword,
+  type SupabaseLoginProfile,
 } from '../services/supabaseClient';
 import type {
   BackendActivityLogEntry,
@@ -570,6 +568,33 @@ function toSeniorProfile(profile: BackendProfile): Senior {
     loginId: profile.loginId,
     managedInternalIds: [],
     mustChangePassword: profile.mustChangePassword,
+    updatedAt: profile.updatedAt,
+    updatedByProfileId: profile.updatedByProfileId,
+    version: profile.version,
+  };
+}
+
+function toBackendProfileFromLogin(
+  profile: SupabaseLoginProfile
+): BackendProfile {
+  return {
+    authUserId: profile.authUserId,
+    avatarImageSrc: profile.avatarImageSrc,
+    contactEmail: profile.contactEmail,
+    createdAt: profile.createdAt,
+    firstName: profile.firstName,
+    id: profile.id,
+    institution: profile.institution,
+    institutionId: profile.institutionId,
+    isActive: profile.isActive,
+    lastLoginAt: profile.lastLoginAt,
+    lastName: profile.lastName,
+    loginCount: profile.loginCount,
+    loginId: profile.loginId,
+    mustChangePassword: profile.mustChangePassword,
+    promotion: profile.promotion,
+    role: profile.role,
+    semester: profile.semester,
     updatedAt: profile.updatedAt,
     updatedByProfileId: profile.updatedByProfileId,
     version: profile.version,
@@ -1384,13 +1409,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     if (options.recordLogin) {
       await recordBackendProfileLogin();
-      const refreshedProfile = await loadBackendProfileByAuthUserId(
-        backendProfile.authUserId ?? ''
-      ).catch(() => null);
-
-      if (refreshedProfile) {
-        backendProfile = refreshedProfile;
-      }
+      backendProfile = {
+        ...backendProfile,
+        lastLoginAt: new Date().toISOString(),
+        loginCount: backendProfile.loginCount + 1,
+      };
     }
 
     const challengeReason =
@@ -1428,7 +1451,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const profile = toInternalProfile(backendProfile);
       setInternalProfiles((current) => mergeRecordsById(current, [profile]));
 
-      const payload = await loadBackendBootstrapPayload(backendProfile.id);
+      const payload = await loadBackendBootstrapPayload(
+        backendProfile.id,
+        undefined,
+        backendProfile
+      );
 
       if (!payload) {
         throw new Error('Aucune donnée Interne reçue de Supabase.');
@@ -1442,10 +1469,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     if (backendProfile.role === 'senior') {
       let senior = toSeniorProfile(backendProfile);
-      const [payload, visibleProfiles] = await Promise.all([
-        loadBackendBootstrapPayload(backendProfile.id),
-        loadBackendVisibleInternalProfiles(),
-      ]);
+      const payload = await loadBackendBootstrapPayload(
+        backendProfile.id,
+        undefined,
+        backendProfile
+      );
 
       if (!payload) {
         throw new Error('Aucune donnée Senior reçue de Supabase.');
@@ -1474,7 +1502,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setActivityLog(payload.userData.activityLog.map(toLocalActivityEntry));
       setUserNotifications(payload.userData.userNotifications);
 
-      const visibleInternals = visibleProfiles
+      const visibleInternals = payload.userData.directoryProfiles
         .filter((profile) => profile.role === 'internal')
         .map(toInternalProfile);
 
@@ -1485,11 +1513,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return 'authenticated' as const;
     }
 
-    const [profiles, assignments, payload] = await Promise.all([
-      loadBackendProfiles(),
-      loadBackendSeniorAssignments(),
-      loadBackendBootstrapPayload(backendProfile.id),
-    ]);
+    const payload = await loadBackendBootstrapPayload(
+      backendProfile.id,
+      undefined,
+      backendProfile
+    );
 
     if (
       !payload ||
@@ -1501,14 +1529,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
     }
 
-    const durableInternals = profiles
+    const durableInternals = payload.userData.directoryProfiles
       .filter((profile) => profile.role === 'internal')
       .map(toInternalProfile);
-    const durableSeniors = profiles
+    const durableSeniors = payload.userData.directoryProfiles
       .filter((profile) => profile.role === 'senior')
       .map((profile) => ({
         ...toSeniorProfile(profile),
-        managedInternalIds: assignments
+        managedInternalIds: payload.userData.seniorAssignments
           .filter(
             (assignment) => assignment.seniorProfileId === profile.id
           )
@@ -1616,10 +1644,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
         );
       } else if (sessionRole === 'senior') {
-        const [payload, visibleProfiles] = await Promise.all([
-          loadBackendBootstrapPayload(activeProfileId),
-          loadBackendVisibleInternalProfiles(),
-        ]);
+        const payload = await loadBackendBootstrapPayload(activeProfileId);
 
         if (!payload) {
           throw new Error('Aucune donnée Senior reçue de Supabase.');
@@ -1635,7 +1660,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         };
 
         setInternalProfiles(
-          visibleProfiles
+          payload.userData.directoryProfiles
             .filter((profile) => profile.role === 'internal')
             .map(toInternalProfile)
         );
@@ -1659,11 +1684,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setUserNotifications(payload.userData.userNotifications);
         setActivityLog(payload.userData.activityLog.map(toLocalActivityEntry));
       } else if (sessionRole === 'admin') {
-        const [profiles, assignments, payload] = await Promise.all([
-          loadBackendProfiles(),
-          loadBackendSeniorAssignments(),
-          loadBackendBootstrapPayload(activeProfileId),
-        ]);
+        const payload = await loadBackendBootstrapPayload(activeProfileId);
 
         if (!payload || payload.userData.profile.role !== 'admin') {
           throw new Error(
@@ -1676,16 +1697,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
 
         setInternalProfiles(
-          profiles
+          payload.userData.directoryProfiles
             .filter((profile) => profile.role === 'internal')
             .map(toInternalProfile)
         );
         setCustomSeniors(
-          profiles
+          payload.userData.directoryProfiles
             .filter((profile) => profile.role === 'senior')
             .map((profile) => ({
               ...toSeniorProfile(profile),
-              managedInternalIds: assignments
+              managedInternalIds: payload.userData.seniorAssignments
                 .filter(
                   (assignment) => assignment.seniorProfileId === profile.id
                 )
@@ -1802,7 +1823,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const { profile: loginProfile, session } =
+      const { profile: loginProfile } =
         await signInWithSupabaseLoginId(loginId, password);
 
       if (loginProfile.mustChangePassword) {
@@ -1825,15 +1846,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return { status: 'password-change-required' } as const;
       }
 
-      const backendProfile = await loadBackendProfileByAuthUserId(session.user.id);
-
-      if (!backendProfile) {
-        await signOutFromSupabase({ scope: 'current' });
-        return {
-          message: 'Ce compte n’est relié à aucun profil actif.',
-          status: 'error',
-        } as const;
-      }
+      const backendProfile = toBackendProfileFromLogin(loginProfile);
 
       const status = await activateBackendProfile(backendProfile, {
         recordLogin: true,

@@ -334,7 +334,7 @@ async function getProfileByLoginId(loginId) {
       login_id: `eq.${loginId}`,
       is_active: 'eq.true',
       select:
-        'id,auth_user_id,role,first_name,last_name,login_id,institution,institution_id,metadata,must_change_password,is_active,version,updated_at,updated_by_profile_id',
+        'id,auth_user_id,role,first_name,last_name,login_id,institution,institution_id,metadata,must_change_password,is_active,avatar_image_src,created_at,last_login_at,promotion,semester,version,updated_at,updated_by_profile_id',
     },
   });
 
@@ -348,7 +348,7 @@ async function getProfileByAuthUserId(authUserId) {
       is_active: 'eq.true',
       limit: '1',
       select:
-        'id,auth_user_id,role,first_name,last_name,login_id,institution,institution_id,metadata,must_change_password,is_active,version,updated_at,updated_by_profile_id',
+        'id,auth_user_id,role,first_name,last_name,login_id,institution,institution_id,metadata,must_change_password,is_active,avatar_image_src,created_at,last_login_at,promotion,semester,version,updated_at,updated_by_profile_id',
     },
   });
 
@@ -666,21 +666,36 @@ function getForwardedAuthHeaders(request) {
 }
 
 function toPublicProfile(profile) {
+  const rawLoginCount = profile.metadata?.loginCount;
+  const loginCount =
+    typeof rawLoginCount === 'number'
+      ? rawLoginCount
+      : typeof rawLoginCount === 'string' && /^\d+$/.test(rawLoginCount)
+        ? Number(rawLoginCount)
+        : 0;
+
   return {
     authUserId: profile.auth_user_id,
+    avatarImageSrc: profile.avatar_image_src ?? null,
     contactEmail:
       typeof profile.metadata?.contactEmail === 'string'
         ? profile.metadata.contactEmail
         : null,
+    createdAt: profile.created_at,
     firstName: profile.first_name,
     id: profile.id,
     institution: profile.institution ?? null,
     institutionId: profile.institution_id ?? null,
     isActive: profile.is_active !== false,
     lastName: profile.last_name,
+    lastLoginAt: profile.last_login_at ?? null,
+    loginCount:
+      Number.isSafeInteger(loginCount) && loginCount >= 0 ? loginCount : 0,
     loginId: profile.login_id,
     mustChangePassword: profile.must_change_password,
+    promotion: profile.promotion ?? null,
     role: profile.role,
+    semester: profile.semester ?? null,
     updatedAt: profile.updated_at,
     updatedByProfileId: profile.updated_by_profile_id ?? null,
     version: Number(profile.version ?? 1),

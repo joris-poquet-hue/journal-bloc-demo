@@ -14,6 +14,18 @@ const {
 
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'PATCH', 'DELETE']);
 const MAX_JSON_BODY_BYTES = 2 * 1024 * 1024;
+const PUSH_DISPATCH_RPC_PATHS = new Set([
+  'rpc/create_admin_notification_message',
+  'rpc/create_intervention_v3',
+  'rpc/publish_trophy_definition_draft',
+  'rpc/record_profile_login',
+  'rpc/save_intervention_evaluation_v2',
+  'rpc/update_admin_notification_message',
+]);
+
+function shouldDispatchPushNotifications(request, target) {
+  return request.method === 'POST' && PUSH_DISPATCH_RPC_PATHS.has(target.path);
+}
 
 function getProxyTarget(request) {
   const requestUrl = new URL(request.url, 'https://project1.invalid');
@@ -106,10 +118,9 @@ module.exports = async function handler(request, response) {
       }
     }
 
-    if (
-      upstreamResponse.ok &&
-      ['POST', 'PATCH', 'DELETE'].includes(request.method)
-    ) {
+    response.end(responseBody);
+
+    if (upstreamResponse.ok && shouldDispatchPushNotifications(request, target)) {
       await dispatchPendingPushNotifications().catch((error) => {
         console.warn(
           'Push notification dispatch deferred.',
@@ -117,8 +128,6 @@ module.exports = async function handler(request, response) {
         );
       });
     }
-
-    response.end(responseBody);
   } catch (error) {
     console.error('Protected backend proxy failed.', error);
     return sendJson(response, 502, {
