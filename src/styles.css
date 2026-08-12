@@ -11922,16 +11922,16 @@ html.monjdb-web-app .senior-evaluation-clinical-overview {
 }
 
 .admin-shortcut-grid--home {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
 
 .admin-shortcut-card--compact {
-  min-height: 112px;
-  grid-template-columns: 48px minmax(0, 1fr) 18px;
+  min-height: 88px;
+  grid-template-columns: 44px minmax(0, 1fr) 18px;
   gap: 12px;
-  padding: 18px 16px;
-  border-radius: 24px;
+  padding: 14px 16px;
+  border-radius: 22px;
   transition:
     transform 150ms ease,
     border-color 150ms ease,
@@ -11946,8 +11946,8 @@ html.monjdb-web-app .senior-evaluation-clinical-overview {
 }
 
 .admin-shortcut-card--compact .admin-shortcut-card__icon {
-  width: 48px;
-  height: 48px;
+  width: 44px;
+  height: 44px;
 }
 
 .admin-shortcut-card--compact .admin-shortcut-card__icon svg {
@@ -11958,6 +11958,7 @@ html.monjdb-web-app .senior-evaluation-clinical-overview {
 .admin-shortcut-card--compact .admin-shortcut-card__copy strong {
   font-size: 0.98rem;
   line-height: 1.24;
+  text-wrap: balance;
 }
 
 .admin-shortcut-card--compact > svg:last-child {
@@ -11967,7 +11968,7 @@ html.monjdb-web-app .senior-evaluation-clinical-overview {
 
 .admin-home-dashboard-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.28fr) minmax(380px, 0.72fr);
+  grid-template-columns: minmax(0, 1.65fr) minmax(300px, 0.8fr);
   align-items: stretch;
   gap: 18px;
 }
@@ -12040,6 +12041,25 @@ html.monjdb-web-app .senior-evaluation-clinical-overview {
 
 .admin-home-connections-card .section-card__content {
   gap: 12px;
+}
+
+.admin-home-connections-card .section-card__header {
+  align-items: flex-start;
+}
+
+.admin-home-connections-card .section-card__header h2 {
+  font-size: 1.46rem;
+  line-height: 1.08;
+}
+
+.admin-home-connections-card .section-card__header p {
+  font-size: 0.88rem;
+}
+
+.admin-home-connections-card .mini-button {
+  min-height: 38px;
+  padding-inline: 14px;
+  white-space: nowrap;
 }
 
 .admin-home-connections-card .admin-connections-list {
@@ -21445,7 +21465,7 @@ fieldset.clinical-context-field {
 }
 
 html.monjdb-web-app .admin-shortcut-grid--home {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 @media (max-width: 1100px) {

@@ -8369,16 +8369,17 @@ export function AdminScreen() {
 
           <SectionCard
           className="admin-dashboard-card admin-home-connections-card"
+          description="Dernières actions utiles"
           headerAction={
             <button
               className="mini-button mini-button--secondary"
               onClick={() => setView('connections')}
               type="button"
             >
-              Voir toutes les activités
+              Tout voir
             </button>
           }
-          title="Dernières activités utilisateurs"
+          title="Activité récente"
         >
           {recentUserConnections.length ? (
             <div className="admin-connections-list">
