@@ -1,6 +1,6 @@
-# Contexte de Project1 — Version 1.4
+# Contexte de Project1 — Version 1.5
 
-> **STATUT : ACTIF — version 1.4 validée le 29 juillet 2026**
+> **STATUT : ACTIF — version 1.5 validée le 1er septembre 2026**
 >
 > Ce document constitue la source de référence validée pour les règles produit,
 > métier, fonctionnelles, techniques et de sécurité de Project1. Il doit être lu
@@ -243,12 +243,37 @@ et non uniquement par l'affichage ou le masquage de boutons.
 
 ### 4.8 Cycle de vie du compte
 
-- Un compte ayant produit des données n'est jamais supprimé physiquement.
-- L'administrateur le désactive, tandis que ses interventions, évaluations et
-  traces historiques restent conservées.
-- Aucune donnée d'un compte désactivé n'est supprimée automatiquement.
-- Toute future politique de durée de conservation ou d'anonymisation doit être
-  définie séparément et validée explicitement avant son application.
+- La désactivation reste réversible et ne supprime aucune donnée. Elle révoque
+  immédiatement toutes les sessions du compte et constitue un préalable
+  obligatoire à toute suppression définitive.
+- Seul un Administrateur actif peut demander la suppression définitive d'un
+  profil déjà désactivé. Il ne peut jamais supprimer son propre compte connecté.
+- L'interface exige une confirmation destructive explicite avec l'identifiant de
+  connexion exact du profil. La condition de désactivation et l'autorisation
+  Administrateur sont également contrôlées par le serveur et la base de données.
+- La suppression définitive efface l'identité Supabase Auth, le profil et toutes
+  les données personnelles et métier directement rattachées à ce profil. Elle
+  efface aussi les données partagées auxquelles le profil participe, notamment
+  les interventions, demandes d'évaluation et évaluations concernées, même si
+  elles apparaissaient auparavant dans l'historique d'autres utilisateurs.
+- Les sessions, abonnements push, bloc-notes, affectations, trophées obtenus,
+  notifications, messages ciblant exclusivement le profil et traces d'audit
+  rattachées sont également supprimés.
+- Les compteurs pseudonymisés de limitation des tentatives d'authentification
+  constituent une télémétrie technique anti-abus, sans identifiant de profil ni
+  login ou adresse IP en clair. Ils deviennent éligibles à la purge une heure
+  après leur dernière mise à jour et sont supprimés au passage horaire suivant,
+  soit une présence physique inférieure à deux heures hors blocage encore actif.
+- Les référentiels partagés qui ne constituent pas les données du compte, comme
+  les établissements, le catalogue commun, les formules et les définitions de
+  trophées, restent conservés ; toute référence d'auteur ou de modification vers
+  le profil supprimé est retirée.
+- L'effacement applicatif est transactionnel. La coordination avec Supabase Auth
+  utilise une opération récupérable en plusieurs phases afin qu'un échec
+  intermédiaire laisse uniquement un profil désactivé pouvant être repris, et
+  jamais un compte réactivé ou un succès partiel présenté comme définitif.
+- Après confirmation, l'action est irréversible depuis l'interface et le profil
+  ne peut plus être réactivé.
 
 ## 5. Supabase, connexion réseau, stockage et synchronisation
 
@@ -402,7 +427,9 @@ Le parcours reste :
   attente`. L'historique conserve son architecture de consultation : une
   intervention en attente y reste verrouillée et non ouvrable.
 - Dès qu'une évaluation existe, l'intervention ne peut plus être modifiée ou
-  supprimée par personne, y compris un administrateur.
+  supprimée individuellement par personne, y compris un administrateur. La seule
+  exception est l'effacement global déclenché par la suppression définitive d'un
+  profil participant, conformément au cycle de vie du compte.
 - La suppression d'une intervention en attente retire également la demande
   d'évaluation correspondante.
 
@@ -444,8 +471,9 @@ Le parcours reste :
 - La catégorie de difficulté est obligatoire.
 - Le commentaire du senior est facultatif.
 - La validation rend l'évaluation définitive.
-- Une évaluation validée ne peut plus être modifiée ou supprimée par l'interne,
-  le senior ou l'administrateur.
+- Une évaluation validée ne peut plus être modifiée ou supprimée individuellement
+  par l'interne, le senior ou l'administrateur. Elle est toutefois effacée avec
+  l'intervention lors de la suppression définitive d'un profil participant.
 - L'interne voit immédiatement les notes, le commentaire éventuel et le score sur
   le web et l'application.
 
@@ -546,7 +574,9 @@ Difficulté :
 - Un trophée désactivé disparaît des collections et des compteurs, sans supprimer
   sa définition.
 - Un trophée déjà activé ne peut jamais être supprimé physiquement. Il peut
-  seulement être désactivé.
+  seulement être désactivé. Cette règle concerne la définition partagée du
+  trophée ; les attributions d'un profil sont effacées avec sa suppression
+  définitive.
 - Seul un brouillon jamais activé peut être supprimé définitivement.
 - Modifier une règle ou un seuil recalcule rétroactivement les trophées de tous
   les internes.
@@ -610,7 +640,8 @@ Difficulté :
 - Un message Administrateur conservé après lecture reste visible avec un style
   atténué jusqu'à sa suppression manuelle.
 - La suppression est logique : le message disparaît pour l'utilisateur, tandis
-  qu'une trace minimale reste conservée pour l'audit.
+  qu'une trace minimale reste conservée pour l'audit, sauf si le profil concerné
+  fait ensuite l'objet d'une suppression définitive.
 - « Tout marquer comme lu » applique à chaque message sa propre règle de cycle de
   vie.
 
@@ -697,6 +728,9 @@ Difficulté :
   attente, validation d'une évaluation, changement d'établissement, désactivation
   de compte, publication de formule et modification de trophée.
 - Le journal est accessible uniquement aux administrateurs.
+- La suppression définitive d'un profil efface les traces d'audit rattachées à
+  ce profil, y compris celles qui décrivent son activité ou le prennent pour
+  cible. Aucun libellé nominatif de remplacement n'est créé.
 
 ### 12.2 Sauvegardes
 
@@ -713,6 +747,10 @@ Difficulté :
 - Une sauvegarde supplémentaire est créée avant chaque migration sensible.
 - Avant toute migration pouvant modifier ou supprimer des données, il faut une
   sauvegarde, une simulation sans écriture et une validation explicite.
+- Une suppression définitive retire immédiatement les données de la base active
+  et des sauvegardes créées ensuite. Les archives chiffrées déjà constituées
+  restent soumises à leur rétention maximale de trente jours et ne peuvent être
+  utilisées comme moyen de réactiver sélectivement un profil supprimé.
 
 ### 12.3 Production
 

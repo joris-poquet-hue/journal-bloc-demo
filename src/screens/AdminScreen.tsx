@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  CircleAlert,
   Clock3,
   FolderOpen,
   Info,
@@ -16,6 +17,7 @@ import {
   RotateCcw,
   Search,
   Star,
+  Trash2,
   Trophy,
   Users,
   X,
@@ -23,11 +25,13 @@ import {
 import {
   FormEvent,
   Fragment,
+  KeyboardEvent,
   useEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 
 import {
   ApproachIcon,
@@ -117,7 +121,10 @@ import {
 import { downloadAnalyticsExcel } from '../utils/analyticsExport';
 import { downloadInterventionsExcel } from '../utils/export';
 import { loadBackendDisabledProfiles } from '../services/backendRepository';
-import { reactivateAdminAccount } from '../services/adminAccountService';
+import {
+  deleteAdminAccountPermanently,
+  reactivateAdminAccount,
+} from '../services/adminAccountService';
 import type { BackendProfile } from '../shared/backendTypes';
 import {
   cleanupTrophyImages,
@@ -170,6 +177,7 @@ type AdminActivityAnalyticsBucket = {
 };
 type AdminRelanceProfile = {
   id: string;
+  profileId: string;
   name: string;
   roleLabel: string;
   contactEmail: string | null;
@@ -770,7 +778,10 @@ function formatAdminActivityBarTooltip(
 }
 
 function isAnalyticsTrackingEntry(entry: ActivityLogEntry) {
-  return Boolean(entry.analyticsEvent);
+  return (
+    entry.analyticsEvent?.kind === 'intervention_form' ||
+    entry.analyticsEvent?.kind === 'senior_evaluation'
+  );
 }
 
 function formatWorkflowDurationLabel(valueInMs: number | null) {
@@ -883,11 +894,17 @@ function buildAllTimeAdminCycleSummary(
     (entry) => entry.actorRole === 'internal' || entry.actorRole === 'senior'
   );
   const completedInterventionFormEvents = userActivityEntries
-    .filter((entry) => entry.analyticsEvent?.kind === 'intervention_form')
-    .map((entry) => entry.analyticsEvent!);
+    .flatMap((entry) =>
+      entry.analyticsEvent?.kind === 'intervention_form'
+        ? [entry.analyticsEvent]
+        : []
+    );
   const completedSeniorEvaluationEvents = userActivityEntries
-    .filter((entry) => entry.analyticsEvent?.kind === 'senior_evaluation')
-    .map((entry) => entry.analyticsEvent!);
+    .flatMap((entry) =>
+      entry.analyticsEvent?.kind === 'senior_evaluation'
+        ? [entry.analyticsEvent]
+        : []
+    );
   const evaluatedInterventions = interventions.filter((intervention) =>
     hasCompleteAdminEvaluation(adminEvaluations[intervention.id])
   );
@@ -1258,8 +1275,21 @@ export function AdminScreen() {
     useState<FeedbackState>(null);
   const [reactivatingProfileId, setReactivatingProfileId] =
     useState<string | null>(null);
+  const [permanentDeletionTarget, setPermanentDeletionTarget] =
+    useState<BackendProfile | null>(null);
+  const [permanentDeletionConfirmation, setPermanentDeletionConfirmation] =
+    useState('');
+  const [permanentDeletionError, setPermanentDeletionError] =
+    useState<string | null>(null);
+  const [permanentlyDeletingProfileId, setPermanentlyDeletingProfileId] =
+    useState<string | null>(null);
   const [isLoadingDisabledProfiles, setIsLoadingDisabledProfiles] =
     useState(false);
+  const disabledProfilesFeedbackRef = useRef<HTMLDivElement | null>(null);
+  const permanentDeletionIsolationCleanupRef = useRef<(() => void) | null>(
+    null
+  );
+  const permanentDeletionTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [revealedAccessKey, setRevealedAccessKey] = useState<{
     accessKey: string;
     userLabel: string;
@@ -1309,6 +1339,52 @@ export function AdminScreen() {
 
     return () => controller.abort();
   }, [customSeniors.length, internalProfiles.length, isAdmin, view]);
+
+  useEffect(() => {
+    if (!permanentDeletionTarget || typeof document === 'undefined') {
+      return;
+    }
+
+    const deletionTrigger = permanentDeletionTriggerRef.current;
+    const pageContainer =
+      deletionTrigger?.closest<HTMLElement>('.app-shell') ??
+      deletionTrigger?.closest<HTMLElement>('.admin-workspace') ??
+      null;
+    const previousBodyOverflow = document.body.style.overflow;
+    const previousAriaHidden = pageContainer?.getAttribute('aria-hidden') ?? null;
+    const previousInert = pageContainer?.inert ?? false;
+
+    if (pageContainer) {
+      pageContainer.inert = true;
+      pageContainer.setAttribute('aria-hidden', 'true');
+    }
+    document.body.style.overflow = 'hidden';
+
+    let hasRestoredPage = false;
+    const restorePage = () => {
+      if (hasRestoredPage) {
+        return;
+      }
+      hasRestoredPage = true;
+      document.body.style.overflow = previousBodyOverflow;
+
+      if (pageContainer) {
+        pageContainer.inert = previousInert;
+        if (previousAriaHidden === null) {
+          pageContainer.removeAttribute('aria-hidden');
+        } else {
+          pageContainer.setAttribute('aria-hidden', previousAriaHidden);
+        }
+      }
+
+      if (permanentDeletionIsolationCleanupRef.current === restorePage) {
+        permanentDeletionIsolationCleanupRef.current = null;
+      }
+    };
+    permanentDeletionIsolationCleanupRef.current = restorePage;
+
+    return restorePage;
+  }, [permanentDeletionTarget]);
   const [selectedEvaluationInterventionId, setSelectedEvaluationInterventionId] =
     useState<string | null>(null);
   const [evaluationFeedback, setEvaluationFeedback] =
@@ -1636,19 +1712,19 @@ export function AdminScreen() {
       (entry) => entry.createdAt >= analyticsPeriodStartIso
     );
     const completedInterventionFormEvents = activityEntries
-      .filter(
-        (entry) =>
-          entry.createdAt >= analyticsPeriodStartIso &&
-          entry.analyticsEvent?.kind === 'intervention_form'
-      )
-      .map((entry) => entry.analyticsEvent!);
+      .flatMap((entry) =>
+        entry.createdAt >= analyticsPeriodStartIso &&
+        entry.analyticsEvent?.kind === 'intervention_form'
+          ? [entry.analyticsEvent]
+          : []
+      );
     const completedSeniorEvaluationEvents = activityEntries
-      .filter(
-        (entry) =>
-          entry.createdAt >= analyticsPeriodStartIso &&
-          entry.analyticsEvent?.kind === 'senior_evaluation'
-      )
-      .map((entry) => entry.analyticsEvent!);
+      .flatMap((entry) =>
+        entry.createdAt >= analyticsPeriodStartIso &&
+        entry.analyticsEvent?.kind === 'senior_evaluation'
+          ? [entry.analyticsEvent]
+          : []
+      );
     const recentRecordedInterventions = sortedInterventions.filter(
       (intervention) => intervention.savedAt >= analyticsPeriodStartIso
     );
@@ -1698,6 +1774,7 @@ export function AdminScreen() {
       ...internalProfiles.map<AdminRelanceProfile>((profile) => ({
         contactEmail: profile.contactEmail ?? null,
         id: `internal:${profile.id}`,
+        profileId: profile.id,
         inactiveDays: getDaysSinceTimestamp(profile.lastLoginAt, now),
         lastLoginAt: profile.lastLoginAt,
         name: formatDisplayName(profile.firstName, profile.lastName),
@@ -1708,6 +1785,7 @@ export function AdminScreen() {
         .map<AdminRelanceProfile>((senior) => ({
           contactEmail: senior.contactEmail ?? null,
           id: `senior:${senior.id}`,
+          profileId: senior.id,
           inactiveDays: getDaysSinceTimestamp(senior.lastLoginAt ?? null, now),
           lastLoginAt: senior.lastLoginAt ?? null,
           name: formatSeniorDisplayName(senior),
@@ -2687,7 +2765,11 @@ export function AdminScreen() {
     recordActivity(
       'Consultation des statistiques d’un interne',
       'Interne',
-      formatDisplayName(profile.firstName, profile.lastName)
+      formatDisplayName(profile.firstName, profile.lastName),
+      {
+        kind: 'profile_target',
+        targetProfileId: profile.id,
+      }
     );
   };
 
@@ -3829,7 +3911,15 @@ export function AdminScreen() {
     window.location.assign(
       `mailto:${profile.contactEmail}?subject=${subject}&body=${body}`
     );
-    recordActivity('Préparation d’un rappel e-mail', 'Relance profil', profile.name);
+    recordActivity(
+      'Préparation d’un rappel e-mail',
+      'Relance profil',
+      profile.name,
+      {
+        kind: 'profile_target',
+        targetProfileId: profile.profileId,
+      }
+    );
     setAnalyticsFeedback({
       kind: 'success',
       message: `Le rappel e-mail pour ${profile.name} a été préparé.`,
@@ -3912,6 +4002,146 @@ export function AdminScreen() {
       });
     } finally {
       setReactivatingProfileId(null);
+    }
+  };
+
+  const openPermanentDeletionDialog = (
+    profile: BackendProfile,
+    trigger: HTMLButtonElement
+  ) => {
+    if (profile.isActive) {
+      setDisabledProfilesFeedback({
+        kind: 'error',
+        message: 'Un profil doit être désactivé avant sa suppression définitive.',
+      });
+      return;
+    }
+
+    permanentDeletionTriggerRef.current = trigger;
+    setDisabledProfilesFeedback(null);
+    setPermanentDeletionConfirmation('');
+    setPermanentDeletionError(null);
+    setPermanentDeletionTarget(profile);
+  };
+
+  const closePermanentDeletionDialog = () => {
+    if (permanentlyDeletingProfileId) {
+      return;
+    }
+
+    permanentDeletionIsolationCleanupRef.current?.();
+    setPermanentDeletionTarget(null);
+    setPermanentDeletionConfirmation('');
+    setPermanentDeletionError(null);
+    window.requestAnimationFrame(() => permanentDeletionTriggerRef.current?.focus());
+  };
+
+  const handlePermanentDeletionDialogKeyDown = (
+    event: KeyboardEvent<HTMLDivElement>
+  ) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closePermanentDeletionDialog();
+      return;
+    }
+
+    if (event.key !== 'Tab') {
+      return;
+    }
+
+    const focusableElements = Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled])'
+      )
+    );
+    const firstElement = focusableElements[0];
+    const lastElement = focusableElements[focusableElements.length - 1];
+
+    if (!firstElement || !lastElement) {
+      event.preventDefault();
+      return;
+    }
+
+    if (event.shiftKey && document.activeElement === firstElement) {
+      event.preventDefault();
+      lastElement.focus();
+    } else if (!event.shiftKey && document.activeElement === lastElement) {
+      event.preventDefault();
+      firstElement.focus();
+    }
+  };
+
+  const handleDeleteProfilePermanently = async (
+    event: FormEvent<HTMLFormElement>
+  ) => {
+    event.preventDefault();
+
+    if (!permanentDeletionTarget || permanentlyDeletingProfileId) {
+      return;
+    }
+
+    const confirmationLogin = permanentDeletionConfirmation.trim();
+    const profile = permanentDeletionTarget;
+    const profileLabel = formatDisplayName(profile.firstName, profile.lastName);
+
+    if (profile.isActive) {
+      setPermanentDeletionError(
+        'Un profil doit être désactivé avant sa suppression définitive.'
+      );
+      return;
+    }
+
+    if (confirmationLogin !== profile.loginId) {
+      setPermanentDeletionError(
+        'L’identifiant saisi ne correspond pas exactement à celui du profil.'
+      );
+      return;
+    }
+
+    setPermanentDeletionError(null);
+    setPermanentlyDeletingProfileId(profile.id);
+
+    try {
+      const result = await deleteAdminAccountPermanently(
+        profile.id,
+        profile.version,
+        confirmationLogin
+      );
+
+      setDisabledProfiles((current) =>
+        current.filter(
+          (candidate) =>
+            candidate.id !== profile.id && candidate.id !== result.deletedProfileId
+        )
+      );
+      permanentDeletionIsolationCleanupRef.current?.();
+      setPermanentDeletionTarget(null);
+      setPermanentDeletionConfirmation('');
+      setDisabledProfilesFeedback({
+        kind: 'success',
+        message: `Le profil de ${profileLabel} et toutes ses données associées ont été supprimés définitivement.`,
+      });
+      permanentDeletionTriggerRef.current = null;
+      window.requestAnimationFrame(() =>
+        disabledProfilesFeedbackRef.current?.focus()
+      );
+
+      try {
+        await refreshBackendData();
+      } catch {
+        setDisabledProfilesFeedback({
+          kind: 'error',
+          message: `Le profil de ${profileLabel} a bien été supprimé définitivement, mais les données affichées n’ont pas pu être actualisées. Rechargez la page.`,
+        });
+      }
+    } catch (error) {
+      setPermanentDeletionError(
+        error instanceof Error
+          ? error.message
+          : 'La suppression définitive du profil a échoué.'
+      );
+    } finally {
+      setPermanentlyDeletingProfileId(null);
     }
   };
 
@@ -6816,10 +7046,17 @@ export function AdminScreen() {
         {isAdmin ? (
           <SectionCard
             className="admin-dashboard-card"
-            description="Les comptes et leur identité de connexion sont conservés. Une réactivation exige une nouvelle connexion sur chaque appareil."
+            description="La désactivation conserve le compte et permet sa réactivation. La suppression définitive efface le profil, son identité de connexion et ses données associées."
             title="Comptes désactivés"
           >
-            <FeedbackMessage feedback={disabledProfilesFeedback} />
+            <div
+              aria-atomic="true"
+              aria-live="polite"
+              ref={disabledProfilesFeedbackRef}
+              tabIndex={-1}
+            >
+              <FeedbackMessage feedback={disabledProfilesFeedback} />
+            </div>
             {isLoadingDisabledProfiles ? (
               <div className="validation-box" role="status">
                 <strong>Chargement de l’historique…</strong>
@@ -6869,7 +7106,10 @@ export function AdminScreen() {
                       {profile.authUserId ? (
                         <button
                           className="mini-button mini-button--secondary"
-                          disabled={reactivatingProfileId === profile.id}
+                          disabled={
+                            reactivatingProfileId === profile.id ||
+                            permanentlyDeletingProfileId === profile.id
+                          }
                           onClick={() => void handleReactivateProfile(profile)}
                           type="button"
                         >
@@ -6883,6 +7123,20 @@ export function AdminScreen() {
                           Identité Auth absente
                         </span>
                       )}
+                      <button
+                        className="mini-button mini-button--danger"
+                        disabled={
+                          reactivatingProfileId === profile.id ||
+                          permanentlyDeletingProfileId === profile.id
+                        }
+                        onClick={(event) =>
+                          openPermanentDeletionDialog(profile, event.currentTarget)
+                        }
+                        type="button"
+                      >
+                        <Trash2 aria-hidden="true" size={16} />
+                        Supprimer définitivement
+                      </button>
                     </div>
                   </article>
                 ))}
@@ -6890,11 +7144,146 @@ export function AdminScreen() {
             ) : (
               <div className="validation-box">
                 <strong>Aucun compte désactivé</strong>
-                <span>Les comptes désactivés apparaîtront ici sans être supprimés.</span>
+                <span>
+                  Les comptes désactivés apparaîtront ici pour être réactivés ou
+                  supprimés définitivement.
+                </span>
               </div>
             )}
           </SectionCard>
         ) : null}
+
+        {permanentDeletionTarget && typeof document !== 'undefined'
+          ? createPortal(
+              <div
+                className="admin-notification-confirmation-backdrop admin-profile-deletion-backdrop"
+                onKeyDown={handlePermanentDeletionDialogKeyDown}
+                onMouseDown={(event) => {
+                  if (event.target === event.currentTarget) {
+                    closePermanentDeletionDialog();
+                  }
+                }}
+              >
+            <form
+              aria-describedby="admin-profile-deletion-warning admin-profile-deletion-instructions"
+              aria-labelledby="admin-profile-deletion-title"
+              aria-modal="true"
+              className="admin-notification-confirmation admin-profile-deletion-confirmation"
+              onSubmit={(event) => void handleDeleteProfilePermanently(event)}
+              role="alertdialog"
+            >
+              <header>
+                <span className="admin-notification-confirmation__icon admin-profile-deletion-confirmation__icon">
+                  <Trash2 aria-hidden="true" />
+                </span>
+                <div>
+                  <span>Action irréversible</span>
+                  <h3 id="admin-profile-deletion-title">
+                    Supprimer définitivement ce profil ?
+                  </h3>
+                </div>
+                <button
+                  aria-label="Fermer la confirmation de suppression"
+                  disabled={Boolean(permanentlyDeletingProfileId)}
+                  onClick={closePermanentDeletionDialog}
+                  type="button"
+                >
+                  <X aria-hidden="true" />
+                </button>
+              </header>
+
+              <div className="admin-notification-confirmation__body">
+                <article className="admin-profile-deletion-confirmation__profile">
+                  <span>Profil désactivé</span>
+                  <strong>
+                    {formatDisplayName(
+                      permanentDeletionTarget.firstName,
+                      permanentDeletionTarget.lastName
+                    )}
+                  </strong>
+                  <small>
+                    {permanentDeletionTarget.role === 'internal'
+                      ? 'Interne'
+                      : permanentDeletionTarget.role === 'senior'
+                        ? 'Senior'
+                        : 'Administrateur'}
+                    {' · '}
+                    {permanentDeletionTarget.institution ?? 'Établissement non renseigné'}
+                  </small>
+                </article>
+
+                <p
+                  className="admin-notification-confirmation__warning admin-profile-deletion-confirmation__warning"
+                  id="admin-profile-deletion-warning"
+                >
+                  <CircleAlert aria-hidden="true" />
+                  <span>
+                    Le profil, son identité de connexion et toutes ses données
+                    associées seront supprimés, y compris les interventions et
+                    évaluations partagées avec d’autres profils. Cette action est
+                    définitive et aucune réactivation ne sera possible.
+                  </span>
+                </p>
+
+                <label className="admin-profile-deletion-confirmation__field">
+                  <span>Identifiant de connexion à confirmer</span>
+                  <code>{permanentDeletionTarget.loginId}</code>
+                  <input
+                    aria-describedby="admin-profile-deletion-instructions"
+                    aria-invalid={Boolean(permanentDeletionError)}
+                    autoComplete="off"
+                    autoFocus
+                    disabled={Boolean(permanentlyDeletingProfileId)}
+                    onChange={(event) => {
+                      setPermanentDeletionConfirmation(event.target.value);
+                      setPermanentDeletionError(null);
+                    }}
+                    spellCheck={false}
+                    type="text"
+                    value={permanentDeletionConfirmation}
+                  />
+                  <small id="admin-profile-deletion-instructions">
+                    Saisissez exactement l’identifiant affiché pour déverrouiller
+                    la suppression définitive.
+                  </small>
+                </label>
+
+                {permanentDeletionError ? (
+                  <p className="auth-error" role="alert">
+                    {permanentDeletionError}
+                  </p>
+                ) : null}
+              </div>
+
+              <footer>
+                <button
+                  className="admin-secondary-button"
+                  disabled={Boolean(permanentlyDeletingProfileId)}
+                  onClick={closePermanentDeletionDialog}
+                  type="button"
+                >
+                  Annuler
+                </button>
+                <button
+                  className="admin-profile-deletion-confirmation__submit"
+                  disabled={
+                    Boolean(permanentlyDeletingProfileId) ||
+                    permanentDeletionConfirmation.trim() !==
+                      permanentDeletionTarget.loginId
+                  }
+                  type="submit"
+                >
+                  <Trash2 aria-hidden="true" />
+                  {permanentlyDeletingProfileId
+                    ? 'Suppression en cours…'
+                    : 'Supprimer définitivement'}
+                </button>
+              </footer>
+                </form>
+              </div>,
+              document.body
+            )
+          : null}
       </AdminPageShell>
     );
   }

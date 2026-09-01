@@ -562,20 +562,32 @@ function getMeasurementType(entry: ActivityLogEntry) {
   return '';
 }
 
+function getMeasurementAnalyticsEvent(entry: ActivityLogEntry) {
+  const event = entry.analyticsEvent;
+
+  return event?.kind === 'intervention_form' || event?.kind === 'senior_evaluation'
+    ? event
+    : null;
+}
+
 function buildUsageRows(activities: ActivityLogEntry[]): XlsxCellValue[][] {
-  return activities.map((entry) => [
-    dateTimeCell(entry.createdAt),
-    entry.actorId ?? '',
-    entry.actorRole === 'internal' ? 'Interne' : 'Senior',
-    entry.action,
-    entry.targetType,
-    entry.targetLabel,
-    getMeasurementType(entry),
-    entry.analyticsEvent ? decimalCell(entry.analyticsEvent.durationMs / 1_000) : null,
-    entry.analyticsEvent?.clickCount ?? null,
-    dateTimeCell(entry.analyticsEvent?.completedAt),
-    entry.analyticsEvent ? 'Oui' : '',
-  ]);
+  return activities.map((entry) => {
+    const measurement = getMeasurementAnalyticsEvent(entry);
+
+    return [
+      dateTimeCell(entry.createdAt),
+      entry.actorId ?? '',
+      entry.actorRole === 'internal' ? 'Interne' : 'Senior',
+      entry.action,
+      entry.targetType,
+      entry.targetLabel,
+      getMeasurementType(entry),
+      measurement ? decimalCell(measurement.durationMs / 1_000) : null,
+      measurement?.clickCount ?? null,
+      dateTimeCell(measurement?.completedAt),
+      measurement ? 'Oui' : '',
+    ];
+  });
 }
 
 function buildUsageWorksheet(activities: ActivityLogEntry[]): XlsxWorksheet {
@@ -735,18 +747,22 @@ export function createAnalyticsUsageCsvContent(input: AnalyticsExportInput) {
     'date_heure_fin',
     'formulaire_termine',
   ];
-  const rows = periodData.activities.map((entry) => [
-    entry.createdAt,
-    entry.actorId ?? '',
-    entry.actorRole === 'internal' ? 'Interne' : 'Senior',
-    entry.action,
-    entry.targetType,
-    entry.targetLabel,
-    getMeasurementType(entry),
-    entry.analyticsEvent ? `${entry.analyticsEvent.durationMs / 1_000}` : '',
-    entry.analyticsEvent ? `${entry.analyticsEvent.clickCount}` : '',
-    entry.analyticsEvent?.completedAt ?? '',
-    entry.analyticsEvent ? 'Oui' : '',
-  ]);
+  const rows = periodData.activities.map((entry) => {
+    const measurement = getMeasurementAnalyticsEvent(entry);
+
+    return [
+      entry.createdAt,
+      entry.actorId ?? '',
+      entry.actorRole === 'internal' ? 'Interne' : 'Senior',
+      entry.action,
+      entry.targetType,
+      entry.targetLabel,
+      getMeasurementType(entry),
+      measurement ? `${measurement.durationMs / 1_000}` : '',
+      measurement ? `${measurement.clickCount}` : '',
+      measurement?.completedAt ?? '',
+      measurement ? 'Oui' : '',
+    ];
+  });
   return buildCsvContent(headers, rows);
 }

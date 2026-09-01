@@ -1501,10 +1501,15 @@ export async function saveBackendSurgicalDefinition(
   signal?: AbortSignal
 ) {
   const now = new Date().toISOString();
+  const {
+    ownerProfileId: _discardedOwnerProfileId,
+    updatedByProfileId: _discardedUpdatedByProfileId,
+    ...cleanDefinition
+  } = definition;
   const body = {
     archived_at: definition.archivedAt ?? null,
     definition: {
-      ...definition,
+      ...cleanDefinition,
       updatedAt: now,
     },
     id: definition.id,
@@ -1556,6 +1561,8 @@ export async function saveBackendTrophyDefinition(
     pendingDraft: _discardedPendingDraft,
     everActivated: _discardedEverActivated,
     activatedAt: _discardedActivatedAt,
+    createdByProfileId: _discardedCreatedByProfileId,
+    updatedByProfileId: _discardedUpdatedByProfileId,
     ...cleanDefinition
   } = trophy;
   const draftResult = await supabaseRestRequest<{
@@ -1718,14 +1725,25 @@ export async function createBackendActivityLogEntry(
     return null;
   }
 
+  const profileTargetEvent =
+    entry.analyticsEvent?.kind === 'profile_target'
+      ? entry.analyticsEvent
+      : null;
   const result = await supabaseRestRequest<ActivityLogRow | ActivityLogRow[]>(
-    'rpc/record_user_activity_event',
+    profileTargetEvent
+      ? 'rpc/record_profile_target_activity_event'
+      : 'rpc/record_user_activity_event',
     {
-      body: {
-        p_analytics_event: entry.analyticsEvent ?? null,
-        p_event_kind: eventKind,
-        p_target_label: entry.targetLabel,
-      },
+      body: profileTargetEvent
+        ? {
+            p_event_kind: eventKind,
+            p_target_profile_id: profileTargetEvent.targetProfileId,
+          }
+        : {
+            p_analytics_event: entry.analyticsEvent ?? null,
+            p_event_kind: eventKind,
+            p_target_label: entry.targetLabel,
+          },
       method: 'POST',
       signal,
     }

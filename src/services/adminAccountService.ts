@@ -161,3 +161,52 @@ export function reactivateAdminAccount(
 ) {
   return changeAdminAccountLifecycle(profileId, expectedVersion, 'reactivate');
 }
+
+export async function deleteAdminAccountPermanently(
+  profileId: string,
+  expectedVersion: number,
+  confirmationLogin: string
+) {
+  if (!getSupabaseSession()) {
+    throw new Error('La session administrateur a expiré. Reconnectez-vous.');
+  }
+
+  const response = await fetch('/api/admin-users', {
+    body: JSON.stringify({
+      action: 'delete_permanently',
+      confirmationLogin,
+      expectedVersion,
+      profileId,
+    }),
+    cache: 'no-store',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    method: 'POST',
+  });
+  const result = (await response.json().catch(() => null)) as
+    | {
+        deletedProfileId?: string;
+        error?: string;
+        success?: boolean;
+      }
+    | null;
+
+  if (
+    !response.ok ||
+    result?.success !== true ||
+    result.deletedProfileId !== profileId
+  ) {
+    throw new SupabaseRestError(
+      response.status,
+      result?.error ??
+        (response.ok && result?.success === true
+          ? 'La confirmation de suppression reçue est incohérente.'
+          : 'Impossible de supprimer définitivement ce compte.'),
+      result
+    );
+  }
+
+  return {
+    deletedProfileId: result.deletedProfileId,
+  };
+}

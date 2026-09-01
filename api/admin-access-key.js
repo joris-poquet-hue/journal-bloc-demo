@@ -113,8 +113,14 @@ module.exports = async function handler(request, response) {
           actor_label:
             `${adminIdentity.profile.first_name} ${adminIdentity.profile.last_name}`.trim(),
           actor_role: adminIdentity.profile.role,
+          analytics_event: {
+            kind: 'account_lifecycle',
+            targetAuthUserId: profile.auth_user_id,
+            targetProfileId: profile.id,
+          },
           created_by_profile_id: adminIdentity.profile.id,
           profile_id: adminIdentity.profile.id,
+          target_profile_id: profile.id,
           target_label: `${profile.first_name} ${profile.last_name}`.trim(),
           target_type: 'Compte utilisateur',
         },

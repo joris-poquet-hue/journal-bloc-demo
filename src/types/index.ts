@@ -473,13 +473,22 @@ export type AdminInterventionEvaluation = {
   version?: number;
 };
 
-export type ActivityAnalyticsEvent = {
+export type ActivityMeasurementAnalyticsEvent = {
   kind: 'intervention_form' | 'senior_evaluation';
   sessionId: string;
   durationMs: number;
   clickCount: number;
   completedAt: string;
 };
+
+export type ActivityProfileTargetAnalyticsEvent = {
+  kind: 'profile_target';
+  targetProfileId: string;
+};
+
+export type ActivityAnalyticsEvent =
+  | ActivityMeasurementAnalyticsEvent
+  | ActivityProfileTargetAnalyticsEvent;
 
 export type ActivityLogEntry = {
   id: string;

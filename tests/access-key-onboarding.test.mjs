@@ -129,7 +129,9 @@ test('le changement d’adresse exige le mot de passe actuel et révoque les anc
   assert.match(passwordApi, /Le mot de passe actuel est obligatoire/);
   assert.match(passwordApi, /SUPABASE_URL}\/auth\/v1\/user/);
   assert.match(passwordApi, /Authorization: `Bearer \$\{authenticatedAccessToken\}`/);
-  assert.match(passwordApi, /pendingContactEmail: contactEmail/);
+  assert.match(passwordApi, /rpc\/store_pending_email_confirmation/);
+  assert.match(passwordApi, /p_contact_email: contactEmail/);
+  assert.match(passwordApi, /p_profile_id: profile\.id/);
   assert.match(callbackApi, /contactEmail: confirmedEmail/);
   assert.match(callbackApi, /rpc\/finalize_confirmed_email/);
   assert.match(callbackApi, /revokeAllApplicationSessions/);

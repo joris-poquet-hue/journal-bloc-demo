@@ -74,23 +74,14 @@ async function requestConfirmedEmailChange(request, accessToken, input) {
 async function storePendingEmailConfirmation(profile, contactEmail, purpose) {
   const requestedAt = new Date().toISOString();
 
-  await restRequest('profiles', {
+  await restRequest('rpc/store_pending_email_confirmation', {
     body: {
-      metadata: {
-        ...(profile.metadata ?? {}),
-        pendingContactEmail: contactEmail,
-        pendingEmailPurpose: purpose,
-        pendingEmailRequestedAt: requestedAt,
-      },
-      updated_at: requestedAt,
+      p_contact_email: contactEmail,
+      p_profile_id: profile.id,
+      p_purpose: purpose,
+      p_requested_at: requestedAt,
     },
-    headers: {
-      Prefer: 'return=minimal',
-    },
-    method: 'PATCH',
-    searchParams: {
-      id: `eq.${profile.id}`,
-    },
+    method: 'POST',
   });
 }
 

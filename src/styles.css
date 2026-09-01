@@ -21269,6 +21269,128 @@ fieldset.clinical-context-field {
   width: 18px;
 }
 
+.admin-profile-deletion-backdrop {
+  background: rgba(63, 12, 12, 0.5);
+}
+
+.admin-profile-deletion-confirmation {
+  width: min(620px, 100%);
+  border-color: rgba(185, 28, 28, 0.3);
+}
+
+.admin-profile-deletion-confirmation > header {
+  background: linear-gradient(105deg, #fff1f0, #fffaf8);
+}
+
+.admin-profile-deletion-confirmation > header span:not(.admin-notification-confirmation__icon),
+.admin-profile-deletion-confirmation__profile > span {
+  color: #a4261d;
+}
+
+.admin-profile-deletion-confirmation__icon {
+  background: #fee4e2;
+  color: #b42318;
+}
+
+.admin-profile-deletion-confirmation__profile {
+  display: grid;
+  gap: 5px;
+  padding: 17px 18px;
+  border: 1px solid rgba(185, 28, 28, 0.18);
+  border-radius: 18px;
+  background: #fffafa;
+}
+
+.admin-profile-deletion-confirmation__profile > span {
+  font-size: 0.7rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.admin-profile-deletion-confirmation__profile strong {
+  color: #071a3d;
+  font-size: 1.05rem;
+}
+
+.admin-profile-deletion-confirmation__profile small {
+  color: #687993;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.admin-profile-deletion-confirmation__warning {
+  background: #fff0ef;
+  color: #8f1d16;
+}
+
+.admin-profile-deletion-confirmation__field {
+  display: grid;
+  gap: 9px;
+  color: #263b5a;
+  font-size: 0.84rem;
+  font-weight: 800;
+}
+
+.admin-profile-deletion-confirmation__field code {
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 7px 10px;
+  border-radius: 9px;
+  background: #f4f6fa;
+  color: #071a3d;
+  font-size: 0.88rem;
+  user-select: all;
+}
+
+.admin-profile-deletion-confirmation__field input {
+  min-height: 48px;
+  width: 100%;
+  padding: 0 14px;
+  border: 1px solid #c9d5e2;
+  border-radius: 12px;
+  background: #fff;
+  color: #071a3d;
+  font: inherit;
+}
+
+.admin-profile-deletion-confirmation__field input:focus-visible {
+  border-color: #b42318;
+  outline: 3px solid rgba(180, 35, 24, 0.16);
+  outline-offset: 1px;
+}
+
+.admin-profile-deletion-confirmation__field small {
+  color: #687993;
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.admin-profile-deletion-confirmation__submit {
+  border: 1px solid #9f1f17;
+  border-radius: 14px;
+  background: #b42318;
+  color: #fff;
+  font-weight: 850;
+}
+
+.admin-profile-deletion-confirmation__submit:hover:not(:disabled),
+.admin-profile-deletion-confirmation__submit:focus-visible:not(:disabled) {
+  background: #941b14;
+}
+
+.admin-profile-deletion-confirmation__submit:focus-visible {
+  outline: 3px solid rgba(180, 35, 24, 0.2);
+  outline-offset: 2px;
+}
+
+.admin-profile-deletion-confirmation__submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .admin-notification-preview {
   position: sticky;
   top: 24px;
