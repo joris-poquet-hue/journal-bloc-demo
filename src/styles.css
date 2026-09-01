@@ -3993,6 +3993,15 @@ button {
   background: rgba(11, 83, 96, 0.04);
 }
 
+.account-action-row:disabled {
+  cursor: wait;
+  opacity: 0.58;
+}
+
+.account-action-row:disabled:hover {
+  background: transparent;
+}
+
 .account-action-row__icon {
   width: 54px;
   height: 54px;
@@ -4166,6 +4175,11 @@ button {
   background: #ffffff;
   color: #506484;
   flex: 0 0 auto;
+}
+
+.account-sheet__close:disabled {
+  cursor: wait;
+  opacity: 0.52;
 }
 
 .account-sheet__form,

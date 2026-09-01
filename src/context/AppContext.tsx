@@ -2849,7 +2849,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         success: true,
         message: hasSemesterUpdate
           ? 'Le semestre a bien été mis à jour.'
-          : 'La photo de profil a bien été mise à jour.',
+          : input.avatarImageSrc
+            ? 'La photo de profil a bien été mise à jour.'
+            : 'La photo de profil a bien été supprimée.',
         profile: updatedProfile,
       };
     } catch (error) {

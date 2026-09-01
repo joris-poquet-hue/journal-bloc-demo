@@ -37,6 +37,7 @@ type AccountSheet =
   | 'password'
   | 'export'
   | 'pending-interventions'
+  | 'photo-removal'
   | 'about'
   | null;
 
@@ -47,6 +48,7 @@ const accountSheetLabels = {
   password: 'Mot de passe',
   'pending-interventions': 'Interventions en attente',
   photo: 'Photo de profil',
+  'photo-removal': 'Supprimer la photo de profil',
   training: 'Formation',
 } satisfies Record<Exclude<AccountSheet, null>, string>;
 
@@ -64,6 +66,8 @@ type PhotoCropState = {
   width: number;
   zoom: number;
 };
+
+type PhotoOperation = 'remove' | 'save' | null;
 
 const semesterOptions = Array.from({ length: 12 }, (_, index) => ({
   label: `S${index + 1}`,
@@ -187,6 +191,7 @@ export function ProfileScreen() {
   const [activeSheet, setActiveSheet] = useState<AccountSheet>(null);
   const [feedback, setFeedback] = useState<FeedbackState>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [photoOperation, setPhotoOperation] = useState<PhotoOperation>(null);
   const [photoCrop, setPhotoCrop] = useState<PhotoCropState | null>(null);
   const [trainingForm, setTrainingForm] = useState({
     semester: selectedInternal?.semester ?? '',
@@ -226,6 +231,7 @@ export function ProfileScreen() {
         (intervention) => intervention.id === pendingDeletionCandidateId
       ) ?? null
     : null;
+  const isUpdatingPhoto = photoOperation != null;
 
   const openSheet = (sheet: Exclude<AccountSheet, null>) => {
     setFeedback(null);
@@ -264,6 +270,12 @@ export function ProfileScreen() {
     setPhotoCrop(null);
     setPendingDeletionCandidateId(null);
     setPendingDeletionError('');
+  };
+
+  const closeSheetIfPhotoIdle = () => {
+    if (!isUpdatingPhoto) {
+      closeSheet();
+    }
   };
 
   const handleTrainingSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -490,9 +502,12 @@ export function ProfileScreen() {
   const handlePhotoCropSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
-    if (!photoCrop) {
+    if (!photoCrop || isUpdatingPhoto) {
       return;
     }
+
+    setFeedback(null);
+    setPhotoOperation('save');
 
     try {
       const avatarImageSrc = await createAvatarDataUrl(photoCrop);
@@ -516,6 +531,42 @@ export function ProfileScreen() {
             ? error.message
             : 'Impossible de mettre a jour la photo de profil.',
       });
+    } finally {
+      setPhotoOperation(null);
+    }
+  };
+
+  const handleRemovePhoto = async () => {
+    if (!selectedInternal.avatarImageSrc || isUpdatingPhoto) {
+      return;
+    }
+
+    setFeedback(null);
+    setPhotoOperation('remove');
+
+    try {
+      const result = await updateInternalProfileSettings(selectedInternal.id, {
+        avatarImageSrc: null,
+      });
+
+      setFeedback({
+        tone: result.success ? 'success' : 'error',
+        message: result.message,
+      });
+
+      if (result.success) {
+        closeSheet();
+      }
+    } catch (error) {
+      setFeedback({
+        tone: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Impossible de supprimer la photo de profil.',
+      });
+    } finally {
+      setPhotoOperation(null);
     }
   };
 
@@ -542,6 +593,7 @@ export function ProfileScreen() {
               ? 'account-feedback--success'
               : 'account-feedback--error'
           }`.trim()}
+          role={feedback.tone === 'error' ? 'alert' : 'status'}
         >
           {feedback.message}
         </div>
@@ -583,10 +635,24 @@ export function ProfileScreen() {
           />
           <AccountActionRow
             description="Choisir ou remplacer ma photo de profil"
+            disabled={isUpdatingPhoto}
             icon={<Camera strokeWidth={2.05} />}
             label="Modifier photo de profil"
             onClick={handlePhotoAction}
           />
+          {selectedInternal.avatarImageSrc ? (
+            <AccountActionRow
+              description="Revenir à l’affichage de mes initiales"
+              disabled={isUpdatingPhoto}
+              icon={<Trash2 strokeWidth={2.05} />}
+              label={
+                photoOperation === 'remove'
+                  ? 'Suppression de la photo…'
+                  : 'Supprimer la photo de profil'
+              }
+              onClick={() => openSheet('photo-removal')}
+            />
+          ) : null}
           <AccountActionRow
             description="Modifier mon mot de passe"
             icon={<LockKeyhole strokeWidth={2.05} />}
@@ -663,14 +729,14 @@ export function ProfileScreen() {
       {activeSheet ? (
         <div
           className="account-sheet-backdrop"
-          onClick={closeSheet}
+          onClick={closeSheetIfPhotoIdle}
         >
           <div
             aria-label={accountSheetLabels[activeSheet]}
             aria-modal="true"
             className={`account-sheet account-sheet--${activeSheet}`}
             onClick={(event) => event.stopPropagation()}
-            role="dialog"
+            role={activeSheet === 'photo-removal' ? 'alertdialog' : 'dialog'}
           >
             {activeSheet === 'training' ? (
               <AccountSheetFrame
@@ -707,7 +773,8 @@ export function ProfileScreen() {
                 eyebrow="Mon profil"
                 icon={<Camera strokeWidth={2} />}
                 title="Photo de profil"
-                onClose={closeSheet}
+                closeDisabled={isUpdatingPhoto}
+                onClose={closeSheetIfPhotoIdle}
               >
                 <form className="account-sheet__form" onSubmit={handlePhotoCropSubmit}>
                   <div className="account-photo-cropper">
@@ -730,6 +797,7 @@ export function ProfileScreen() {
                   </div>
 
                   <SheetRange
+                    disabled={isUpdatingPhoto}
                     label="Zoom"
                     max={200}
                     min={100}
@@ -746,7 +814,7 @@ export function ProfileScreen() {
                     value={Math.round(photoCrop.zoom * 100)}
                   />
                   <SheetRange
-                    disabled={photoPreview.drawWidth <= 220}
+                    disabled={isUpdatingPhoto || photoPreview.drawWidth <= 220}
                     label="Déplacement horizontal"
                     max={100}
                     min={-100}
@@ -763,7 +831,7 @@ export function ProfileScreen() {
                     value={photoCrop.panX}
                   />
                   <SheetRange
-                    disabled={photoPreview.drawHeight <= 220}
+                    disabled={isUpdatingPhoto || photoPreview.drawHeight <= 220}
                     label="Déplacement vertical"
                     max={100}
                     min={-100}
@@ -783,16 +851,67 @@ export function ProfileScreen() {
                   <div className="account-sheet__actions account-sheet__actions--split">
                     <button
                       className="flow-button flow-button--secondary"
-                      onClick={closeSheet}
+                      disabled={isUpdatingPhoto}
+                      onClick={closeSheetIfPhotoIdle}
                       type="button"
                     >
                       Annuler
                     </button>
-                    <button className="flow-button flow-button--primary" type="submit">
-                      Enregistrer
+                    <button
+                      className="flow-button flow-button--primary"
+                      disabled={isUpdatingPhoto}
+                      type="submit"
+                    >
+                      {photoOperation === 'save'
+                        ? 'Enregistrement…'
+                        : 'Enregistrer'}
                     </button>
                   </div>
                 </form>
+              </AccountSheetFrame>
+            ) : null}
+
+            {activeSheet === 'photo-removal' ? (
+              <AccountSheetFrame
+                description="Confirme la suppression de la photo actuellement enregistrée."
+                eyebrow="Mon profil"
+                icon={<Trash2 strokeWidth={2.05} />}
+                title="Supprimer la photo de profil"
+                closeDisabled={isUpdatingPhoto}
+                onClose={closeSheetIfPhotoIdle}
+              >
+                <div className="account-sheet__stack">
+                  <p className="account-sheet__text">
+                    La photo sera définitivement effacée de ton profil. Tes
+                    initiales seront affichées à sa place sur le web et dans
+                    l’application.
+                  </p>
+                  {feedback?.tone === 'error' ? (
+                    <div className="auth-error" role="alert">
+                      {feedback.message}
+                    </div>
+                  ) : null}
+                  <div className="account-sheet__actions account-sheet__actions--split">
+                    <button
+                      className="account-button"
+                      disabled={isUpdatingPhoto}
+                      onClick={closeSheetIfPhotoIdle}
+                      type="button"
+                    >
+                      Annuler
+                    </button>
+                    <button
+                      className="account-button account-button--danger"
+                      disabled={isUpdatingPhoto}
+                      onClick={() => void handleRemovePhoto()}
+                      type="button"
+                    >
+                      {photoOperation === 'remove'
+                        ? 'Suppression…'
+                        : 'Supprimer définitivement'}
+                    </button>
+                  </div>
+                </div>
               </AccountSheetFrame>
             ) : null}
 
@@ -1105,15 +1224,22 @@ function AccountActionRow({
   icon,
   label,
   description,
+  disabled = false,
   onClick,
 }: {
   icon: ReactNode;
   label: string;
   description: string;
+  disabled?: boolean;
   onClick: () => void;
 }) {
   return (
-    <button className="account-action-row" onClick={onClick} type="button">
+    <button
+      className="account-action-row"
+      disabled={disabled}
+      onClick={onClick}
+      type="button"
+    >
       <span className="account-action-row__icon" aria-hidden="true">
         {icon}
       </span>
@@ -1131,6 +1257,7 @@ function AccountSheetFrame({
   description,
   eyebrow,
   icon,
+  closeDisabled = false,
   onClose,
   children,
 }: {
@@ -1138,6 +1265,7 @@ function AccountSheetFrame({
   description?: string;
   eyebrow?: string;
   icon?: ReactNode;
+  closeDisabled?: boolean;
   onClose: () => void;
   children: ReactNode;
 }) {
@@ -1161,6 +1289,7 @@ function AccountSheetFrame({
         <button
           aria-label="Fermer"
           className="account-sheet__close"
+          disabled={closeDisabled}
           onClick={onClose}
           type="button"
         >
