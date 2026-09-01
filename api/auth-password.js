@@ -215,6 +215,7 @@ module.exports = async function handler(request, response) {
 
   try {
     let authenticatedAccessToken = null;
+    let verifiedAuthPassword = null;
 
     if (currentPassword) {
       const authenticationPassword =
@@ -248,6 +249,7 @@ module.exports = async function handler(request, response) {
       }
 
       authenticatedAccessToken = payload.access_token;
+      verifiedAuthPassword = authenticationPassword;
       transientAccessTokens.add(payload.access_token);
     }
 
@@ -259,6 +261,7 @@ module.exports = async function handler(request, response) {
         authenticatedAccessToken,
         action === 'complete-setup'
           ? {
+              current_password: verifiedAuthPassword,
               data: { emailTemplatePurpose: purpose },
               email: contactEmail,
               password,
@@ -288,7 +291,10 @@ module.exports = async function handler(request, response) {
       const { payload, response: passwordResponse } = await supabaseRequest(
         `${SUPABASE_URL}/auth/v1/user`,
         {
-          body: JSON.stringify({ password }),
+          body: JSON.stringify({
+            current_password: verifiedAuthPassword || undefined,
+            password,
+          }),
           headers: {
             apikey: SUPABASE_SERVICE_ROLE_KEY,
             Authorization: `Bearer ${authenticatedAccessToken}`,

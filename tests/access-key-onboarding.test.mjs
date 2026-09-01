@@ -75,7 +75,12 @@ test('la première connexion saisit une seule adresse et attend sa confirmation 
   assert.match(passwordApi, /pendingEmailConfirmation: true/);
   assert.match(passwordApi, /emailTemplatePurpose: purpose/);
   assert.doesNotMatch(passwordApi, /email_confirm: true/);
-  assert.match(passwordApi, /email: contactEmail,[\s\S]*password/);
+  assert.match(
+    passwordApi,
+    /current_password: verifiedAuthPassword,[\s\S]*email: contactEmail,[\s\S]*password/
+  );
+  assert.match(passwordApi, /verifiedAuthPassword = authenticationPassword/);
+  assert.doesNotMatch(passwordApi, /current_password:\s*currentPassword/);
   assert.doesNotMatch(loginScreen, /Confirmer l’adresse e-mail/);
   assert.match(loginScreen, /Un lien te sera envoyé/);
   assert.match(loginScreen, /Mot de passe ou clé d’accès/);
@@ -151,6 +156,19 @@ test('le changement d’adresse exige le mot de passe actuel et révoque les anc
   assert.match(profileScreen, /requestEmailChange/);
   assert.match(seniorDashboard, /Modifier l’adresse e-mail/);
   assert.match(seniorDashboard, /Envoyer le lien de confirmation/);
+});
+
+test('les changements de mot de passe transmettent le secret actuel déjà vérifié à Supabase Auth', async () => {
+  const passwordApi = await readProjectFile('api/auth-password.js');
+
+  assert.match(passwordApi, /let verifiedAuthPassword = null/);
+  assert.match(passwordApi, /verifiedAuthPassword = authenticationPassword/);
+  assert.match(
+    passwordApi,
+    /body: JSON\.stringify\(\{\s*current_password: verifiedAuthPassword \|\| undefined,\s*password,\s*\}\)/
+  );
+  assert.doesNotMatch(passwordApi, /current_password:\s*currentPassword/);
+  assert.doesNotMatch(passwordApi, /console\.(?:log|info|warn|error)\([^\n]*verifiedAuthPassword/);
 });
 
 test('une régénération est réservée à un compte encore en attente et remplace immédiatement l’ancienne clé', async () => {
