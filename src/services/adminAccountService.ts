@@ -30,6 +30,85 @@ export type AdminAccountProfile = {
   version: number;
 };
 
+const ACCESS_KEY_OPERATION_STORAGE_PREFIX =
+  'monjdb:provisional-access-key-operation:';
+const pendingAccessKeyOperations = new Map<
+  string,
+  { expectedVersion: number; operationId: string }
+>();
+const ACCESS_KEY_OPERATION_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+function createAccessKeyOperationId() {
+  if (typeof crypto === 'undefined' || !('randomUUID' in crypto)) {
+    throw new Error('Le navigateur ne permet pas de sécuriser cette rotation.');
+  }
+
+  return crypto.randomUUID();
+}
+
+function getAccessKeyOperation(profileId: string, expectedVersion: number) {
+  const storageKey = `${ACCESS_KEY_OPERATION_STORAGE_PREFIX}${profileId}`;
+  const inMemory = pendingAccessKeyOperations.get(profileId);
+
+  if (
+    inMemory &&
+    ACCESS_KEY_OPERATION_ID_PATTERN.test(inMemory.operationId)
+  ) {
+    return inMemory.operationId;
+  }
+
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(storageKey) ?? 'null') as
+      | { expectedVersion?: number; operationId?: string }
+      | null;
+
+    if (
+      typeof stored?.operationId === 'string' &&
+      ACCESS_KEY_OPERATION_ID_PATTERN.test(stored.operationId)
+    ) {
+      pendingAccessKeyOperations.set(profileId, {
+        expectedVersion,
+        operationId: stored.operationId,
+      });
+      return stored.operationId;
+    }
+  } catch {
+    // A blocked sessionStorage must not prevent an in-memory retry.
+  }
+
+  const operationId = createAccessKeyOperationId();
+  const operation = { expectedVersion, operationId };
+  pendingAccessKeyOperations.set(profileId, operation);
+
+  try {
+    sessionStorage.setItem(storageKey, JSON.stringify(operation));
+  } catch {
+    // The in-memory copy still covers retries during this page lifetime.
+  }
+
+  return operationId;
+}
+
+function clearAccessKeyOperation(profileId: string, operationId: string) {
+  if (pendingAccessKeyOperations.get(profileId)?.operationId === operationId) {
+    pendingAccessKeyOperations.delete(profileId);
+  }
+
+  try {
+    const storageKey = `${ACCESS_KEY_OPERATION_STORAGE_PREFIX}${profileId}`;
+    const stored = JSON.parse(sessionStorage.getItem(storageKey) ?? 'null') as
+      | { operationId?: string }
+      | null;
+
+    if (stored?.operationId === operationId) {
+      sessionStorage.removeItem(storageKey);
+    }
+  } catch {
+    // Nothing else is required after a successful server response.
+  }
+}
+
 async function saveAdminAccount(
   payload: AdminAccountPayload,
   method: 'POST' | 'PATCH'
@@ -83,8 +162,9 @@ export async function regenerateAdminAccessKey(
     throw new Error('La session administrateur a expiré. Reconnectez-vous.');
   }
 
+  const operationId = getAccessKeyOperation(profileId, expectedVersion);
   const response = await fetch('/api/admin-access-key', {
-    body: JSON.stringify({ expectedVersion, profileId }),
+    body: JSON.stringify({ expectedVersion, operationId, profileId }),
     cache: 'no-store',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json' },
@@ -96,16 +176,23 @@ export async function regenerateAdminAccessKey(
         auditWarning?: string;
         error?: string;
         profile?: AdminAccountProfile;
+        resetOperation?: boolean;
       }
     | null;
 
   if (!response.ok || !result?.accessKey || !result.profile) {
+    if (result?.resetOperation === true) {
+      clearAccessKeyOperation(profileId, operationId);
+    }
+
     throw new SupabaseRestError(
       response.status,
       result?.error ?? 'Impossible de régénérer cette clé d’accès.',
       result
     );
   }
+
+  clearAccessKeyOperation(profileId, operationId);
 
   return {
     accessKey: result.accessKey,

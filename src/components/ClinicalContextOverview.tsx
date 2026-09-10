@@ -17,10 +17,7 @@ const CLINICAL_CONTEXT_PRIMARY_LABELS = new Set([
 
 interface ClinicalContextOverviewProps {
   className?: string;
-  intervention: Pick<
-    SavedIntervention,
-    'contextVariables' | 'operativeDurationMinutes'
-  >;
+  intervention: Pick<SavedIntervention, 'contextVariables'>;
 }
 
 export function ClinicalContextOverview({
@@ -46,12 +43,6 @@ export function ClinicalContextOverview({
       value: getContextValue('IMC de la patiente'),
     },
     {
-      label: 'Durée opératoire',
-      value: intervention.operativeDurationMinutes
-        ? `${intervention.operativeDurationMinutes} min`
-        : 'Non renseignée',
-    },
-    {
       label: 'Saignement',
       value: getContextValue('Saignement per-opératoire'),
     },
@@ -59,9 +50,7 @@ export function ClinicalContextOverview({
   const otherContextRows = visibleContextRows.filter(
     (row) => !CLINICAL_CONTEXT_PRIMARY_LABELS.has(row.label)
   );
-  const clinicalDataCount =
-    visibleContextRows.length +
-    (intervention.operativeDurationMinutes ? 1 : 0);
+  const clinicalDataCount = visibleContextRows.length;
 
   return (
     <section

@@ -8,6 +8,7 @@ const {
   getProfileByLoginId,
   getRequestBody,
   isConfigured,
+  normalizeEmail,
   normalizeLoginId,
   registerAuthFailure,
   sendJson,
@@ -58,8 +59,12 @@ module.exports = async function handler(request, response) {
 
     if (profile?.auth_user_id) {
       const user = await getAuthUser(profile.auth_user_id);
+      const confirmedContactEmail = normalizeEmail(
+        profile.metadata?.contactEmail
+      );
+      const authEmail = normalizeEmail(user?.email);
 
-      if (user?.email) {
+      if (confirmedContactEmail && authEmail === confirmedContactEmail) {
         const redirectTo = process.env.SUPABASE_AUTH_REDIRECT_TO;
         const searchParams = new URLSearchParams();
 
@@ -72,7 +77,7 @@ module.exports = async function handler(request, response) {
             searchParams.toString() ? `?${searchParams.toString()}` : ''
           }`,
           {
-            body: JSON.stringify({ email: user.email }),
+            body: JSON.stringify({ email: authEmail }),
             headers: {
               apikey: SUPABASE_SERVICE_ROLE_KEY,
               Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,

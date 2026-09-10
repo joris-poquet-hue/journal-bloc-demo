@@ -6,7 +6,6 @@ import {
   InternalProfile,
   InterventionType,
   SavedIntervention,
-  SurgicalApproach,
   SurgicalInterventionDefinition,
   TrophyCondition,
   TrophyConditionType,

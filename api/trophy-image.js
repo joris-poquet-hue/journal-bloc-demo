@@ -4,6 +4,7 @@ const {
   authenticateApplicationSession,
   createSupabaseApplicationJwt,
   getRequestBody,
+  isBusinessApplicationSession,
   requireAdmin,
 } = require('../src/serverAuth.cjs');
 
@@ -149,7 +150,7 @@ async function ensureBucket() {
     return;
   }
 
-  throw new Error(errorMessage || 'Impossible de preparer le bucket Supabase.');
+  throw new Error(errorMessage || 'Impossible de préparer le stockage des images.');
 }
 
 function getStoragePathFromUrl(value) {
@@ -239,6 +240,12 @@ async function serveTrophyImage(request, response) {
 
   if (!identity) {
     return sendJson(response, 401, { error: 'Une authentification est requise.' });
+  }
+
+  if (!isBusinessApplicationSession(identity)) {
+    return sendJson(response, 403, {
+      error: 'Cette session ne permet pas encore d’accéder aux images de trophées.',
+    });
   }
 
   const requestUrl = new URL(request.url, 'https://project1.invalid');
@@ -447,7 +454,7 @@ async function cleanupTrophyImages(trophyId) {
 module.exports = async function handler(request, response) {
   if (!isConfigured()) {
     return sendJson(response, 503, {
-      error: 'Le stockage Supabase n’est pas configuré sur ce déploiement.',
+      error: 'Le stockage des images n’est pas configuré sur ce déploiement.',
     });
   }
 
@@ -472,7 +479,7 @@ module.exports = async function handler(request, response) {
   }
 
   if (!adminIdentity) {
-    return sendJson(response, 401, { error: 'Accès non autorisé.' });
+    return sendJson(response, 403, { error: 'Accès non autorisé.' });
   }
 
   if (request.method === 'DELETE') {
@@ -588,7 +595,7 @@ module.exports = async function handler(request, response) {
 
     return sendJson(response, uploadResponse.status, {
       error:
-        errorMessage || 'Impossible de televerser l image dans Supabase Storage.',
+        errorMessage || 'Impossible de téléverser l’image dans le stockage sécurisé.',
     });
   }
 

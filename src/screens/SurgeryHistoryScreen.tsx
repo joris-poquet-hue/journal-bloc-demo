@@ -7,7 +7,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
-  Info,
   MoveRight,
   SlidersHorizontal,
   Star,
@@ -31,7 +30,6 @@ import { useAppContext } from '../context/AppContext';
 import {
   approachOptions,
   allChecklistSteps,
-  formatDisplayName,
   formatSeniorDisplayName,
   formatSurgeryContext,
   getHistoricalChecklistSteps,
@@ -49,7 +47,6 @@ import {
 import {
   AdminInterventionEvaluation,
   ChecklistLevel,
-  InterventionType,
   SavedIntervention,
   SurgicalInterventionDefinition,
 } from '../types';
@@ -290,34 +287,7 @@ function getDayTitle(value: string) {
   }).format(parseIsoDate(value));
 }
 
-function getInterventionTime(intervention: SavedIntervention) {
-  if (intervention.startTime) {
-    return intervention.startTime.slice(0, 5);
-  }
-
-  const date = new Date(intervention.savedAt);
-
-  if (Number.isNaN(date.getTime())) {
-    return 'Heure non renseignée';
-  }
-
-  return new Intl.DateTimeFormat('fr-FR', {
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
-}
-
 function getInterventionSortValue(intervention: SavedIntervention) {
-  if (intervention.startTime) {
-    const interventionTime = new Date(
-      `${intervention.date}T${intervention.startTime}`
-    ).getTime();
-
-    if (!Number.isNaN(interventionTime)) {
-      return interventionTime;
-    }
-  }
-
   const savedAtTime = new Date(intervention.savedAt).getTime();
   const fallbackTime = parseIsoDate(intervention.date).getTime();
 
@@ -1173,8 +1143,7 @@ export function SurgeryHistoryScreen() {
             <ApproachIcon intervention={selectedDetail.intervention} />
             <div className="history-detail-card__summary">
               <span className="history-detail-card__date">
-                {formatIsoDate(selectedDetail.intervention.date)} ·{' '}
-                {getInterventionTime(selectedDetail.intervention)}
+                {formatIsoDate(selectedDetail.intervention.date)}
               </span>
               <h2>
                 {getHistoricalProcedureLabel(
@@ -1339,8 +1308,6 @@ export function SurgeryHistoryScreen() {
                     <span>
                       {formatIsoDate(selectedDetail.intervention.date)}
                     </span>
-                    <span aria-hidden="true">·</span>
-                    <span>{getInterventionTime(selectedDetail.intervention)}</span>
                     <span aria-hidden="true">·</span>
                     <span>
                       {selectedDetailSenior
@@ -1812,7 +1779,6 @@ function HistoryInterventionCard({
     <div className="history-day-entry">
       <SurgeryInterventionCard
         dateLabel={formatInterventionCardDate(intervention.intervention.date)}
-        dateMetaLabel={getInterventionTime(intervention.intervention)}
         intervention={intervention.intervention}
         isValidated={intervention.isValidated}
         onPress={onOpen}

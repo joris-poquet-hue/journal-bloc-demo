@@ -55,6 +55,10 @@ function assertMobileAudit(report) {
     throw new Error(`Nouvelles vulnérabilités mobiles : ${unexpected.join(', ')}`);
   }
 
+  if (Object.keys(vulnerabilities).length === 0) {
+    return;
+  }
+
   const imageSize = vulnerabilities['image-size'];
   const advisories = (imageSize?.via ?? [])
     .filter((item) => typeof item === 'object')
@@ -87,5 +91,5 @@ assertMobileAudit(runAudit(mobileRoot));
 
 console.log('Audit web : aucune vulnérabilité.');
 console.log(
-  'Audit mobile : deux avis image-size sans version corrigée en amont, chaîne strictement bornée et correctif local vérifié.'
+  'Audit mobile : aucune vulnérabilité non corrigée.'
 );

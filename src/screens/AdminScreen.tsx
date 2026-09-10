@@ -43,11 +43,11 @@ import { PrimaryButton } from '../components/PrimaryButton';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { SectionCard } from '../components/SectionCard';
 import { AdminInterventionsManager } from '../components/AdminInterventionsManager';
+import { AdminAccountView } from './admin/AdminAccountView';
 import { SeniorChecklistEditor } from './admin/SeniorChecklistEditor';
 import { buildSupportMailto } from '../supportConfig';
 import { useAppContext } from '../context/AppContext';
 import {
-  allChecklistSteps,
   approachOptions,
   checklistLevelOptions,
   entryTechniqueOptions,
@@ -58,7 +58,6 @@ import {
   getHistoricalProcedureLabel,
   getChoiceLabel,
   getInternalById,
-  getSurgicalInterventionDefinition,
   getSurgicalInterventionDefinitions,
   indicationOptions,
   roleOptions,
@@ -82,7 +81,6 @@ import {
   SavedIntervention,
   Senior,
   SurgicalApproach,
-  SurgicalInterventionDefinition,
   TrophyCondition,
   TrophyConditionType,
   TrophyLevelDefinition,
@@ -91,8 +89,6 @@ import {
   TrophyTrackedStatus,
   TrophyType,
   TrophyVisibility,
-  UpdateInternalCredentialsInput,
-  UpdateSeniorCredentialsInput,
 } from '../types';
 import { formatIsoDate } from '../utils/date';
 import {
@@ -114,12 +110,13 @@ import {
   getUnlockedTrophyTierForProfile,
   validateTrophyDefinition,
 } from '../utils/adminTrophies';
-import {
-  buildTrophyDisplayModels,
-  type TrophyDisplayModel,
-} from '../utils/trophyDisplay';
+import { buildTrophyDisplayModels } from '../utils/trophyDisplay';
 import { downloadAnalyticsExcel } from '../utils/analyticsExport';
 import { downloadInterventionsExcel } from '../utils/export';
+import {
+  buildEvaluationPeriodCounts,
+  getCalendarDayDifference,
+} from '../utils/exportMetrics';
 import { loadBackendDisabledProfiles } from '../services/backendRepository';
 import {
   deleteAdminAccountPermanently,
@@ -140,6 +137,24 @@ import { AdminPageShell } from './admin/AdminPageShell';
 import { AdminNotificationsManager } from './admin/AdminNotificationsManager';
 import { hasCompleteAdminEvaluation } from './admin/adminEvaluationModel';
 import {
+  ADMIN_ACTIVITY_ANALYTICS_PERIOD_OPTIONS,
+  ADMIN_RELANCE_WINDOW_OPTIONS,
+  addDays,
+  addMonths,
+  buildAdminActivityAnalyticsBuckets,
+  buildAdminActivityBuckets,
+  buildAllTimeAdminCycleSummary,
+  getAdminAnalyticsPeriodLabel,
+  getAdminAnalyticsPeriodStart,
+  getAdminRelanceThresholdDays,
+  isAnalyticsTrackingEntry,
+  isSameCalendarDay,
+  parseIsoDateValue,
+  type AdminActivityAnalyticsPeriod,
+  type AdminActivityRange,
+  type AdminRelanceWindow,
+} from './admin/adminAnalyticsModel';
+import {
   AdminFeedbackMessage as FeedbackMessage,
   type AdminFeedback as FeedbackState,
 } from './admin/AdminFeedbackMessage';
@@ -157,10 +172,7 @@ type AdminView =
   | 'institutions'
   | 'interventions'
   | 'notifications';
-type AdminActivityRange = 'day' | 'week' | 'month';
-type AdminActivityAnalyticsPeriod = '7d' | '30d' | '6m' | '1y';
 type AdminInterventionStatusFilter = 'all' | 'evaluated' | 'pending';
-type AdminRelanceWindow = '14d' | '1m' | '3m';
 type AdminUserConnection = {
   id: string;
   actorRole: 'internal' | 'senior';
@@ -211,7 +223,6 @@ type TrophyFormFeedback = {
   message: string;
 } | null;
 type TrophyImageKey = keyof AdminTrophyDefinition['images'];
-type AdminProfileViewSource = 'profiles' | 'history';
 type ProfileAccountTab = 'internal' | 'senior';
 type ProfileStatsTab = 'history' | 'progress';
 type ProfileHistoryStatusFilter = 'all' | 'evaluated' | 'pending';
@@ -227,23 +238,6 @@ type ProfileProgressProcedureOption = {
 type ProfileHistoryCardStatus = Exclude<ProfileHistoryStatusFilter, 'all'>;
 
 const PROFILE_HISTORY_PAGE_SIZE_OPTIONS = [4, 8, 12];
-const ADMIN_ACTIVITY_ANALYTICS_PERIOD_OPTIONS: Array<{
-  value: AdminActivityAnalyticsPeriod;
-  label: string;
-}> = [
-  { value: '7d', label: '7 jours' },
-  { value: '30d', label: '30 jours' },
-  { value: '6m', label: '6 mois' },
-  { value: '1y', label: '1 an' },
-];
-const ADMIN_RELANCE_WINDOW_OPTIONS: Array<{
-  value: AdminRelanceWindow;
-  label: string;
-}> = [
-  { value: '14d', label: '14 jours' },
-  { value: '1m', label: '1 mois' },
-  { value: '3m', label: '3 mois' },
-];
 const ADMIN_DETAILED_ACTIVITY_PAGE_SIZE = 10;
 const ADMIN_PROFILE_LOGIN_ACTION = 'Connexion au profil';
 
@@ -266,21 +260,11 @@ const EMPTY_CREATE_FORM: CreateInternalProfileInput = {
   semester: '',
 };
 
-const EMPTY_UPDATE_INTERNAL_CREDENTIALS_FORM: UpdateInternalCredentialsInput = {
-  loginId: '',
-  password: '',
-};
-
 const EMPTY_CREATE_SENIOR_FORM: CreateSeniorProfileInput = {
   firstName: '',
   institutionId: '',
   lastName: '',
   loginId: '',
-};
-
-const EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM: UpdateSeniorCredentialsInput = {
-  loginId: '',
-  password: '',
 };
 
 const EMPTY_INTERVENTION_FILTERS: AdminInterventionFilters = {
@@ -311,23 +295,6 @@ const ADMIN_TROPHY_FILTER_OPTIONS: Array<{
   { value: 'draft', label: 'Brouillons' },
   { value: 'active', label: 'Actifs' },
   { value: 'inactive', label: 'Inactifs' },
-];
-
-const TROPHY_VISIBILITY_OPTIONS: Array<{
-  value: TrophyVisibility;
-  label: string;
-  description: string;
-}> = [
-  {
-    value: 'visible',
-    label: 'Progression visible',
-    description: "L’interne voit sa progression",
-  },
-  {
-    value: 'surprise',
-    label: 'Trophée surprise',
-    description: 'Le trophée reste caché',
-  },
 ];
 
 const TROPHY_CONDITION_OPTIONS: Array<{
@@ -382,11 +349,6 @@ const TROPHY_TYPE_LABELS: Record<TrophyType, string> = {
 const TROPHY_VISIBILITY_LABELS: Record<TrophyVisibility, string> = {
   visible: 'Progression visible',
   surprise: 'Trophée surprise',
-};
-
-const TROPHY_VISIBILITY_DESCRIPTIONS: Record<TrophyVisibility, string> = {
-  visible: "L’interne voit sa progression côté interne.",
-  surprise: "Le trophée reste caché avant son obtention.",
 };
 
 const TROPHY_OPERATIVE_SCOPE_OPTIONS: Array<{
@@ -603,10 +565,6 @@ function averageNumbers(values: number[]) {
   return values.reduce((total, value) => total + value, 0) / values.length;
 }
 
-function roundPercentage(value: number | null) {
-  return value == null ? null : Math.round(value);
-}
-
 function getProfileHistoryStatus(
   evaluation: AdminInterventionEvaluation | undefined
 ): ProfileHistoryCardStatus {
@@ -629,57 +587,6 @@ function getChecklistLevelNumericValue(level: ChecklistLevel | null | undefined)
   }
 
   return Number(level);
-}
-
-function parseIsoDateValue(value: string) {
-  const [year, month, day] = value.split('-').map(Number);
-
-  return new Date(year, (month ?? 1) - 1, day ?? 1, 12, 0, 0, 0);
-}
-
-function startOfWeek(value: Date) {
-  const nextDate = new Date(value);
-  const day = nextDate.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-
-  nextDate.setDate(nextDate.getDate() + diff);
-  nextDate.setHours(0, 0, 0, 0);
-  return nextDate;
-}
-
-function endOfWeek(value: Date) {
-  const nextDate = startOfWeek(value);
-
-  nextDate.setDate(nextDate.getDate() + 6);
-  nextDate.setHours(23, 59, 59, 999);
-  return nextDate;
-}
-
-function startOfMonth(value: Date) {
-  return new Date(value.getFullYear(), value.getMonth(), 1, 0, 0, 0, 0);
-}
-
-function endOfMonth(value: Date) {
-  return new Date(value.getFullYear(), value.getMonth() + 1, 0, 23, 59, 59, 999);
-}
-
-function addDays(value: Date, amount: number) {
-  const nextDate = new Date(value);
-
-  nextDate.setDate(nextDate.getDate() + amount);
-  return nextDate;
-}
-
-function addMonths(value: Date, amount: number) {
-  return new Date(value.getFullYear(), value.getMonth() + amount, 1, 12, 0, 0, 0);
-}
-
-function isSameCalendarDay(left: Date, right: Date) {
-  return (
-    left.getFullYear() === right.getFullYear() &&
-    left.getMonth() === right.getMonth() &&
-    left.getDate() === right.getDate()
-  );
 }
 
 function formatAdminConnectionTimestamp(value: string) {
@@ -770,18 +677,21 @@ function formatAdminDelayLabel(valueInMs: number | null) {
     : `${totalDays.toFixed(1).replace('.', ',')} j`;
 }
 
+function formatCalendarDaysLabel(valueInDays: number | null) {
+  if (valueInDays == null) {
+    return 'Non calculable';
+  }
+
+  const roundedValue = Math.round(valueInDays * 10) / 10;
+
+  return `${String(roundedValue).replace('.', ',')} j`;
+}
+
 function formatAdminActivityBarTooltip(
   count: number,
   roleLabel: 'interne' | 'senior'
 ) {
   return `${count} activité${count > 1 ? 's' : ''} ${roleLabel}${count > 1 ? 's' : ''}`;
-}
-
-function isAnalyticsTrackingEntry(entry: ActivityLogEntry) {
-  return (
-    entry.analyticsEvent?.kind === 'intervention_form' ||
-    entry.analyticsEvent?.kind === 'senior_evaluation'
-  );
 }
 
 function formatWorkflowDurationLabel(valueInMs: number | null) {
@@ -846,310 +756,6 @@ function formatTierObtainedCountLabel(label: string, count: number) {
   return `${label} obtenu par ${count} interne${count > 1 ? 's' : ''}`;
 }
 
-type AdminActivityBucket = {
-  id: string;
-  label: string;
-  recordedCount: number;
-  evaluatedCount: number;
-};
-
-function getAdminAnalyticsPeriodLabel(period: AdminActivityAnalyticsPeriod) {
-  return (
-    ADMIN_ACTIVITY_ANALYTICS_PERIOD_OPTIONS.find((option) => option.value === period)
-      ?.label ?? '30 jours'
-  );
-}
-
-function getAdminAnalyticsPeriodStart(
-  period: AdminActivityAnalyticsPeriod,
-  referenceDate: Date
-) {
-  if (period === '7d') {
-    const start = addDays(referenceDate, -6);
-
-    start.setHours(0, 0, 0, 0);
-    return start;
-  }
-
-  if (period === '30d') {
-    const start = addDays(referenceDate, -29);
-
-    start.setHours(0, 0, 0, 0);
-    return start;
-  }
-
-  if (period === '6m') {
-    return startOfMonth(addMonths(referenceDate, -5));
-  }
-
-  return startOfMonth(addMonths(referenceDate, -11));
-}
-
-function buildAllTimeAdminCycleSummary(
-  activityLog: ActivityLogEntry[],
-  interventions: SavedIntervention[],
-  adminEvaluations: Record<string, AdminInterventionEvaluation>
-) {
-  const userActivityEntries = activityLog.filter(
-    (entry) => entry.actorRole === 'internal' || entry.actorRole === 'senior'
-  );
-  const completedInterventionFormEvents = userActivityEntries
-    .flatMap((entry) =>
-      entry.analyticsEvent?.kind === 'intervention_form'
-        ? [entry.analyticsEvent]
-        : []
-    );
-  const completedSeniorEvaluationEvents = userActivityEntries
-    .flatMap((entry) =>
-      entry.analyticsEvent?.kind === 'senior_evaluation'
-        ? [entry.analyticsEvent]
-        : []
-    );
-  const evaluatedInterventions = interventions.filter((intervention) =>
-    hasCompleteAdminEvaluation(adminEvaluations[intervention.id])
-  );
-  const recordingDelayValues = interventions
-    .map((intervention) => {
-      const delay =
-        new Date(intervention.savedAt).getTime() -
-        parseIsoDateValue(intervention.date).getTime();
-
-      return Number.isNaN(delay) || delay < 0 ? null : delay;
-    })
-    .filter((value): value is number => value != null);
-  const evaluationDelayValues = evaluatedInterventions
-    .map((intervention) => {
-      const updatedAt = adminEvaluations[intervention.id]?.updatedAt;
-
-      if (!updatedAt) return null;
-
-      const delay =
-        new Date(updatedAt).getTime() - new Date(intervention.savedAt).getTime();
-
-      return Number.isNaN(delay) || delay < 0 ? null : delay;
-    })
-    .filter((value): value is number => value != null);
-
-  return {
-    averageEvaluationDelayMs: averageNumbers(evaluationDelayValues),
-    averageInterventionFormClickCount: averageNumbers(
-      completedInterventionFormEvents.map((event) => event.clickCount)
-    ),
-    averageInterventionFormDurationMs: averageNumbers(
-      completedInterventionFormEvents.map((event) => event.durationMs)
-    ),
-    averageRecordingDelayMs: averageNumbers(recordingDelayValues),
-    averageSeniorEvaluationClickCount: averageNumbers(
-      completedSeniorEvaluationEvents.map((event) => event.clickCount)
-    ),
-    averageSeniorEvaluationDurationMs: averageNumbers(
-      completedSeniorEvaluationEvents.map((event) => event.durationMs)
-    ),
-    completedInterventionFormCount: completedInterventionFormEvents.length,
-    completedSeniorEvaluationCount: completedSeniorEvaluationEvents.length,
-    evaluatedCount: evaluatedInterventions.length,
-    recordedCount: interventions.length,
-  };
-}
-
-function getAdminRelanceThresholdDays(window: AdminRelanceWindow) {
-  if (window === '1m') {
-    return 30;
-  }
-
-  if (window === '3m') {
-    return 90;
-  }
-
-  return 14;
-}
-
-function buildAdminActivityAnalyticsBuckets(
-  activityLog: ActivityLogEntry[],
-  period: AdminActivityAnalyticsPeriod
-) {
-  const referenceDate = new Date();
-  const userEntries = activityLog.filter(
-    (entry) =>
-      (entry.actorRole === 'internal' || entry.actorRole === 'senior') &&
-      !isAnalyticsTrackingEntry(entry)
-  );
-  const bucketBlueprints =
-    period === '6m' || period === '1y'
-      ? Array.from({ length: period === '6m' ? 6 : 12 }, (_, index) => {
-          const monthDate = addMonths(
-            referenceDate,
-            index - (period === '6m' ? 5 : 11)
-          );
-          const start = startOfMonth(monthDate);
-          const end = endOfMonth(monthDate);
-
-          return {
-            id: start.toISOString(),
-            label: start.toLocaleDateString('fr-FR', {
-              month: 'short',
-              year: period === '1y' ? '2-digit' : undefined,
-            }),
-            start,
-            end,
-          };
-        })
-      : Array.from({ length: period === '7d' ? 7 : 30 }, (_, index) => {
-            const offset = period === '7d' ? 6 : 29;
-            const date = addDays(referenceDate, index - offset);
-            const start = new Date(date);
-
-            start.setHours(0, 0, 0, 0);
-
-            const end = new Date(date);
-
-            end.setHours(23, 59, 59, 999);
-
-            return {
-              id: start.toISOString(),
-              label: start.toLocaleDateString('fr-FR', {
-                day: 'numeric',
-                month: 'short',
-              }),
-              start,
-              end,
-            };
-          })
-        ;
-
-  return bucketBlueprints.map((bucket) => {
-    const counts = userEntries.reduce(
-      (current, entry) => {
-        const timestamp = new Date(entry.createdAt);
-
-        if (Number.isNaN(timestamp.getTime())) {
-          return current;
-        }
-
-        if (timestamp < bucket.start || timestamp > bucket.end) {
-          return current;
-        }
-
-        if (entry.actorRole === 'internal') {
-          current.internalCount += 1;
-        }
-
-        if (entry.actorRole === 'senior') {
-          current.seniorCount += 1;
-        }
-
-        current.totalCount += 1;
-        return current;
-      },
-      { internalCount: 0, seniorCount: 0, totalCount: 0 }
-    );
-
-    return {
-      id: bucket.id,
-      label: bucket.label,
-      ...counts,
-    };
-  });
-}
-
-function buildAdminActivityBuckets(
-  savedInterventions: SavedIntervention[],
-  adminEvaluations: Record<string, AdminInterventionEvaluation>,
-  range: AdminActivityRange
-) {
-  const today = new Date();
-  const latestInterventionDate = savedInterventions.reduce<Date>(
-    (latest, intervention) => {
-      const currentDate = parseIsoDateValue(intervention.date);
-
-      return currentDate > latest ? currentDate : latest;
-    },
-    today
-  );
-  const referenceDate = latestInterventionDate > today ? latestInterventionDate : today;
-  const bucketBlueprints =
-    range === 'day'
-      ? Array.from({ length: 7 }, (_, index) => {
-          const date = addDays(referenceDate, index - 6);
-          const start = new Date(date);
-
-          start.setHours(0, 0, 0, 0);
-
-          const end = new Date(date);
-
-          end.setHours(23, 59, 59, 999);
-
-          return {
-            id: date.toISOString(),
-            label: date.toLocaleDateString('fr-FR', {
-              day: 'numeric',
-              month: 'short',
-            }),
-            start,
-            end,
-          };
-        })
-      : range === 'week'
-        ? Array.from({ length: 8 }, (_, index) => {
-            const weekStart = startOfWeek(addDays(referenceDate, (index - 7) * 7));
-            const weekEnd = endOfWeek(weekStart);
-
-            return {
-              id: weekStart.toISOString(),
-              label: `${weekStart.toLocaleDateString('fr-FR', {
-                day: 'numeric',
-                month: 'short',
-              })} - ${weekEnd.toLocaleDateString('fr-FR', {
-                day: 'numeric',
-                month: 'short',
-              })}`,
-              start: weekStart,
-              end: weekEnd,
-            };
-          })
-        : Array.from({ length: 6 }, (_, index) => {
-            const monthDate = addMonths(referenceDate, index - 5);
-            const monthStart = startOfMonth(monthDate);
-            const monthEnd = endOfMonth(monthDate);
-
-            return {
-              id: monthStart.toISOString(),
-              label: monthStart.toLocaleDateString('fr-FR', {
-                month: 'short',
-                year: 'numeric',
-              }),
-              start: monthStart,
-              end: monthEnd,
-            };
-          });
-
-  return bucketBlueprints.map((bucket) => {
-    const counters = savedInterventions.reduce(
-      (current, intervention) => {
-        const interventionDate = parseIsoDateValue(intervention.date);
-
-        if (interventionDate < bucket.start || interventionDate > bucket.end) {
-          return current;
-        }
-
-        return {
-          recordedCount: current.recordedCount + 1,
-          evaluatedCount:
-            current.evaluatedCount +
-            (hasCompleteAdminEvaluation(adminEvaluations[intervention.id]) ? 1 : 0),
-        };
-      },
-      { recordedCount: 0, evaluatedCount: 0 }
-    );
-
-    return {
-      id: bucket.id,
-      label: bucket.label,
-      ...counters,
-    };
-  });
-}
-
 export function AdminScreen() {
   const {
     adminEvaluations,
@@ -1170,7 +776,6 @@ export function AdminScreen() {
     institutions,
     isAdmin,
     isSenior,
-    notebookDocuments,
     logout,
     recordActivity,
     regenerateAccessKey,
@@ -1187,7 +792,6 @@ export function AdminScreen() {
     selectedSenior,
     surgicalProcedureOptions,
     updateInternalProfile,
-    updateInternalCredentials,
     updateSeniorProfile,
     updateSeniorManagedInternals,
     updateSeniorCredentials,
@@ -1205,8 +809,6 @@ export function AdminScreen() {
   const [detailedActivitiesVisibleCount, setDetailedActivitiesVisibleCount] =
     useState(ADMIN_DETAILED_ACTIVITY_PAGE_SIZE);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-  const [selectedProfileViewSource, setSelectedProfileViewSource] =
-    useState<AdminProfileViewSource>('profiles');
   const [profilesTab, setProfilesTab] = useState<ProfileAccountTab>('internal');
   const [profileEditorType, setProfileEditorType] =
     useState<ProfileAccountTab>('internal');
@@ -1232,7 +834,6 @@ export function AdminScreen() {
     useState<string | null>(null);
   const [trophyFilter, setTrophyFilter] = useState<AdminTrophyFilter>('all');
   const [trophySearch, setTrophySearch] = useState('');
-  const [selectedTrophyId, setSelectedTrophyId] = useState<string | null>(null);
   const [trophyDraft, setTrophyDraft] = useState<AdminTrophyDefinition | null>(null);
   const [trophyFormFeedback, setTrophyFormFeedback] =
     useState<TrophyFormFeedback>(null);
@@ -1245,25 +846,13 @@ export function AdminScreen() {
   const analyticsChartScrollRef = useRef<HTMLDivElement | null>(null);
   const [createForm, setCreateForm] =
     useState<CreateInternalProfileInput>(EMPTY_CREATE_FORM);
-  const [editingInternalCredentialsProfileId, setEditingInternalCredentialsProfileId] =
-    useState<string | null>(null);
-  const [editInternalCredentialsForm, setEditInternalCredentialsForm] =
-    useState<UpdateInternalCredentialsInput>(
-      EMPTY_UPDATE_INTERNAL_CREDENTIALS_FORM
-    );
   const [createSeniorForm, setCreateSeniorForm] =
     useState<CreateSeniorProfileInput>(EMPTY_CREATE_SENIOR_FORM);
   const [editingSeniorId, setEditingSeniorId] = useState<string | null>(null);
-  const [editSeniorCredentialsForm, setEditSeniorCredentialsForm] =
-    useState<UpdateSeniorCredentialsInput>(
-      EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM
-    );
   const [interventionFilters, setInterventionFilters] =
     useState<AdminInterventionFilters>(EMPTY_INTERVENTION_FILTERS);
   const [feedback, setFeedback] = useState<FeedbackState>(null);
   const [analyticsFeedback, setAnalyticsFeedback] = useState<FeedbackState>(null);
-  const [internalCredentialsFeedback, setInternalCredentialsFeedback] =
-    useState<FeedbackState>(null);
   const [seniorFeedback, setSeniorFeedback] = useState<FeedbackState>(null);
   const [seniorAccountFeedback, setSeniorAccountFeedback] =
     useState<FeedbackState>(null);
@@ -1299,7 +888,7 @@ export function AdminScreen() {
     useState<string | null>(null);
   const [institutionFeedback, setInstitutionFeedback] =
     useState<FeedbackState>(null);
-  useScrollResetOnChange([view]);
+  useScrollResetOnChange(view);
 
   useEffect(() => {
     if (view !== 'profiles') {
@@ -1728,6 +1317,12 @@ export function AdminScreen() {
     const recentRecordedInterventions = sortedInterventions.filter(
       (intervention) => intervention.savedAt >= analyticsPeriodStartIso
     );
+    const periodEvaluationCounts = buildEvaluationPeriodCounts(
+      sortedInterventions,
+      adminEvaluations,
+      analyticsPeriodStartIso,
+      referenceDate.toISOString()
+    );
     const evaluatedInterventions = sortedInterventions.filter((intervention) =>
       hasCompleteAdminEvaluation(adminEvaluations[intervention.id])
     );
@@ -1750,13 +1345,9 @@ export function AdminScreen() {
       })
       .filter((value): value is number => value != null);
     const recordingDelayValues = recentRecordedInterventions
-      .map((intervention) => {
-        const delay =
-          new Date(intervention.savedAt).getTime() -
-          parseIsoDateValue(intervention.date).getTime();
-
-        return Number.isNaN(delay) || delay < 0 ? null : delay;
-      })
+      .map((intervention) =>
+        getCalendarDayDifference(intervention.date, intervention.savedAt)
+      )
       .filter((value): value is number => value != null);
     const interventionFormDurationValues = completedInterventionFormEvents.map(
       (event) => event.durationMs
@@ -1943,7 +1534,7 @@ export function AdminScreen() {
         return !Number.isNaN(lastLoginTime) && lastLoginTime >= analyticsPeriodStart.getTime();
       }).length,
       averageEvaluationDelayMs: averageNumbers(evaluationDelayValues),
-      averageRecordingDelayMs: averageNumbers(recordingDelayValues),
+      averageRecordingDelayDays: averageNumbers(recordingDelayValues),
       chartMax: Math.max(
         ...activityAnalyticsBuckets.flatMap((bucket) => [
           bucket.internalCount,
@@ -1951,18 +1542,15 @@ export function AdminScreen() {
         ]),
         1
       ),
-      evaluationRate:
-        recentRecordedInterventions.length > 0
-          ? Math.round(
-              (recentEvaluatedInterventions.length / recentRecordedInterventions.length) * 100
-            )
-          : 0,
+      evaluatedRecordedCount: periodEvaluationCounts.evaluatedRecordedCount,
+      evaluationRate: periodEvaluationCounts.evaluationRate,
+      evaluationsPerformedCount:
+        periodEvaluationCounts.evaluationsPerformedCount,
       neverConnectedCount: relanceProfiles.filter(
         (profile) => profile.inactiveDays == null
       ).length,
       recentActivityCount: recentActivityEntries.length,
       recentDetailedActivities: visibleActivityEntries.slice(0, 24),
-      recentEvaluatedCount: recentEvaluatedInterventions.length,
       recentRecordedCount: recentRecordedInterventions.length,
       averageInterventionFormDurationMs: averageNumbers(interventionFormDurationValues),
       averageInterventionFormClickCount: averageNumbers(interventionFormClickValues),
@@ -2037,10 +1625,6 @@ export function AdminScreen() {
   useEffect(() => {
     setDetailedActivitiesVisibleCount(ADMIN_DETAILED_ACTIVITY_PAGE_SIZE);
   }, [activityAnalyticsSummary.recentDetailedActivities.length, activityAnalyticsPeriod]);
-  const customSeniorAccounts = useMemo(
-    () => customSeniors.filter((senior) => senior.isCustom),
-    [customSeniors]
-  );
   const getConnectionActivities = (connection: AdminUserConnection) =>
     (recentActivitiesByActor[`${connection.actorRole}:${connection.id}`] ?? [])
       .filter((entry) => entry.createdAt >= connection.lastLoginAt)
@@ -2084,13 +1668,6 @@ export function AdminScreen() {
         right.createdAt.localeCompare(left.createdAt)
       ),
     [internalProfiles]
-  );
-  const seniorProfilesForAdminList = useMemo(
-    () =>
-      [...customSeniorAccounts].sort((left, right) =>
-        (right.createdAt ?? '').localeCompare(left.createdAt ?? '')
-      ),
-    [customSeniorAccounts]
   );
   const allSeniorProfilesForAdminList = useMemo(
     () =>
@@ -2253,6 +1830,7 @@ export function AdminScreen() {
     });
   }, [
     adminEvaluations,
+    customSurgicalInterventions,
     profileHistoryDateFrom,
     profileHistoryDateTo,
     profileHistorySearch,
@@ -2261,7 +1839,6 @@ export function AdminScreen() {
     selectableSeniors,
     selectedProfile,
     selectedProfileInterventions,
-    surgicalProcedureOptions,
   ]);
   const selectedProfileEvaluatedInterventions = useMemo(
     () =>
@@ -2365,7 +1942,11 @@ export function AdminScreen() {
     return Array.from(optionsByKey.values()).sort((left, right) =>
       left.label.localeCompare(right.label, 'fr-FR', { sensitivity: 'base' })
     );
-  }, [selectedProfileInterventions, surgicalInterventionDefinitions, surgicalProcedureOptions]);
+  }, [
+    customSurgicalInterventions,
+    selectedProfileInterventions,
+    surgicalInterventionDefinitions,
+  ]);
   const selectedProfileProgressProcedureOption =
     selectedProfileProgressProcedureOptions.find(
       (option) => option.key === profileProgressProcedureKey
@@ -2625,7 +2206,11 @@ export function AdminScreen() {
         (left, right) =>
           left.order - right.order || left.label.localeCompare(right.label, 'fr-FR')
       );
-  }, [customSurgicalInterventions, selectedProfileProgressInterventions]);
+  }, [
+    adminEvaluations,
+    customSurgicalInterventions,
+    selectedProfileProgressInterventions,
+  ]);
   const selectedEvaluationIntervention =
     sortedInterventions.find(
       (intervention) => intervention.id === selectedEvaluationInterventionId
@@ -2633,12 +2218,16 @@ export function AdminScreen() {
   const selectedEvaluationInternal = selectedEvaluationIntervention
     ? getInternalById(selectedEvaluationIntervention.internalId, internalProfiles)
     : null;
-  const selectedEvaluationChecklistSteps = selectedEvaluationIntervention
-    ? getHistoricalChecklistSteps(
-        selectedEvaluationIntervention,
-        customSurgicalInterventions
-      )
-    : [];
+  const selectedEvaluationChecklistSteps = useMemo(
+    () =>
+      selectedEvaluationIntervention
+        ? getHistoricalChecklistSteps(
+            selectedEvaluationIntervention,
+            customSurgicalInterventions
+          )
+        : [],
+    [customSurgicalInterventions, selectedEvaluationIntervention]
+  );
   const selectedEvaluation =
     selectedEvaluationInterventionId != null
       ? adminEvaluations[selectedEvaluationInterventionId]
@@ -2752,15 +2341,11 @@ export function AdminScreen() {
     selectedProfileProgressApproachOptions,
   ]);
 
-  const openProfileStats = (
-    profile: InternalProfile,
-    source: AdminProfileViewSource
-  ) => {
+  const openProfileStats = (profile: InternalProfile) => {
     setProfileStatsTab('progress');
     setProfileProgressProcedureKey('');
     setProfileProgressApproach('');
     setSelectedProfileId(profile.id);
-    setSelectedProfileViewSource(source);
     setView('profile');
     recordActivity(
       'Consultation des statistiques d’un interne',
@@ -3154,22 +2739,6 @@ export function AdminScreen() {
     setSeniorAccountFeedback(null);
   };
 
-  const startSeniorCredentialsEdition = (senior: Senior) => {
-    startSeniorEdition(senior);
-    setSeniorAccountFeedback(null);
-  };
-
-  const handleEditSeniorCredentialsFieldChange = (
-    field: keyof UpdateSeniorCredentialsInput,
-    value: string
-  ) => {
-    setEditSeniorCredentialsForm((current) => ({
-      ...current,
-      [field]: value,
-    }));
-    setSeniorAccountFeedback(null);
-  };
-
   const handleCreateProfile = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -3313,34 +2882,6 @@ export function AdminScreen() {
     }
   };
 
-  const handleUpdateSeniorCredentials = async (
-    event: FormEvent<HTMLFormElement>,
-    seniorId: string
-  ) => {
-    event.preventDefault();
-    setSeniorFeedback(null);
-
-    const result = await updateSeniorCredentials(
-      seniorId,
-      {
-        ...editSeniorCredentialsForm,
-        mustChangePassword: true,
-      }
-    );
-
-    setSeniorAccountFeedback({
-      kind: result.success ? 'success' : 'error',
-      message: result.message,
-    });
-
-    if (!result.success) {
-      return;
-    }
-
-    setEditingSeniorId(null);
-    setEditSeniorCredentialsForm(EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM);
-  };
-
   const handleDeactivateSeniorProfile = async (senior: Senior) => {
     const seniorLabel = formatSeniorDisplayName(senior);
     const confirmed = window.confirm(
@@ -3354,7 +2895,6 @@ export function AdminScreen() {
     try {
       await deactivateSeniorProfile(senior.id);
       setEditingSeniorId((current) => (current === senior.id ? null : current));
-      setEditSeniorCredentialsForm(EMPTY_UPDATE_SENIOR_CREDENTIALS_FORM);
       setSeniorFeedback(null);
       setSeniorAccountFeedback({
         kind: 'success',
@@ -3406,7 +2946,6 @@ export function AdminScreen() {
     const nextDraft = createEmptyTrophyDefinition(type);
 
     setTrophyDraft(nextDraft);
-    setSelectedTrophyId(nextDraft.id);
     setTrophyFormFeedback(null);
     setTrophyValidationErrors([]);
     setView('trophy-editor');
@@ -3441,7 +2980,6 @@ export function AdminScreen() {
         };
 
     setTrophyDraft(ensureTrophyDefinitionShape(editableDefinition));
-    setSelectedTrophyId(trophyId);
     setTrophyFormFeedback(null);
     setTrophyValidationErrors([]);
     setView('trophy-editor');
@@ -3451,7 +2989,6 @@ export function AdminScreen() {
     const duplicate = cloneTrophyDefinition(trophy);
 
     setTrophyDraft(duplicate);
-    setSelectedTrophyId(duplicate.id);
     setTrophyFormFeedback({
       kind: 'success',
       message: 'Une copie brouillon a été préparée. Vous pouvez la modifier avant enregistrement.',
@@ -3482,7 +3019,6 @@ export function AdminScreen() {
 
     try {
       await deleteAdminTrophy(trophyId);
-      setSelectedTrophyId((current) => (current === trophyId ? null : current));
       if (trophyDraft?.id === trophyId) {
         setTrophyDraft(null);
         setView('trophies');
@@ -3785,8 +3321,7 @@ export function AdminScreen() {
         ...normalizedDraft,
         updatedAt: new Date().toISOString(),
       };
-      const savedTrophy = await saveAdminTrophy(nextDraft);
-      setSelectedTrophyId(savedTrophy.id);
+      await saveAdminTrophy(nextDraft);
       setTrophyFormFeedback({
         kind: 'success',
         message:
@@ -3832,61 +3367,87 @@ export function AdminScreen() {
     }
   };
 
-  const handleExportFilteredBlocks = () => {
-    downloadInterventionsExcel(
+  const handleExportFilteredBlocks = async () => {
+    const exportedCount = await downloadInterventionsExcel(
       filteredInterventions,
       internalProfiles,
       customSurgicalInterventions,
       adminEvaluations,
-      selectableSeniors
+      selectableSeniors,
+      {
+        audience: 'admin',
+        scopeLabel: 'Filtres de l’historique administrateur',
+      }
+    );
+    recordActivity(
+      'Export XLSX',
+      'Historique administrateur',
+      `Sélection filtrée · ${exportedCount} intervention${
+        exportedCount > 1 ? 's' : ''
+      }`
     );
   };
 
-  const handleExport = () => {
-    downloadInterventionsExcel(
+  const handleExport = async () => {
+    const exportedCount = await downloadInterventionsExcel(
       selectedInterventions,
       internalProfiles,
       customSurgicalInterventions,
       adminEvaluations,
-      selectableSeniors
+      selectableSeniors,
+      { audience: 'admin' }
+    );
+    recordActivity(
+      'Export XLSX',
+      'Historique administrateur',
+      `Sélection · ${exportedCount} intervention${
+        exportedCount > 1 ? 's' : ''
+      }`
     );
   };
 
-  const handleSelectedProfileExport = () => {
-    downloadInterventionsExcel(
-      selectedProfileInterventions,
-      internalProfiles,
-      customSurgicalInterventions,
-      adminEvaluations,
-      selectableSeniors
-    );
-  };
-
-  const handleExportAnalyticsExcel = () => {
+  const handleExportAnalyticsExcel = async () => {
     const generatedAt = new Date();
 
-    downloadAnalyticsExcel({
-      activityLog,
-      adminEvaluations,
-      allTimeCycleSummary: allTimeActivityCycleSummary,
-      customSurgicalInterventions,
-      internalProfiles,
-      period: activityAnalyticsPeriod,
-      periodEndIso: generatedAt.toISOString(),
-      periodLabel: analyticsPeriodLabel,
-      periodStartIso: getAdminAnalyticsPeriodStart(
-        activityAnalyticsPeriod,
-        generatedAt
-      ).toISOString(),
-      periodSummary: activityAnalyticsSummary,
-      generatedAtIso: generatedAt.toISOString(),
-      savedInterventions,
-      selectableSeniors,
-    });
-    setAnalyticsFeedback({
-      kind: 'success',
-      message: 'L’export des données au format Excel a bien été téléchargé.',
-    });
+    try {
+      await downloadAnalyticsExcel({
+        activityLog,
+        adminEvaluations,
+        allTimeCycleSummary: allTimeActivityCycleSummary,
+        customSurgicalInterventions,
+        internalProfiles,
+        period: activityAnalyticsPeriod,
+        periodEndIso: generatedAt.toISOString(),
+        periodLabel: analyticsPeriodLabel,
+        periodStartIso: getAdminAnalyticsPeriodStart(
+          activityAnalyticsPeriod,
+          generatedAt
+        ).toISOString(),
+        periodSummary: activityAnalyticsSummary,
+        generatedAtIso: generatedAt.toISOString(),
+        savedInterventions,
+        selectableSeniors,
+      });
+      recordActivity(
+        'Export XLSX',
+        'Analytique administrateur',
+        `${analyticsPeriodLabel} · ${activityAnalyticsSummary.recentRecordedCount} intervention${
+          activityAnalyticsSummary.recentRecordedCount > 1 ? 's' : ''
+        }`
+      );
+      setAnalyticsFeedback({
+        kind: 'success',
+        message: 'L’export des données au format Excel a été préparé.',
+      });
+    } catch (error) {
+      setAnalyticsFeedback({
+        kind: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Impossible de préparer l’export Excel.',
+      });
+    }
   };
 
   const handleSendRelanceEmail = (profile: AdminRelanceProfile) => {
@@ -3958,7 +3519,7 @@ export function AdminScreen() {
     if (!profile.authUserId) {
       setDisabledProfilesFeedback({
         kind: 'error',
-        message: `Le compte historique de ${profileLabel} ne possède plus d’identité Supabase Auth et ne peut pas être réactivé automatiquement.`,
+        message: `Le compte historique de ${profileLabel} ne possède plus d’identité de connexion et ne peut pas être réactivé automatiquement.`,
       });
       return;
     }
@@ -4223,12 +3784,6 @@ export function AdminScreen() {
         value: getSelectedEvaluationContextValue('IMC de la patiente'),
       },
       {
-        label: 'Durée opératoire',
-        value: selectedEvaluationIntervention.operativeDurationMinutes
-          ? `${selectedEvaluationIntervention.operativeDurationMinutes} min`
-          : 'Non renseignée',
-      },
-      {
         label: 'Saignement',
         value: getSelectedEvaluationContextValue('Saignement per-opératoire'),
       },
@@ -4238,8 +3793,7 @@ export function AdminScreen() {
         (row) => !selectedEvaluationContextMetricLabels.has(row.label)
       );
     const selectedEvaluationClinicalDataCount =
-      selectedEvaluationVisibleContextRows.length +
-      (selectedEvaluationIntervention.operativeDurationMinutes ? 1 : 0);
+      selectedEvaluationVisibleContextRows.length;
     const priorAutonomyScores = sortedInterventions
       .filter(
         (intervention) =>
@@ -4318,20 +3872,8 @@ export function AdminScreen() {
                 <small className="senior-evaluation-summary-card__native-indication">
                   Indication : {indicationLabel || 'Non renseignée'}
                 </small>
-                <small className="senior-evaluation-summary-card__native-timing">
-                  Début : {selectedEvaluationIntervention.startTime ?? 'Non renseigné'}
-                  <span className="senior-evaluation-summary-card__native-duration">
-                    {' · '}
-                    Durée :{' '}
-                    {selectedEvaluationIntervention.operativeDurationMinutes
-                      ? `${selectedEvaluationIntervention.operativeDurationMinutes} min`
-                      : 'Non renseignée'}
-                  </span>
-                </small>
                 <small className="senior-evaluation-summary-card__web-meta">
                   {indicationLabel || 'Indication non renseignée'}
-                  {' · '}
-                  {selectedEvaluationIntervention.startTime ?? 'Horaire non renseigné'}
                 </small>
               </div>
             </div>
@@ -4633,16 +4175,6 @@ export function AdminScreen() {
                   <span>
                     <strong>Méthode d’entrée</strong>
                     {selectedEvaluationEntryTechniqueLabel}
-                  </span>
-                  <span>
-                    <strong>Début</strong>
-                    {selectedEvaluationIntervention.startTime ?? 'Non renseigné'}
-                  </span>
-                  <span>
-                    <strong>Durée</strong>
-                    {selectedEvaluationIntervention.operativeDurationMinutes
-                      ? `${selectedEvaluationIntervention.operativeDurationMinutes} min`
-                      : 'Non renseignée'}
                   </span>
                 </div>
               </div>
@@ -5118,10 +4650,10 @@ export function AdminScreen() {
             <article className="admin-metric-card admin-metric-card--compact admin-metric-card--compact-no-icon">
               <div>
                 <strong>{activityAnalyticsSummary.evaluationRate}%</strong>
-                <span>Blocs évalués</span>
+                <span>Blocs de la période évalués</span>
                 <small>
-                  {activityAnalyticsSummary.recentEvaluatedCount} évaluations enregistrées
-                  sur {analyticsPeriodLabel.toLocaleLowerCase('fr-FR')}
+                  {activityAnalyticsSummary.evaluatedRecordedCount} sur{' '}
+                  {activityAnalyticsSummary.recentRecordedCount} interventions saisies
                 </small>
               </div>
             </article>
@@ -5129,7 +4661,9 @@ export function AdminScreen() {
             <article className="admin-metric-card admin-metric-card--compact admin-metric-card--compact-no-icon">
               <div>
                 <strong>
-                  {formatAdminDelayLabel(activityAnalyticsSummary.averageRecordingDelayMs)}
+                  {formatCalendarDaysLabel(
+                    activityAnalyticsSummary.averageRecordingDelayDays
+                  )}
                 </strong>
                 <span>Délai moyen bloc → saisie</span>
                 <small>date opératoire → enregistrement</small>
@@ -5421,8 +4955,8 @@ export function AdminScreen() {
                 <span>Blocs enregistrés</span>
               </article>
               <article className="admin-usage-cycle-pill">
-                <strong>{activityAnalyticsSummary.recentEvaluatedCount}</strong>
-                <span>Évaluations enregistrées</span>
+                <strong>{activityAnalyticsSummary.evaluationsPerformedCount}</strong>
+                <span>Évaluations réalisées</span>
               </article>
             </div>
 
@@ -5430,7 +4964,9 @@ export function AdminScreen() {
               <article className="admin-usage-delay-card">
                 <span>Délai moyen bloc → saisie</span>
                 <strong>
-                  {formatAdminDelayLabel(activityAnalyticsSummary.averageRecordingDelayMs)}
+                  {formatCalendarDaysLabel(
+                    activityAnalyticsSummary.averageRecordingDelayDays
+                  )}
                 </strong>
               </article>
               <article className="admin-usage-delay-card">
@@ -5688,45 +5224,10 @@ export function AdminScreen() {
 
   if (isAdmin && view === 'account') {
     return (
-      <AdminPageShell
-        backLabel="Retour à l’espace administrateur"
+      <AdminAccountView
         onBack={() => setView('home')}
-        subtitle="Informations du compte administrateur et accès au support."
-        title="Mon profil administrateur"
-      >
-        <SectionCard className="admin-dashboard-card" title="Compte administrateur">
-          <div className="info-grid">
-            <div className="info-block">
-              <span className="info-block__label">Rôle</span>
-              <strong className="info-block__value">Administration</strong>
-            </div>
-            <div className="info-block">
-              <span className="info-block__label">Identifiant</span>
-              <strong className="info-block__value">admin</strong>
-            </div>
-            <div className="info-block">
-              <span className="info-block__label">Périmètre</span>
-              <strong className="info-block__value">
-                Profils, interventions, historique, trophées
-              </strong>
-            </div>
-          </div>
-        </SectionCard>
-
-        <SectionCard
-          className="admin-dashboard-card"
-          description="Besoin d’un accès, d’une correction de données ou d’une assistance technique ?"
-          title="Support"
-        >
-          <div className="action-stack">
-            <PrimaryButton
-              label="Contacter le support"
-              onPress={handleAdminSupportClick}
-              variant="secondary"
-            />
-          </div>
-        </SectionCard>
-      </AdminPageShell>
+        onSupport={handleAdminSupportClick}
+      />
     );
   }
 
@@ -6649,7 +6150,7 @@ export function AdminScreen() {
                         <div className="admin-profile-card__actions admin-profile-card__actions--grid">
                           <button
                             className="mini-button mini-button--secondary"
-                            onClick={() => openProfileStats(profile, 'profiles')}
+                            onClick={() => openProfileStats(profile)}
                             type="button"
                           >
                             Voir les statistiques
@@ -8637,6 +8138,7 @@ export function AdminScreen() {
         onEvaluate={openEvaluationTool}
         onLogout={logout}
         refreshBackendData={refreshBackendData}
+        recordActivity={recordActivity}
         savedInterventions={savedInterventions}
         selectableSeniors={selectableSeniors}
         selectedSenior={selectedSenior}
@@ -8955,7 +8457,7 @@ export function AdminScreen() {
           {isAdmin ? (
           <SectionCard
             title="Interventions enregistrées"
-            description={`${filteredCountLabel} · export CSV compatible Excel.`}
+            description={`${filteredCountLabel} · export Excel nominatif.`}
           >
             {sortedInterventions.length === 0 ? (
               <div className="validation-box">
@@ -9056,7 +8558,7 @@ export function AdminScreen() {
                       onClick={handleExport}
                       type="button"
                     >
-                      Exporter en CSV
+                      Exporter en Excel
                     </button>
                   </div>
                 </div>

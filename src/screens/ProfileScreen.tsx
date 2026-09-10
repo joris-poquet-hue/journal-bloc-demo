@@ -16,6 +16,7 @@ import {
 import { ChangeEvent, FormEvent, ReactNode, useRef, useState } from 'react';
 
 import packageJson from '../../package.json';
+import { AccountSecurityPanel } from '../components/AccountSecurityPanel';
 import { InternalAvatar } from '../components/InternalAvatar';
 import { ScreenContainer } from '../components/ScreenContainer';
 import { buildSupportMailto } from '../supportConfig';
@@ -35,6 +36,7 @@ type AccountSheet =
   | 'photo'
   | 'email'
   | 'password'
+  | 'security'
   | 'export'
   | 'pending-interventions'
   | 'photo-removal'
@@ -46,6 +48,7 @@ const accountSheetLabels = {
   email: 'Adresse e-mail',
   export: 'Exporter mes statistiques',
   password: 'Mot de passe',
+  security: 'Sécurité et appareils',
   'pending-interventions': 'Interventions en attente',
   photo: 'Photo de profil',
   'photo-removal': 'Supprimer la photo de profil',
@@ -182,6 +185,7 @@ export function ProfileScreen() {
     customSurgicalInterventions,
     selectableSeniors,
     logout,
+    recordActivity,
     startNewIntervention,
     requestEmailChange,
     updateInternalCredentials,
@@ -360,7 +364,7 @@ export function ProfileScreen() {
     }
   };
 
-  const handleExport = () => {
+  const handleExport = async () => {
     if (internalInterventions.length === 0) {
       setFeedback({
         tone: 'error',
@@ -369,18 +373,40 @@ export function ProfileScreen() {
       return;
     }
 
-    downloadInterventionsExcel(
-      internalInterventions,
-      internalProfiles,
-      customSurgicalInterventions,
-      {},
-      selectableSeniors
-    );
-    setFeedback({
-      tone: 'success',
-      message: 'L’export Excel compatible a été téléchargé.',
-    });
-    closeSheet();
+    try {
+      const exportedCount = await downloadInterventionsExcel(
+        internalInterventions,
+        internalProfiles,
+        customSurgicalInterventions,
+        adminEvaluations,
+        selectableSeniors,
+        {
+          audience: 'internal',
+          scopeLabel: `Mes statistiques — ${selectedInternal.institution}`,
+        }
+      );
+
+      recordActivity(
+        'Export XLSX',
+        'Statistiques personnelles',
+        `Mes données · ${exportedCount} intervention${
+          exportedCount > 1 ? 's' : ''
+        }`
+      );
+      setFeedback({
+        tone: 'success',
+        message: 'L’export Excel a été préparé.',
+      });
+      closeSheet();
+    } catch (error) {
+      setFeedback({
+        tone: 'error',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Impossible de préparer l’export Excel.',
+      });
+    }
   };
 
   const handleDeletePendingIntervention = async () => {
@@ -399,7 +425,7 @@ export function ProfileScreen() {
       setPendingDeletionError(
         error instanceof Error
           ? error.message
-          : 'La suppression n’a pas pu être confirmée par Supabase.'
+          : 'La suppression n’a pas pu être confirmée par le serveur.'
       );
     } finally {
       setIsDeletingPendingIntervention(false);
@@ -660,9 +686,15 @@ export function ProfileScreen() {
             onClick={() => openSheet('password')}
           />
           <AccountActionRow
+            description="Double authentification et appareils connectés"
+            icon={<ShieldCheck strokeWidth={2.05} />}
+            label="Sécurité du compte"
+            onClick={() => openSheet('security')}
+          />
+          <AccountActionRow
             description={
               selectedInternal.contactEmail ||
-              'Adresse à confirmer lors de la première connexion'
+              'Adresse en attente de confirmation — récupération indisponible'
             }
             icon={<Mail strokeWidth={2.05} />}
             label="Adresse e-mail"
@@ -970,6 +1002,18 @@ export function ProfileScreen() {
               </AccountSheetFrame>
             ) : null}
 
+            {activeSheet === 'security' ? (
+              <AccountSheetFrame
+                description="Renforce la connexion et contrôle les sessions actives."
+                eyebrow="Mon profil"
+                icon={<ShieldCheck strokeWidth={2} />}
+                title="Sécurité et appareils"
+                onClose={closeSheet}
+              >
+                <AccountSecurityPanel />
+              </AccountSheetFrame>
+            ) : null}
+
             {activeSheet === 'email' ? (
               <AccountSheetFrame
                 description="La nouvelle adresse remplacera l’adresse actuelle après confirmation du lien reçu."
@@ -982,7 +1026,8 @@ export function ProfileScreen() {
                   <p className="account-sheet__text">
                     Adresse actuelle :{' '}
                     <strong>
-                      {selectedInternal.contactEmail || 'Non renseignée'}
+                      {selectedInternal.contactEmail ||
+                        'En attente de confirmation — récupération indisponible'}
                     </strong>
                   </p>
                   <SheetField

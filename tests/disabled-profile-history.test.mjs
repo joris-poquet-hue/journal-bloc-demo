@@ -7,6 +7,9 @@ function readSource(path) {
 }
 
 const adminScreen = readSource('../src/screens/AdminScreen.tsx');
+const adminAnalyticsModel = readSource(
+  '../src/screens/admin/adminAnalyticsModel.ts'
+);
 const backendRepository = readSource('../src/services/backendRepository.ts');
 const adminAccountService = readSource('../src/services/adminAccountService.ts');
 
@@ -144,11 +147,11 @@ test('les activités visant un profil conservent son UUID sans fausser les mesur
     /entry\.analyticsEvent\?\.kind === 'profile_target'[\s\S]*rpc\/record_profile_target_activity_event/
   );
 
-  const analyticsGuardStart = adminScreen.indexOf(
+  const analyticsGuardStart = adminAnalyticsModel.indexOf(
     'function isAnalyticsTrackingEntry'
   );
-  const analyticsGuardEnd = adminScreen.indexOf('\n}', analyticsGuardStart);
-  const analyticsGuard = adminScreen.slice(
+  const analyticsGuardEnd = adminAnalyticsModel.indexOf('\n}', analyticsGuardStart);
+  const analyticsGuard = adminAnalyticsModel.slice(
     analyticsGuardStart,
     analyticsGuardEnd
   );

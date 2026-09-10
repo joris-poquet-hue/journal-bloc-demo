@@ -1,6 +1,6 @@
-import { DependencyList, useEffect } from 'react';
+import { useEffect } from 'react';
 
-export function useScrollResetOnChange(deps: DependencyList) {
+export function useScrollResetOnChange(resetKey: string) {
   useEffect(() => {
     if (typeof window === 'undefined') {
       return;
@@ -20,5 +20,5 @@ export function useScrollResetOnChange(deps: DependencyList) {
 
     resetScrollPosition();
     requestAnimationFrame(resetScrollPosition);
-  }, deps);
+  }, [resetKey]);
 }

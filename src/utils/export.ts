@@ -24,7 +24,16 @@ import {
 } from '../types';
 import { calculateAutonomyScore } from './autonomyScore';
 import { getAuthoritativeChecklist } from './evaluationChecklist';
+import {
+  downloadInterventionsXlsx,
+  type InterventionExportOptions,
+} from './interventionsXlsx';
 import { buildSeniorInstitutionExportScope } from './seniorExportScope';
+
+export {
+  buildInterventionsWorksheets,
+  createInterventionsWorkbookBlob,
+} from './interventionsXlsx';
 
 type WorksheetData = {
   name: string;
@@ -215,7 +224,7 @@ function buildWorkbookXml(worksheets: WorksheetData[]) {
  xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
  xmlns:html="http://www.w3.org/TR/REC-html40">
   <DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
-    <Author>Codex</Author>
+    <Author>Mon Journal de Bloc</Author>
     <Created>${new Date().toISOString()}</Created>
   </DocumentProperties>
   <ExcelWorkbook xmlns="urn:schemas-microsoft-com:office:excel">
@@ -328,8 +337,6 @@ function createSummaryWorksheet(
     headers: [
       'ID intervention',
       'Date du bloc',
-      'Heure de début du bloc',
-      'Durée opératoire en minutes',
       'Date et heure d’enregistrement par l’interne',
       'Date et heure d’évaluation par le senior',
       'Délai avant évaluation senior en heures',
@@ -360,10 +367,6 @@ function createSummaryWorksheet(
       return [
         intervention.id,
         intervention.date,
-        intervention.startTime ?? '',
-        intervention.operativeDurationMinutes == null
-          ? ''
-          : `${intervention.operativeDurationMinutes}`,
         intervention.savedAt,
         context.evaluationTimestamp || 'Non évaluée',
         context.delayBeforeEvaluationHours || 'En attente',
@@ -421,11 +424,6 @@ function createInternalDataWorksheet(
       );
 
       return checklistSteps.map((step) => {
-        const level = getAuthoritativeChecklist(
-          intervention,
-          adminEvaluations[intervention.id]
-        )[step.id];
-
         return [
           intervention.id,
           internalLabel,
@@ -512,11 +510,6 @@ function createStepDetailWorksheet(
       );
 
       return checklistSteps.map((step, index) => {
-        const level = getAuthoritativeChecklist(
-          intervention,
-          adminEvaluations[intervention.id]
-        )[step.id];
-
         return [
           intervention.id,
           procedureLabel,
@@ -575,45 +568,25 @@ export function buildInterventionsWorkbookXml(
   return buildWorkbookXml(worksheets);
 }
 
-function downloadWorkbookXml(workbookXml: string) {
-  if (!workbookXml) {
-    return;
-  }
-
-  const blob = new Blob([`\uFEFF${workbookXml}`], {
-    type: 'application/vnd.ms-excel;charset=utf-8;',
-  });
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  const dateStamp = new Date().toISOString().slice(0, 10);
-
-  link.href = url;
-  link.download = `journal-de-bord-interventions-${dateStamp}.xls`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  window.URL.revokeObjectURL(url);
-}
-
 export function downloadInterventionsExcel(
   interventions: SavedIntervention[],
   internalProfiles: InternalProfile[],
   customInterventions: SurgicalInterventionDefinition[] = [],
   adminEvaluations: Record<string, AdminInterventionEvaluation> = {},
-  selectableSeniors: Senior[] = []
+  selectableSeniors: Senior[] = [],
+  options: InterventionExportOptions = {}
 ) {
-  downloadWorkbookXml(
-    buildInterventionsWorkbookXml(
-      interventions,
-      internalProfiles,
-      customInterventions,
-      adminEvaluations,
-      selectableSeniors
-    )
+  return downloadInterventionsXlsx(
+    interventions,
+    internalProfiles,
+    customInterventions,
+    adminEvaluations,
+    selectableSeniors,
+    options
   );
 }
 
-export function downloadSeniorInstitutionInterventionsExcel(
+export async function downloadSeniorInstitutionInterventionsExcel(
   senior: Senior,
   interventions: SavedIntervention[],
   internalProfiles: InternalProfile[],
@@ -628,12 +601,20 @@ export function downloadSeniorInstitutionInterventionsExcel(
     selectableSeniors
   );
 
-  downloadInterventionsExcel(
+  if (scope.interventions.length === 0) {
+    return 0;
+  }
+
+  await downloadInterventionsExcel(
     scope.interventions,
     scope.internalProfiles,
     customInterventions,
     adminEvaluations,
-    scope.selectableSeniors
+    scope.selectableSeniors,
+    {
+      audience: 'senior',
+      scopeLabel: `Internes actifs — ${senior.institution}`,
+    }
   );
 
   return scope.interventions.length;

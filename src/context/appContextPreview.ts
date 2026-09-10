@@ -136,8 +136,6 @@ export function isNativeAppShell() {
 export function createChecklistPreviewDraft(): InterventionDraft {
   return {
     date: getTodayIsoDate(),
-    startTime: null,
-    operativeDurationMinutes: null,
     internalId: CHECKLIST_PREVIEW_INTERNAL.id,
     seniorId: CHECKLIST_PREVIEW_SENIOR.id,
     procedure: CHECKLIST_PREVIEW_INTERVENTION.id,

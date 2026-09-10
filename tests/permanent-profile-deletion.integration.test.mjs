@@ -5,7 +5,12 @@ import test from 'node:test';
 
 import pg from 'pg';
 
-const connectionString = process.env.SUPABASE_TEST_POSTGRES_URL;
+const allowRestoreDrillTests = process.env.PROJECT1_RESTORE_DRILL === '1';
+const connectionString =
+  process.env.SUPABASE_TEST_POSTGRES_URL ||
+  (allowRestoreDrillTests
+    ? process.env.SUPABASE_POSTGRES_URL_NON_POOLING
+    : undefined);
 const requireTestDatabase = process.env.REQUIRE_SUPABASE_TEST_DB === '1';
 const migrationDirectory = new URL('../supabase/migrations/', import.meta.url);
 const migrationFiles = readdirSync(migrationDirectory)
@@ -20,6 +25,7 @@ if (requireTestDatabase && !connectionString) {
 
 if (
   connectionString &&
+  !allowRestoreDrillTests &&
   [
     process.env.SUPABASE_POSTGRES_URL_NON_POOLING,
     process.env.SUPABASE_POSTGRES_URL,
@@ -32,6 +38,24 @@ if (
   throw new Error(
     'Le test de suppression définitive refuse toute URL identique à la production.'
   );
+}
+
+if (connectionString && allowRestoreDrillTests) {
+  const testProjectRef = process.env.SUPABASE_TEST_PROJECT_REF?.trim();
+  const databaseUrl = new URL(connectionString);
+  const connectionIdentifiesTestProject = Boolean(
+    testProjectRef &&
+      (databaseUrl.hostname.includes(testProjectRef) ||
+        decodeURIComponent(databaseUrl.username)
+          .split('.')
+          .includes(testProjectRef))
+  );
+
+  if (!connectionIdentifiesTestProject) {
+    throw new Error(
+      'Le test de restauration exige un SUPABASE_TEST_PROJECT_REF correspondant à la base isolée.'
+    );
+  }
 }
 
 test(

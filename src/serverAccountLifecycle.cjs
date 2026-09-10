@@ -50,7 +50,7 @@ async function changeAccountLifecycle({
 
   if (!currentProfile.auth_user_id) {
     const error = new Error(
-      'Ce compte historique ne possède plus d’identité Supabase Auth et ne peut pas être réactivé automatiquement.'
+      'Ce compte historique ne possède plus d’identité de connexion et ne peut pas être réactivé automatiquement.'
     );
     error.status = 409;
     throw error;
@@ -97,7 +97,7 @@ async function changeAccountLifecycle({
 
   if (!updatedProfile) {
     const error = new Error(
-      'Supabase n’a pas retourné le profil après le changement d’état.'
+      'Le serveur n’a pas retourné le profil après le changement d’état.'
     );
     error.status = 502;
     throw error;

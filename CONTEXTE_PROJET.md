@@ -1,6 +1,6 @@
-# Contexte de Project1 — Version 1.5
+# Contexte de Project1 — Version 1.6
 
-> **STATUT : ACTIF — version 1.5 validée le 1er septembre 2026**
+> **STATUT : ACTIF — version 1.6 validée le 9 septembre 2026**
 >
 > Ce document constitue la source de référence validée pour les règles produit,
 > métier, fonctionnelles, techniques et de sécurité de Project1. Il doit être lu
@@ -161,12 +161,21 @@ et non uniquement par l'affichage ou le masquage de boutons.
 - L'utilisateur saisit son identifiant et sa clé provisoire.
 - Il renseigne ensuite une seule fois son adresse e-mail et crée un mot de passe
   personnel, saisi deux fois pour confirmation.
-- Un lien de confirmation est envoyé à l'adresse e-mail renseignée.
-- Le compte reste en attente et l'utilisateur n'accède pas à son espace tant que
-  le lien n'a pas été confirmé.
+- Dès que cette étape aboutit, la clé provisoire est définitivement invalidée,
+  toutes les sessions provisoires ouvertes avec cette clé sont révoquées et le
+  serveur crée une nouvelle session standard réservée au client qui a terminé
+  l'inscription.
+- Le profil actualisé et, dans l'application mobile, le nouveau jeton de session
+  sécurisé sont renvoyés au client. L'utilisateur accède immédiatement à son
+  espace, sans nouvelle connexion.
+- Un lien de confirmation est envoyé à l'adresse e-mail renseignée. Cette
+  confirmation ne bloque pas l'accès au compte : elle valide l'adresse et rend
+  ensuite la récupération du mot de passe disponible.
 - Un nouveau lien peut être demandé si le précédent a expiré.
-- La confirmation de l'adresse active le compte et invalide définitivement la
-  clé provisoire.
+- Si la création de la nouvelle session échoue après l'enregistrement du mot de
+  passe, le compte reste activé et la clé reste invalidée. L'interface demande à
+  l'utilisateur de se reconnecter avec son identifiant et son nouveau mot de
+  passe ; elle ne lui demande jamais de réutiliser la clé.
 
 ### 4.3 Connexions suivantes
 
@@ -188,8 +197,11 @@ et non uniquement par l'affichage ou le masquage de boutons.
 ### 4.5 Adresse e-mail
 
 - L'interne et le senior gèrent eux-mêmes leur adresse e-mail.
-- La première adresse n'est activée qu'après confirmation du lien envoyé par
-  e-mail.
+- La première adresse reste en attente jusqu'à la confirmation du lien envoyé,
+  sans empêcher l'accès immédiat au compte après la création du mot de passe.
+- Tant que cette première adresse n'est pas confirmée, la récupération du mot de
+  passe et les notifications de sécurité qui exigent une adresse vérifiée sont
+  indisponibles. L'interface et l'e-mail d'activation l'indiquent explicitement.
 - Après la première connexion, changer l'adresse exige le mot de passe actuel et
   une confirmation envoyée à la nouvelle adresse.
 - La nouvelle adresse est saisie une seule fois. L'adresse actuelle reste active
@@ -220,6 +232,10 @@ et non uniquement par l'affichage ou le masquage de boutons.
 
 - Un même compte peut posséder plusieurs sessions actives simultanément sur le
   web et l'application.
+- L'utilisateur peut consulter ses appareils connectés, révoquer une session
+  distante précise ou révoquer toutes les autres sessions. Les libellés
+  d'appareil restent génériques et ne conservent ni adresse IP ni agent
+  utilisateur brut.
 - Le bouton « Se déconnecter » révoque toutes les sessions du compte sur tous les
   appareils.
 - La désactivation administrative d'un compte révoque immédiatement toutes ses
@@ -240,6 +256,11 @@ et non uniquement par l'affichage ou le masquage de boutons.
   reste disponible en secours.
 - Une déconnexion globale ou une désactivation du compte invalide également
   l'accès biométrique.
+- La double authentification TOTP peut être activée depuis le compte. Dès qu'un
+  facteur est activé, son code est exigé à chaque nouvelle connexion. Elle est
+  signalée comme protection attendue pour les Seniors et Administrateurs.
+- L'activation et la désactivation du second facteur exigent le mot de passe
+  actuel. Leur confirmation révoque les autres sessions par précaution.
 
 ### 4.8 Cycle de vie du compte
 
@@ -306,15 +327,18 @@ et non uniquement par l'affichage ou le masquage de boutons.
 
 ### 5.2 Connexion et stockage local
 
-- Une connexion Internet est obligatoire pour consulter ou modifier les données.
+- Une connexion Internet est obligatoire pour consulter les données et pour
+  confirmer toute écriture officielle.
 - Supabase et les composants serveur autorisés constituent l'unique source de
   vérité.
-- L'application et le web ne proposent pas de mode hors ligne pour les données
-  métier.
-- Aucune donnée métier sensible ne doit être conservée durablement dans
+- L'application et le web ne proposent pas de consultation hors ligne des
+  données métier enregistrées. Une exception strictement limitée existe pour le
+  brouillon d'intervention en cours.
+- Aucune donnée métier sensible enregistrée ne doit être conservée durablement dans
   `localStorage`, `sessionStorage`, IndexedDB ou le cache du navigateur. Cela
   inclut notamment les profils, interventions, checklists, évaluations,
-  bloc-notes et journaux d'activité.
+  bloc-notes et journaux d'activité. Le brouillon temporaire autorisé ci-dessous
+  n'est jamais considéré comme une donnée enregistrée.
 - Sur le web, les données chargées restent uniquement en mémoire pendant la
   session active. Les identifiants de session ne sont jamais stockés dans les API
   de stockage JavaScript ; ils utilisent un mécanisme serveur protégé par un
@@ -325,15 +349,29 @@ et non uniquement par l'affichage ou le masquage de boutons.
 - Le stockage local reste autorisé uniquement pour des préférences d'interface
   sans donnée personnelle ou métier, comme un filtre ou une position de
   navigation.
-- La fin de session efface l'état en mémoire et les caches privés associés.
+- Un brouillon d'intervention non validé peut être conservé dans IndexedDB pour
+  résister à une coupure ou une fermeture accidentelle. Il est chiffré en
+  AES-GCM avec une clé non extractible propre au profil et à l'appareil, expire
+  après 72 heures et est supprimé après enregistrement, abandon explicite ou
+  déconnexion.
+- La fin de session efface l'état en mémoire et les caches privés associés,
+  y compris tout brouillon d'intervention local.
 - Aucune modification ne doit être considérée comme réussie si le serveur ne l'a
   pas confirmée.
 - Une perte de connexion affiche un état clair et permet de réessayer.
-- Aucun brouillon d'intervention n'est conservé hors ligne. Si la connexion est
-  perdue avant la validation finale, l'interne recommence la saisie.
+- Une perte de connexion ne bloque pas la saisie du brouillon. L'interface
+  indique clairement son état local chiffré ; la validation finale attend le
+  retour du serveur et propose la reprise du brouillon au prochain accès.
 - Le bloc-notes est sauvegardé automatiquement sur le serveur pendant la saisie,
   sans bouton « Enregistrer ».
 - Le même bloc-notes est retrouvé sur le web et l'application.
+- Une modification distante du bloc-notes recharge l'éditeur lorsqu'il n'existe
+  aucune saisie locale. En cas de modifications concurrentes, l'utilisateur
+  compare les deux versions et choisit la version distante, la version locale
+  ou une fusion explicite sans écrasement silencieux.
+- Le serveur conserve au maximum 50 instantanés privés du bloc-notes, espacés
+  d'au moins cinq minutes, afin de permettre une restauration volontaire. Ces
+  instantanés suivent exactement les mêmes règles d'accès privé que le document.
 - Une erreur de sauvegarde ne doit jamais être présentée comme un succès.
 
 ### 5.3 Cohérence de l'historique Interne-Senior
@@ -821,6 +859,15 @@ dans les rapports versionnés du dossier `docs`.
 3. **Authentification, sessions, comptes et établissements — conformes** :
    la session web est gérée côté serveur, la session mobile dans le stockage
    sécurisé natif, la déconnexion et la désactivation révoquent les sessions,
+   la finalisation de la première connexion révoque toutes les sessions
+   provisoires puis crée une nouvelle session standard réservée au client qui
+   l'a terminée. La confirmation de l'adresse e-mail est obligatoire avant la
+   première connexion standard ; la récupération du mot de passe reste
+   indisponible avant cette confirmation et l'interface l'annonce clairement.
+   Les appareils actifs sont consultables et révocables, et le second facteur
+   TOTP protège toute nouvelle connexion dès son activation. Si la rotation
+   de session échoue après l'activation, l'utilisateur se reconnecte avec son
+   nouveau mot de passe sans pouvoir réutiliser la clé provisoire. Par ailleurs,
    la désactivation est réversible lorsque l'identité Auth existe encore, les
    adresses e-mail sont confirmées et modifiables, et les établissements
    utilisent un référentiel officiel à identifiants stables.
@@ -840,14 +887,14 @@ dans les rapports versionnés du dossier `docs`.
    `project1-integration-test-20260811` : 1 222 lignes applicatives et 9 objets
    Storage ont été contrôlés. Aucune restauration d'exercice ne doit viser la
    production.
-6. **Dépendances web — conformes ; dépendances mobiles sous surveillance** :
-   l'audit web ne signale aucune vulnérabilité. Les versions Expo et React
-   Native sont alignées sur les versions compatibles et CocoaPods s'installe de
-   nouveau correctement. Deux avis de sécurité amont concernant `image-size`
-   restent présents dans l'arbre Expo sans version corrigée compatible. Ils sont
-   limités par des correctifs locaux versionnés, des tests dédiés et une liste
-   d'exceptions exacte. Cette exception doit être supprimée dès qu'une version
-   Expo compatible apporte le correctif amont.
+6. **Dépendances web et mobiles — conformes** : les audits npm du 10 septembre
+   2026 ne signalent aucune vulnérabilité. Les versions Expo SDK 57 et React
+   Native sont alignées sur les versions compatibles recommandées. La mise à
+   jour de Metro a retiré `image-size` de l'arbre mobile ; son ancien correctif
+   local a donc été supprimé, tandis que les tests dédiés vérifient désormais
+   soit son absence, soit le maintien des protections comportementales si cette
+   dépendance réapparaît. Le correctif de compatibilité Ruby 2.6 pour
+   `expo-modules-autolinking` reste versionné.
 7. **Diffusion mobile — incomplète** : le code Expo passe le typage, le contrôle
    de configuration et la vérification des versions. La validation Android sur
    appareil réel et la soumission en boutique restent à faire. La production
@@ -861,13 +908,19 @@ dans les rapports versionnés du dossier `docs`.
    test ont été recréés. Le test Supabase croisé connecté réussit localement ;
    les secrets GitHub et l'adresse du déploiement E2E isolé doivent rester
    valides pour que les emplois connectés soient obligatoires et verts dans la
-   CI.
+   CI. Les mutations complètes (création, relecture et suppression de la donnée
+   synthétique) disposent d'un emploi séparé, manuel et rattaché à
+   l'environnement GitHub protégé `isolated-e2e` ; elles restent interdites sur
+   le domaine de production.
 9. **Dette de maintenance — réduction commencée** : ESLint ne signale aucune
    erreur bloquante mais conserve un ensemble d'avertissements historiques à
    traiter progressivement. Les premières extractions ont été réalisées dans
-   `src/styles.css`, `mobile/App.tsx` et `src/screens/AdminScreen.tsx`. Ces trois
-   fichiers restent volumineux et doivent continuer à être découpés par petits
-   lots testés, sans réécriture globale risquée.
+   `src/styles.css`, l'ancienne implémentation `mobile/App.tsx`,
+   `src/screens/AdminScreen.tsx` et `src/context/AppContext.tsx`. Les modèles
+   analytiques, le modèle de contexte et la vue de sécurité du compte sont
+   désormais séparés. Les deux fichiers principaux restent volumineux et doivent
+   continuer à être découpés par petits lots testés, sans réécriture globale
+   risquée.
 10. **Exports — contenu à valider avec le propriétaire** : les exports existants
     respectent les exclusions de secrets et de données privées déjà définies,
     mais la liste exacte des colonnes utiles pour les exports Interne, Senior et

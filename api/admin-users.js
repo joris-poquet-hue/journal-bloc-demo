@@ -156,7 +156,7 @@ async function createAccount(input, adminIdentity) {
     authUserId = authUser?.id ?? null;
 
     if (!authUserId) {
-      throw new Error('Supabase Auth n’a pas retourné de compte utilisateur.');
+      throw new Error('Le service d’authentification n’a pas retourné de compte utilisateur.');
     }
 
     const rows = await restRequest('profiles', {
@@ -183,7 +183,7 @@ async function createAccount(input, adminIdentity) {
     profileId = profile?.id ?? null;
 
     if (!profile) {
-      throw new Error('Supabase n’a pas retourné le profil créé.');
+      throw new Error('Le serveur n’a pas retourné le profil créé.');
     }
 
     await restRequest('activity_log', {
@@ -239,7 +239,7 @@ async function createAccount(input, adminIdentity) {
 
         if (!Array.isArray(rows)) {
           throw new Error(
-            'Réponse Supabase invalide lors du contrôle de compensation.'
+            'Réponse serveur invalide lors du contrôle de compensation.'
           );
         }
 
@@ -256,7 +256,7 @@ async function updateAccount(input, adminIdentity) {
   const currentProfile = await findProfile(input.profileId);
 
   if (!currentProfile?.auth_user_id) {
-    const error = new Error('Ce profil n’est pas relié à Supabase Auth.');
+    const error = new Error('Ce profil n’est pas relié au service d’authentification.');
     error.status = 404;
     throw error;
   }

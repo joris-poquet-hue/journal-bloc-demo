@@ -58,7 +58,7 @@ export function PreBlockScreen() {
   const { recordActivity } = useAppContext();
   const [view, setView] = useState<GuideView>('menu');
   const [expandedFigure, setExpandedFigure] = useState<ExpandedFigure | null>(null);
-  useScrollResetOnChange([view]);
+  useScrollResetOnChange(view);
   const selectedGuide =
     view === 'menu'
       ? null

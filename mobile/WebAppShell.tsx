@@ -1,9 +1,11 @@
 import { StatusBar } from 'expo-status-bar';
 import Constants from 'expo-constants';
 import * as Crypto from 'expo-crypto';
+import { File, Paths } from 'expo-file-system';
 import * as LocalAuthentication from 'expo-local-authentication';
 import * as Notifications from 'expo-notifications';
 import * as SecureStore from 'expo-secure-store';
+import * as Sharing from 'expo-sharing';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -44,6 +46,11 @@ const MOBILE_SESSION_STORAGE_KEY = 'monjdb.mobile-session.v1';
 const MOBILE_BIOMETRIC_PREFERENCE_KEY = 'monjdb.mobile-biometric.v1';
 const MOBILE_PUSH_DEVICE_ID_KEY = 'monjdb.mobile-push-device-id.v1';
 const MOBILE_SESSION_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const XLSX_MIME_TYPE =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const XLSX_FILENAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,119}\.xlsx$/;
+const BASE64_PATTERN = /^[A-Za-z0-9+/]*={0,2}$/;
+const MAX_NATIVE_EXPORT_BYTES = 20 * 1024 * 1024;
 const STANDARD_SECURE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
 };
@@ -52,6 +59,79 @@ const BIOMETRIC_SECURE_STORE_OPTIONS: SecureStore.SecureStoreOptions = {
   keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   requireAuthentication: true,
 };
+
+type NativeFileExportMessage = {
+  base64: string;
+  byteLength: number;
+  filename: string;
+  mimeType: typeof XLSX_MIME_TYPE;
+  type: 'MONJDB_FILE_EXPORT';
+};
+
+type NativeBridgeMessage = {
+  base64?: string;
+  byteLength?: number;
+  filename?: string;
+  mimeType?: string;
+  token?: string;
+  type?: string;
+};
+
+function getBase64ByteLength(value: string) {
+  const paddingLength = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
+
+  return Math.floor((value.length * 3) / 4) - paddingLength;
+}
+
+function isNativeFileExportMessage(
+  message: NativeBridgeMessage
+): message is NativeFileExportMessage {
+  return Boolean(
+    message.type === 'MONJDB_FILE_EXPORT' &&
+      message.mimeType === XLSX_MIME_TYPE &&
+      typeof message.filename === 'string' &&
+      XLSX_FILENAME_PATTERN.test(message.filename) &&
+      typeof message.byteLength === 'number' &&
+      Number.isInteger(message.byteLength) &&
+      message.byteLength > 0 &&
+      message.byteLength <= MAX_NATIVE_EXPORT_BYTES &&
+      typeof message.base64 === 'string' &&
+      message.base64.length <= Math.ceil((MAX_NATIVE_EXPORT_BYTES * 4) / 3) + 4 &&
+      BASE64_PATTERN.test(message.base64) &&
+      getBase64ByteLength(message.base64) === message.byteLength
+  );
+}
+
+async function shareNativeXlsx(message: NativeFileExportMessage) {
+  if (!(await Sharing.isAvailableAsync())) {
+    throw new Error('Le partage de fichiers n’est pas disponible sur cet appareil.');
+  }
+
+  const file = new File(Paths.cache, message.filename);
+
+  try {
+    if (file.exists) {
+      file.delete();
+    }
+
+    file.create({ overwrite: true });
+    file.write(message.base64, { encoding: 'base64' });
+
+    if (!file.exists || file.size !== message.byteLength) {
+      throw new Error('Le fichier Excel temporaire n’a pas pu être vérifié.');
+    }
+
+    await Sharing.shareAsync(file.uri, {
+      UTI: 'org.openxmlformats.spreadsheetml.sheet',
+      dialogTitle: 'Partager l’export Excel',
+      mimeType: XLSX_MIME_TYPE,
+    });
+  } finally {
+    if (file.exists) {
+      file.delete();
+    }
+  }
+}
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -366,6 +446,7 @@ export default function WebAppShell() {
   const webViewRef = useRef<WebView>(null);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState ?? 'active');
   const pushRegistrationSessionRef = useRef<string | null>(null);
+  const nativeFileShareQueueRef = useRef(Promise.resolve());
   const source = useMemo(
     () =>
       restoredSessionToken
@@ -575,10 +656,21 @@ export default function WebAppShell() {
 
   function handleWebMessage(event: WebViewMessageEvent) {
     try {
-      const message = JSON.parse(event.nativeEvent.data) as {
-        token?: string;
-        type?: string;
-      };
+      const message = JSON.parse(event.nativeEvent.data) as NativeBridgeMessage;
+
+      if (isNativeFileExportMessage(message)) {
+        nativeFileShareQueueRef.current = nativeFileShareQueueRef.current
+          .then(() => shareNativeXlsx(message))
+          .catch((error) => {
+            Alert.alert(
+              'Export impossible',
+              error instanceof Error
+                ? error.message
+                : 'Le fichier Excel n’a pas pu être partagé.'
+            );
+          });
+        return;
+      }
 
       if (
         message.type === 'MONJDB_SESSION_CREATED' &&

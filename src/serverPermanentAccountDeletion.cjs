@@ -41,7 +41,7 @@ async function permanentlyDeleteAccount({
     });
 
     if (!Array.isArray(rows)) {
-      throw new Error('Réponse Supabase invalide lors du contrôle du profil.');
+      throw new Error('Réponse serveur invalide lors du contrôle du profil.');
     }
 
     return rows.length > 0;
@@ -112,7 +112,7 @@ async function permanentlyDeleteAccount({
     preparation.profileId !== profileId
   ) {
     throw createRetryableDeletionError(
-      'Supabase n’a pas confirmé la préparation du profil demandé.'
+      'Le serveur n’a pas confirmé la préparation du profil demandé.'
     );
   }
 
@@ -121,7 +121,7 @@ async function permanentlyDeleteAccount({
     preparation.authIdentityExists !== false
   ) {
     throw createRetryableDeletionError(
-      'Supabase n’a pas confirmé l’état de l’identité de connexion.'
+      'Le serveur n’a pas confirmé l’état de l’identité de connexion.'
     );
   }
 
@@ -130,7 +130,7 @@ async function permanentlyDeleteAccount({
     !isUuid(preparation.authUserId)
   ) {
     throw createRetryableDeletionError(
-      'Supabase n’a pas fourni une identité de connexion valide.'
+      'Le serveur n’a pas fourni une identité de connexion valide.'
     );
   }
 
@@ -173,7 +173,7 @@ async function permanentlyDeleteAccount({
     }
 
     throw createRetryableDeletionError(
-      'Supabase n’a pas confirmé l’effacement définitif du profil.'
+      'Le serveur n’a pas confirmé l’effacement définitif du profil.'
     );
   }
 

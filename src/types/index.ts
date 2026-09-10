@@ -108,6 +108,16 @@ export type NotebookDocument = {
   version?: number;
 };
 
+export type NotebookDocumentVersion = {
+  archivedAt: string;
+  contentHtml: string;
+  id: string;
+  internalId: string;
+  sourceUpdatedAt: string;
+  sourceVersion: number;
+  updatedByProfileId: string | null;
+};
+
 export type TrophyStatus = 'draft' | 'active' | 'inactive';
 export type TrophyType = 'operatoire' | 'special';
 export type TrophyFormat = 'unique' | 'levels';
@@ -421,8 +431,6 @@ export type CreateSurgicalInterventionResult = {
 
 export type InterventionDraft = {
   date: string;
-  startTime?: string | null;
-  operativeDurationMinutes?: number | null;
   internalId: string | null;
   seniorId: string | null;
   procedure: InterventionType | null;

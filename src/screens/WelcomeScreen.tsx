@@ -58,23 +58,6 @@ function comparePreviewTrophies(left: TrophyDisplayModel, right: TrophyDisplayMo
   return right.isUnlocked === left.isUnlocked ? 0 : right.isUnlocked ? 1 : -1;
 }
 
-function getInterventionTime(intervention: SavedIntervention) {
-  if (intervention.startTime) {
-    return intervention.startTime.slice(0, 5);
-  }
-
-  const date = new Date(intervention.savedAt);
-
-  if (Number.isNaN(date.getTime())) {
-    return undefined;
-  }
-
-  return new Intl.DateTimeFormat('fr-FR', {
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
-}
-
 export function WelcomeScreen() {
   const {
     adminEvaluations,
@@ -178,10 +161,7 @@ export function WelcomeScreen() {
 
     return Boolean(evaluation?.globalPerformance && evaluation.categoryDifficulty);
   };
-  const renderInterventionCard = (
-    intervention: SavedIntervention,
-    showTime = false
-  ) => {
+  const renderInterventionCard = (intervention: SavedIntervention) => {
     const isValidated = isInterventionValidated(intervention);
     const senior = selectableSeniors.find(
       (candidate) => candidate.id === intervention.seniorId
@@ -190,7 +170,6 @@ export function WelcomeScreen() {
     return (
       <SurgeryInterventionCard
         dateLabel={formatInterventionCardDate(intervention.date)}
-        dateMetaLabel={showTime ? getInterventionTime(intervention) : undefined}
         intervention={intervention}
         isValidated={isValidated}
         onPress={
@@ -290,13 +269,13 @@ export function WelcomeScreen() {
                         : 'En attente'}
                     </strong>
                   </div>
-                  {renderInterventionCard(latestInterventions[0], true)}
+                  {renderInterventionCard(latestInterventions[0])}
                 </div>
                 {latestInterventions.length > 1 ? (
                   <div className="dashboard-intervention-feature__secondary">
                     {latestInterventions.slice(1).map((intervention) => (
                       <div key={intervention.id}>
-                        {renderInterventionCard(intervention, true)}
+                        {renderInterventionCard(intervention)}
                       </div>
                     ))}
                   </div>

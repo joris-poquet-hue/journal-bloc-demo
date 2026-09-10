@@ -39,6 +39,11 @@ export type SupabaseAuthSession = {
   user: SupabaseAuthUser;
 };
 
+export type MfaLoginChallenge = {
+  message: string;
+  requiresMfa: true;
+};
+
 export class SupabaseRestError extends Error {
   details: unknown;
   status: number;
@@ -163,25 +168,86 @@ async function parseErrorPayload(response: Response) {
   }
 
   return {
-    message: `Supabase request failed with status ${response.status}`,
+    message: `La requête au serveur a échoué avec le statut ${response.status}.`,
     payload,
   };
 }
 
-async function parseApplicationProfileResponse(response: Response) {
+type ApplicationProfileResponse = {
+  confirmationRecorded: false;
+  message: string;
+  profile: SupabaseLoginProfile;
+  requiresLogin: false;
+  session: SupabaseAuthSession;
+  type?: string;
+};
+
+type ApplicationRequiresLoginResponse = {
+  confirmationRecorded: boolean;
+  message: string;
+  profile: null;
+  requiresLogin: true;
+  session: null;
+  type?: string;
+};
+
+function parseApplicationProfileResponse(
+  response: Response
+): Promise<ApplicationProfileResponse>;
+function parseApplicationProfileResponse(
+  response: Response,
+  options: { allowRequiresLogin: true }
+): Promise<ApplicationProfileResponse | ApplicationRequiresLoginResponse>;
+async function parseApplicationProfileResponse(
+  response: Response,
+  options: { allowRequiresLogin?: boolean } = {}
+): Promise<ApplicationProfileResponse | ApplicationRequiresLoginResponse> {
   const payload = (await response.json().catch(() => null)) as
     | {
+        confirmationRecorded?: boolean;
         error?: string;
+        message?: string;
         mobileSessionToken?: string;
         profile?: SupabaseLoginProfile;
+        requiresLogin?: boolean;
         type?: string;
       }
     | null;
 
-  if (!response.ok || !payload?.profile) {
+  if (!response.ok) {
     throw new SupabaseRestError(
       response.status,
       payload?.error ?? 'La session sécurisée n’a pas pu être créée.',
+      payload
+    );
+  }
+
+  if (payload?.requiresLogin === true) {
+    if (!options.allowRequiresLogin) {
+      throw new SupabaseRestError(
+        response.status,
+        payload.message ?? 'Une nouvelle connexion est requise.',
+        payload
+      );
+    }
+
+    setActiveSession(null);
+    postNativeSessionMessage('MONJDB_SESSION_REVOKED');
+
+    return {
+      confirmationRecorded: payload.confirmationRecorded === true,
+      message: payload.message ?? '',
+      profile: null,
+      requiresLogin: true,
+      session: null,
+      type: payload.type,
+    };
+  }
+
+  if (!payload?.profile) {
+    throw new SupabaseRestError(
+      response.status,
+      'La session sécurisée n’a pas pu être créée.',
       payload
     );
   }
@@ -198,7 +264,10 @@ async function parseApplicationProfileResponse(response: Response) {
   setActiveSession(session);
 
   return {
+    confirmationRecorded: false,
+    message: payload.message ?? '',
     profile: payload.profile,
+    requiresLogin: false,
     session,
     type: payload.type,
   };
@@ -229,10 +298,11 @@ export function setSupabaseSession(session: SupabaseAuthSession | null) {
 
 export async function signInWithSupabaseLoginId(
   loginId: string,
-  password: string
+  password: string,
+  mfaCode?: string
 ) {
   const response = await fetch('/api/auth-login', {
-    body: JSON.stringify({ loginId, password }),
+    body: JSON.stringify({ loginId, mfaCode, password }),
     cache: 'no-store',
     credentials: 'same-origin',
     headers: {
@@ -242,7 +312,25 @@ export async function signInWithSupabaseLoginId(
     method: 'POST',
   });
 
-  return parseApplicationProfileResponse(response);
+  if (response.status === 202) {
+    const payload = (await response.json().catch(() => null)) as
+      | { message?: string; requiresMfa?: boolean }
+      | null;
+
+    if (payload?.requiresMfa) {
+      return {
+        message:
+          payload.message ??
+          'Saisis le code de ton application d’authentification.',
+        requiresMfa: true,
+      } satisfies MfaLoginChallenge;
+    }
+  }
+
+  return {
+    ...(await parseApplicationProfileResponse(response)),
+    requiresMfa: false as const,
+  };
 }
 
 export async function restoreSupabaseSession() {
@@ -300,7 +388,9 @@ export async function consumeSupabaseAuthCallback() {
     method: 'POST',
   });
 
-  return parseApplicationProfileResponse(response);
+  return parseApplicationProfileResponse(response, {
+    allowRequiresLogin: true,
+  });
 }
 
 export async function requestSupabasePasswordRecovery(loginId: string) {
@@ -347,6 +437,7 @@ export async function updateSupabasePassword(
     credentials: 'same-origin',
     headers: {
       'Content-Type': 'application/json',
+      ...getNativeApplicationHeaders(),
     },
     method: 'POST',
   });
@@ -354,8 +445,10 @@ export async function updateSupabasePassword(
     | {
         error?: string;
         message?: string;
+        mobileSessionToken?: string;
         pendingEmailConfirmation?: boolean;
         profile?: SupabaseLoginProfile;
+        requiresLogin?: boolean;
         success?: boolean;
       }
     | null;
@@ -368,13 +461,36 @@ export async function updateSupabasePassword(
     );
   }
 
-  if (payload.profile) {
+  const requiresLogin = payload.requiresLogin === true;
+
+  if (requiresLogin) {
+    setActiveSession(null);
+    postNativeSessionMessage('MONJDB_SESSION_REVOKED');
+  } else {
+    if (!payload.profile) {
+      throw new SupabaseRestError(
+        response.status,
+        'Le compte a été sécurisé, mais la nouvelle session est introuvable.',
+        payload
+      );
+    }
+
+    if (payload.mobileSessionToken) {
+      postNativeSessionMessage(
+        'MONJDB_SESSION_CREATED',
+        payload.mobileSessionToken
+      );
+      payload.mobileSessionToken = undefined;
+    }
+
     setActiveSession(toApplicationSession(payload.profile));
   }
 
   return {
     message: payload.message ?? '',
     pendingEmailConfirmation: payload.pendingEmailConfirmation === true,
+    profile: payload.profile ?? null,
+    requiresLogin,
   };
 }
 

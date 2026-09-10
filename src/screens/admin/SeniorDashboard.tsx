@@ -8,6 +8,7 @@ import {
   Pencil,
   RefreshCw,
   Settings,
+  ShieldCheck,
   UserRound,
   Users,
   X,
@@ -22,6 +23,7 @@ import {
 } from 'react';
 
 import { ApproachIcon } from '../../components/ApproachIcon';
+import { AccountSecurityPanel } from '../../components/AccountSecurityPanel';
 import { NotificationAvatarButton } from '../../components/NotificationAvatarButton';
 import { NotificationCenter } from '../../components/NotificationCenter';
 import { PrimaryButton } from '../../components/PrimaryButton';
@@ -70,6 +72,7 @@ export function SeniorDashboard({
   onEvaluate,
   onLogout,
   refreshBackendData,
+  recordActivity,
   savedInterventions,
   selectableSeniors,
   selectedSenior,
@@ -88,6 +91,11 @@ export function SeniorDashboard({
   onEvaluate: (interventionId: string) => void;
   onLogout: () => void;
   refreshBackendData: () => Promise<void>;
+  recordActivity: (
+    action: string,
+    targetType: string,
+    targetLabel: string
+  ) => void;
   savedInterventions: SavedIntervention[];
   selectableSeniors: Senior[];
   selectedSenior: Senior;
@@ -123,6 +131,7 @@ export function SeniorDashboard({
     useState(false);
   const [isPasswordSheetOpen, setIsPasswordSheetOpen] = useState(false);
   const [isEmailSheetOpen, setIsEmailSheetOpen] = useState(false);
+  const [isSecuritySheetOpen, setIsSecuritySheetOpen] = useState(false);
   const [isPendingEvaluationsSheetOpen, setIsPendingEvaluationsSheetOpen] =
     useState(false);
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
@@ -160,7 +169,10 @@ export function SeniorDashboard({
   const populationChangeScrollYRef = useRef<number | null>(null);
 
   const refreshedInternalProfiles = internalProfiles;
-  const refreshedManagedInternalIds = selectedSenior.managedInternalIds ?? [];
+  const refreshedManagedInternalIds = useMemo(
+    () => selectedSenior.managedInternalIds ?? [],
+    [selectedSenior.managedInternalIds]
+  );
   const refreshedSavedInterventions = savedInterventions;
   const refreshedAdminEvaluations = adminEvaluations;
   const refreshedCustomSurgicalInterventions = customSurgicalInterventions;
@@ -280,6 +292,7 @@ export function SeniorDashboard({
 
     return relatedProfilesByRecency;
   }, [
+    alphabeticalProfiles,
     managedProfiles,
     populationFilter,
     relatedProfilesByRecency,
@@ -401,12 +414,12 @@ export function SeniorDashboard({
     }
   };
 
-  const handleInstitutionExport = () => {
+  const handleInstitutionExport = async () => {
     setIsSettingsMenuOpen(false);
     setExportFeedback(null);
 
     try {
-      const exportedCount = downloadSeniorInstitutionInterventionsExcel(
+      const exportedCount = await downloadSeniorInstitutionInterventionsExcel(
         selectedSenior,
         refreshedSavedInterventions,
         refreshedInternalProfiles,
@@ -414,6 +427,16 @@ export function SeniorDashboard({
         refreshedAdminEvaluations,
         selectableSeniors
       );
+
+      if (exportedCount > 0) {
+        recordActivity(
+          'Export XLSX',
+          "Statistiques de l'établissement",
+          `Même lieu de stage · ${exportedCount} intervention${
+            exportedCount > 1 ? 's' : ''
+          }`
+        );
+      }
 
       setExportFeedback(
         exportedCount > 0
@@ -777,6 +800,18 @@ export function SeniorDashboard({
         >
           <Pencil aria-hidden="true" />
           <span>Modifier le mot de passe</span>
+        </button>
+        <button
+          className="senior-settings__menu-item"
+          onClick={() => {
+            setIsSettingsMenuOpen(false);
+            setIsSecuritySheetOpen(true);
+          }}
+          role="menuitem"
+          type="button"
+        >
+          <ShieldCheck aria-hidden="true" />
+          <span>Sécurité et appareils</span>
         </button>
         <button
           className="senior-settings__menu-item"
@@ -1279,7 +1314,10 @@ export function SeniorDashboard({
             <div className="account-sheet__stack">
               <p className="account-sheet__text">
                 Adresse actuelle :{' '}
-                <strong>{selectedSenior.contactEmail || 'Non renseignée'}</strong>
+                <strong>
+                  {selectedSenior.contactEmail ||
+                    'En attente de confirmation — récupération indisponible'}
+                </strong>
               </p>
               <label className="account-sheet__field">
                 <span>Nouvelle adresse e-mail</span>
@@ -1334,6 +1372,39 @@ export function SeniorDashboard({
                 Envoyer le lien de confirmation
               </button>
             </div>
+          </div>
+        </div>
+      ) : null}
+
+      {isSecuritySheetOpen ? (
+        <div
+          className="account-sheet-backdrop"
+          onClick={() => setIsSecuritySheetOpen(false)}
+        >
+          <div
+            aria-labelledby="senior-security-title"
+            aria-modal="true"
+            className="account-sheet senior-account-sheet"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="account-sheet__header">
+              <div className="account-sheet__heading">
+                <h3 id="senior-security-title">Sécurité et appareils</h3>
+                <p className="account-sheet__text">
+                  Renforcez la connexion et contrôlez les sessions actives.
+                </p>
+              </div>
+              <button
+                aria-label="Fermer la fenêtre de sécurité"
+                className="account-sheet__close"
+                onClick={() => setIsSecuritySheetOpen(false)}
+                type="button"
+              >
+                <X aria-hidden="true" />
+              </button>
+            </div>
+            <AccountSecurityPanel />
           </div>
         </div>
       ) : null}

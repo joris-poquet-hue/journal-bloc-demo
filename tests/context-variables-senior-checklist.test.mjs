@@ -18,6 +18,9 @@ const optionalContextMigration = readSource(
 const requiredSurgeryContextMigration = readSource(
   '../supabase/migrations/202607290005_required_surgery_context.sql'
 );
+const operatingTimeRetirementMigration = readSource(
+  '../supabase/migrations/202609080001_require_email_confirmation_remove_operating_time.sql'
+);
 const types = readSource('../src/types/index.ts');
 const mockData = readSource('../src/data/mockData.ts');
 const navigator = readSource('../src/navigation/AppNavigator.tsx');
@@ -57,7 +60,7 @@ test('le parcours Interne utilise le contexte clinique structuré sans checklist
   assert.doesNotMatch(summary, /checklistProgress/);
 });
 
-test('les horaires et le contexte structuré sont validés et enregistrés atomiquement', () => {
+test('le contexte structuré reste enregistré sans horaires ni durée opératoire', () => {
   assert.match(
     structuredContextMigration,
     /add column if not exists intervention_start_time time without time zone/i
@@ -76,28 +79,38 @@ test('les horaires et le contexte structuré sont validés et enregistrés atomi
   assert.match(structuredContextMigration, /clinicalContextDefinition/i);
   assert.match(repository, /rpc\/create_intervention_v3/);
   assert.match(repository, /p_context_variables: intervention\.contextVariables/);
-  assert.match(repository, /p_intervention_start_time: intervention\.startTime/);
   assert.match(
     repository,
-    /p_operative_duration_minutes: intervention\.operativeDurationMinutes/
+    /p_intervention_start_time: '00:00'/
   );
-  assert.doesNotMatch(form, /value=\{['"]08:00['"]\}/);
-  assert.doesNotMatch(form, /placeholder="Ex\. 90"/);
-  assert.doesNotMatch(form, /name="intervention-start-time"/);
-  assert.doesNotMatch(form, /name="operative-duration-minutes"/);
-  assert.match(form, /value=\{draft\.startTime \?\? ''\}/);
-  assert.match(form, /value=\{draft\.operativeDurationMinutes \?\? ''\}/);
-  assert.match(form, /formatStartTimeInput\(event\.target\.value\)/);
-  assert.match(form, /aria-label="Heure de début de l’intervention"[\s\S]*type="text"/);
-  assert.doesNotMatch(
-    form,
-    /aria-label="Heure de début de l’intervention"[\s\S]*type="time"/
+  assert.match(
+    repository,
+    /p_operative_duration_minutes: 1/
   );
+  assert.doesNotMatch(types, /startTime|operativeDurationMinutes/);
+  assert.doesNotMatch(form, /startTime|operativeDurationMinutes/);
+  assert.doesNotMatch(validation, /startTime|operativeDurationMinutes/);
+  assert.doesNotMatch(summary, /Heure de l’intervention|Durée de l’intervention/);
   assert.match(
     appContext,
     /const goToForm = \(\) => \{[\s\S]*setDraft\(createInitialDraft\(selectedInternal\.id\)\)/
   );
-  assert.doesNotMatch(form, /value=\{60\}/);
+  assert.match(
+    operatingTimeRetirementMigration,
+    /new\.intervention_start_time := null;[\s\S]*new\.operative_duration_minutes := null;/
+  );
+  assert.match(
+    operatingTimeRetirementMigration,
+    /before insert on public\.interventions/
+  );
+  assert.match(
+    operatingTimeRetirementMigration,
+    /update public\.interventions[\s\S]*intervention_start_time = null,[\s\S]*operative_duration_minutes = null/
+  );
+  assert.match(
+    operatingTimeRetirementMigration,
+    /- 'interventionTimingDefinition'/
+  );
   const createInterventionCall = repository.match(
     /rpc\/create_intervention_v3[\s\S]*?return toSavedIntervention/
   )?.[0];
@@ -192,7 +205,7 @@ test('la checklist complète appartient au Senior désigné', () => {
   );
   assert.match(adminScreen, /missingChecklistSteps/);
   assert.match(adminScreen, /senior-evaluation-clinical-overview/);
-  assert.match(adminScreen, /Durée opératoire/);
+  assert.doesNotMatch(adminScreen, /Durée opératoire/);
   assert.match(adminScreen, /Voir les autres variables/);
   assert.doesNotMatch(adminScreen, /Repères de l’intervention/);
   assert.match(contextScreen, /Complication per-opératoire/);
@@ -202,7 +215,7 @@ test('la checklist complète appartient au Senior désigné', () => {
 test('le contexte clinique est harmonisé dans les historiques web Senior et Interne', () => {
   assert.match(clinicalContextOverview, /Âge/);
   assert.match(clinicalContextOverview, /IMC/);
-  assert.match(clinicalContextOverview, /Durée opératoire/);
+  assert.doesNotMatch(clinicalContextOverview, /Durée opératoire/);
   assert.match(clinicalContextOverview, /Saignement/);
   assert.doesNotMatch(
     clinicalContextOverview,

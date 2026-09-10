@@ -16,6 +16,9 @@ function readSource(path) {
 const adminUsersApi = readSource('../api/admin-users.js');
 const adminAccessKeyApi = readSource('../api/admin-access-key.js');
 const authPasswordApi = readSource('../api/auth-password.js');
+const immediateLoginMigration = readSource(
+  '../supabase/migrations/202609010002_immediate_first_login.sql'
+);
 const AUTH_USER_ID = '11111111-1111-4111-8111-111111111111';
 
 function buildInput(overrides = {}) {
@@ -292,13 +295,18 @@ test('l’API réserve une action explicite à la suppression définitive', () =
 });
 
 test('les futures traces de cycle de vie identifient précisément le profil cible', () => {
-  for (const source of [adminUsersApi, adminAccessKeyApi]) {
-    assert.match(source, /analytics_event:\s*\{/);
-    assert.match(source, /kind:\s*'account_lifecycle'/);
-    assert.match(source, /targetAuthUserId:/);
-    assert.match(source, /targetProfileId:/);
-    assert.match(source, /target_profile_id:/);
-  }
+  assert.match(adminUsersApi, /analytics_event:\s*\{/);
+  assert.match(adminUsersApi, /kind:\s*'account_lifecycle'/);
+  assert.match(adminUsersApi, /targetAuthUserId:/);
+  assert.match(adminUsersApi, /targetProfileId:/);
+  assert.match(adminUsersApi, /target_profile_id:/);
+
+  assert.doesNotMatch(adminAccessKeyApi, /restRequest\('activity_log'/);
+  assert.match(
+    immediateLoginMigration,
+    /Clé d’accès provisoire régénérée[\s\S]*'kind', 'account_lifecycle'[\s\S]*'targetAuthUserId'[\s\S]*'targetProfileId'/
+  );
+  assert.match(immediateLoginMigration, /target_profile_id/);
 });
 
 test('la demande e-mail fusionne le metadata côté SQL sans réintroduire un UUID supprimé', () => {

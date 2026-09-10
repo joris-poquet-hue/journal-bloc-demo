@@ -11,6 +11,7 @@ import type {
   Institution,
   InterventionType,
   Laterality,
+  NotebookDocumentVersion,
   Senior,
   SessionRole,
   SurgeryContext,
@@ -187,6 +188,16 @@ type NotebookRow = {
   updated_at: string;
   updated_by_profile_id: string | null;
   version: number;
+};
+
+type NotebookVersionRow = {
+  archived_at: string;
+  content_html: string;
+  id: string;
+  profile_id: string;
+  source_updated_at: string;
+  source_updated_by_profile_id: string | null;
+  source_version: number;
 };
 
 type TrophyDefinitionRow = {
@@ -448,9 +459,7 @@ function toSavedIntervention(row: InterventionRow): BackendSavedIntervention {
     indication: row.indication,
     indicationComment: row.indication_comment ?? '',
     internalId: row.internal_profile_id,
-    startTime: row.intervention_start_time,
     laterality: row.laterality,
-    operativeDurationMinutes: row.operative_duration_minutes,
     procedure: row.procedure_id,
     role: row.role,
     savedAt: row.saved_at,
@@ -484,6 +493,20 @@ function toNotebookDocument(row: NotebookRow): BackendNotebookDocument {
     updatedAt: row.updated_at,
     updatedByProfileId: row.updated_by_profile_id,
     version: row.version,
+  };
+}
+
+function toNotebookDocumentVersion(
+  row: NotebookVersionRow
+): NotebookDocumentVersion {
+  return {
+    archivedAt: row.archived_at,
+    contentHtml: row.content_html,
+    id: row.id,
+    internalId: row.profile_id,
+    sourceUpdatedAt: row.source_updated_at,
+    sourceVersion: row.source_version,
+    updatedByProfileId: row.source_updated_by_profile_id,
   };
 }
 
@@ -798,7 +821,7 @@ export async function createBackendInstitution(
   const row = Array.isArray(result) ? result[0] : result;
 
   if (!row) {
-    throw new Error("Supabase n’a pas retourné l’établissement créé.");
+    throw new Error("Le serveur n’a pas retourné l’établissement créé.");
   }
 
   return toInstitution(row);
@@ -825,7 +848,7 @@ export async function renameBackendInstitution(
   const row = Array.isArray(result) ? result[0] : result;
 
   if (!row) {
-    throw new Error("Supabase n’a pas retourné l’établissement renommé.");
+    throw new Error("Le serveur n’a pas retourné l’établissement renommé.");
   }
 
   return toInstitution(row);
@@ -850,7 +873,7 @@ export async function archiveBackendInstitution(
   const row = Array.isArray(result) ? result[0] : result;
 
   if (!row) {
-    throw new Error("Supabase n’a pas retourné l’établissement archivé.");
+    throw new Error("Le serveur n’a pas retourné l’établissement archivé.");
   }
 
   return toInstitution(row);
@@ -877,7 +900,7 @@ export async function moveBackendProfileToInstitution(
   const row = Array.isArray(result) ? result[0] : result;
 
   if (!row) {
-    throw new Error('Supabase n’a pas retourné le profil déplacé.');
+    throw new Error('Le serveur n’a pas retourné le profil déplacé.');
   }
 
   return toBackendProfile(row);
@@ -1336,10 +1359,12 @@ export async function createBackendInterventionWithEvaluationRequest(
       p_indication: intervention.indication,
       p_indication_comment: intervention.indicationComment,
       p_intervention_date: intervention.date,
-      p_intervention_start_time: intervention.startTime,
+      // Kept only for compatibility with the legacy RPC signature. A database
+      // trigger strips both timing values before the row is stored.
+      p_intervention_start_time: '00:00',
       p_intervention_id: intervention.id,
       p_laterality: intervention.laterality,
-      p_operative_duration_minutes: intervention.operativeDurationMinutes,
+      p_operative_duration_minutes: 1,
       p_procedure_id: intervention.procedure,
       p_role: intervention.role,
       p_senior_profile_id: intervention.seniorId,
@@ -1401,6 +1426,48 @@ export async function upsertBackendNotebookDocument(
     : await insertRows<NotebookRow>('notebook_documents', body, signal);
 
   return rows[0] ? toNotebookDocument(rows[0]) : null;
+}
+
+export async function loadBackendNotebookVersions(
+  profileId: string,
+  signal?: AbortSignal
+) {
+  const rows = await selectSupabaseRows<NotebookVersionRow>(
+    'notebook_document_versions',
+    {
+      filters: { profile_id: `eq.${profileId}` },
+      limit: 50,
+      order: 'archived_at.desc',
+      signal,
+    }
+  );
+
+  return rows.map(toNotebookDocumentVersion);
+}
+
+export async function restoreBackendNotebookVersion(
+  snapshotId: string,
+  expectedVersion: number,
+  signal?: AbortSignal
+) {
+  const result = await supabaseRestRequest<NotebookRow[]>(
+    'rpc/restore_notebook_document_version',
+    {
+      body: {
+        p_expected_version: expectedVersion,
+        p_snapshot_id: snapshotId,
+      },
+      method: 'POST',
+      signal,
+    }
+  );
+  const row = result[0];
+
+  if (!row) {
+    throw new Error('La version restaurée n’a pas été retournée par le serveur.');
+  }
+
+  return toNotebookDocument(row);
 }
 
 export class BackendVersionConflictError extends Error {

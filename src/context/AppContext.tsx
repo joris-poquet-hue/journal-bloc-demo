@@ -12,23 +12,16 @@ import {
 
 import {
   ADMIN_LOGIN_ID,
-  allChecklistSteps,
-  defaultComplexityRating,
   formatDisplayName,
   formatSeniorDisplayName,
-  getApproachOptionsForIndication,
   getChoiceLabel,
   getChecklistStepsForIntervention,
   getProcedureOptions,
   getSelectableSeniors,
-  getSeniorById,
-  getSurgicalInterventionDefinitions,
   getSurgicalInterventionDefinition,
   isApproachAllowedForIndication,
-  normalizeComplexityRating,
   normalizeCredentialValue,
 } from '../data/mockData';
-import { createEmptyClinicalContext } from '../data/contextVariables';
 import {
   CHECKLIST_PREVIEW_INTERNAL,
   CHECKLIST_PREVIEW_INTERVENTION,
@@ -37,6 +30,31 @@ import {
   isNativeAppShell,
   shouldEnableChecklistPreview,
 } from './appContextPreview';
+import {
+  createActivityLogEntryId,
+  createEmptyChecklist,
+  createInitialDraft,
+  createSavedInterventionId,
+  evaluationsArrayToRecord,
+  getAvailableApproachesForDraft,
+  hydrateAdminTrophies,
+  hydrateCustomSeniors,
+  hydrateInternalProfile,
+  hydrateInternalProfiles,
+  hydrateNotebookDocuments,
+  hydrateSavedInterventions,
+  hydrateSurgicalInterventionDefinitions,
+  isValidContactEmail,
+  mergeRecordsById,
+  sanitizeContactEmail,
+  toBackendProfileFromLogin,
+  toInternalProfile,
+  toLocalActivityEntry,
+  toLocalNotebookDocument,
+  toLocalSavedIntervention,
+  toSeniorProfile,
+  upsertSeniorRecord,
+} from './appContextModel';
 import {
   ActivityAnalyticsEvent,
   ActivityLogEntry,
@@ -58,7 +76,6 @@ import {
   SavedIntervention,
   Senior,
   SessionRole,
-  SurgicalApproach,
   SurgicalInterventionDefinition,
   SummaryMode,
   TrophyAward,
@@ -69,8 +86,6 @@ import {
   UpdateSeniorCredentialsInput,
   UpdateSeniorCredentialsResult,
 } from '../types';
-import { ensureTrophyDefinitionShape } from '../utils/adminTrophies';
-import { getTodayIsoDate } from '../utils/date';
 import {
   buildSurgicalInterventionDefinitionFromInput,
   ensureSurgicalInterventionDefinitionShape,
@@ -116,14 +131,10 @@ import {
   startApplicationSessionActivityTracking,
   subscribeToBackendRealtime,
   updateSupabasePassword,
-  type SupabaseLoginProfile,
 } from '../services/supabaseClient';
 import type {
-  BackendActivityLogEntry,
   BackendBootstrapPayload,
-  BackendNotebookDocument,
   BackendProfile,
-  BackendSavedIntervention,
   BackendUserNotification,
 } from '../shared/backendTypes';
 import {
@@ -142,6 +153,14 @@ import {
   ALL_KNOWN_LEGACY_STORAGE_KEYS,
   cleanupKnownLegacyBusinessStorage,
 } from '../utils/legacyNotebookRecovery';
+import {
+  clearAllOfflineInterventionDrafts,
+  clearOfflineInterventionDraft,
+  isMeaningfulInterventionDraft,
+  readOfflineInterventionDraft,
+  writeOfflineInterventionDraft,
+} from '../utils/offlineInterventionDraft';
+import { sanitizeNotebookHtml } from '../utils/notebookHtml';
 
 const TROPHY_TIER_RANK = {
   bronze: 0,
@@ -169,6 +188,12 @@ type AppContextValue = {
   selectedInternal: InternalProfile | null;
   selectedSenior: Senior | null;
   draft: InterventionDraft;
+  offlineDraftRecovery: {
+    draft: InterventionDraft;
+    updatedAt: string;
+  } | null;
+  offlineDraftStatus: 'error' | 'idle' | 'loading' | 'saved' | 'saving';
+  isOnline: boolean;
   lastSavedIntervention: SavedIntervention | null;
   savedInterventions: SavedIntervention[];
   activityLog: ActivityLogEntry[];
@@ -201,10 +226,15 @@ type AppContextValue = {
   checklistProgress: ReturnType<typeof getChecklistProgress>;
   login: (
     loginId: string,
-    password: string
+    password: string,
+    mfaCode?: string
   ) => Promise<{
     message?: string;
-    status: 'authenticated' | 'error' | 'password-change-required';
+    status:
+      | 'authenticated'
+      | 'error'
+      | 'mfa-required'
+      | 'password-change-required';
   }>;
   logout: () => Promise<void>;
   recordActivity: (
@@ -225,6 +255,7 @@ type AppContextValue = {
     confirmPassword: string
   ) => Promise<{
     message: string;
+    requiresLogin?: boolean;
     success: boolean;
   }>;
   requestEmailChange: (
@@ -258,6 +289,8 @@ type AppContextValue = {
   backToContextVariables: () => void;
   backToWelcome: () => void;
   startNewIntervention: () => void;
+  restoreOfflineInterventionDraft: () => void;
+  discardOfflineInterventionDraft: () => Promise<void>;
   saveIntervention: () => Promise<SavedIntervention | null>;
   refreshBackendData: () => Promise<void>;
   markUserNotificationRead: (notificationId: string) => Promise<void>;
@@ -330,8 +363,11 @@ type AppContextValue = {
   ) => Promise<AdminTrophyDefinition>;
   deleteAdminTrophy: (trophyId: string) => Promise<void>;
   dismissTrophyCelebration: () => void;
-  updateNotebookDocument: (contentHtml: string) => Promise<NotebookDocument>;
-  clearNotebookDocument: () => Promise<NotebookDocument>;
+  updateNotebookDocument: (
+    contentHtml: string,
+    expectedVersion?: number
+  ) => Promise<NotebookDocument>;
+  clearNotebookDocument: (expectedVersion?: number) => Promise<NotebookDocument>;
   updateDraftField: <K extends keyof InterventionDraft>(
     field: K,
     value: InterventionDraft[K]
@@ -353,9 +389,9 @@ type SyncIssueKey = 'activity_log' | 'notebook_documents';
 
 const SYNC_ISSUE_MESSAGES: Record<SyncIssueKey, string> = {
   notebook_documents:
-    'Le bloc-notes n’a pas été enregistré dans Supabase. Le contenu reste temporairement visible dans cette page ; vérifie la connexion puis réessaie.',
+    'Le bloc-notes n’a pas été enregistré sur le serveur. Le contenu reste temporairement visible dans cette page ; vérifie la connexion puis réessaie.',
   activity_log:
-    'Le journal d’activité n’a pas pu être enregistré dans Supabase. Vérifie la connexion avant de recharger.',
+    'Le journal d’activité n’a pas pu être enregistré sur le serveur. Vérifie la connexion avant de recharger.',
 };
 
 type PasswordChangeChallengeState = {
@@ -366,385 +402,6 @@ type PasswordChangeChallengeState = {
   userId: string;
   userLabel: string;
 };
-
-function hydrateInternalProfile(profile: InternalProfile) {
-  const {
-    currentRotation: _discardedCurrentRotation,
-    password: _discardedPassword,
-    ...safeProfile
-  } = profile as InternalProfile & {
-    currentRotation?: string;
-    password?: string;
-  };
-
-  return {
-    ...safeProfile,
-    avatarImageSrc: profile.avatarImageSrc ?? null,
-    contactEmail: profile.contactEmail?.trim() || null,
-    institution: profile.institution?.trim() || 'CHU de Nantes',
-    lastLoginAt: profile.lastLoginAt ?? null,
-    loginCount: Math.max(0, profile.loginCount ?? (profile.lastLoginAt ? 1 : 0)),
-    mustChangePassword: profile.mustChangePassword ?? profile.lastLoginAt == null,
-    baselineStats: {
-      totalInterventions: profile.baselineStats?.totalInterventions ?? 0,
-      primaryOperatorCount:
-        profile.baselineStats?.primaryOperatorCount ?? 0,
-      primaryAssistantCount:
-        profile.baselineStats?.primaryAssistantCount ?? 0,
-    },
-  };
-}
-
-function hydrateInternalProfiles(profiles: InternalProfile[]) {
-  return profiles.map(hydrateInternalProfile);
-}
-
-function hydrateCustomSeniors(customSeniors: Senior[]) {
-  return customSeniors
-    .filter(
-      (senior) =>
-        senior.isActive !== false &&
-        Boolean(senior.id?.trim()) &&
-        Boolean(senior.firstName?.trim()) &&
-        Boolean(senior.lastName?.trim())
-    )
-    .map((senior) => {
-      const { password: _discardedPassword, ...safeSenior } = senior as Senior & {
-        password?: string;
-      };
-
-      return {
-        ...safeSenior,
-        contactEmail: senior.contactEmail?.trim() || null,
-        firstName: senior.firstName.trim(),
-        institution: senior.institution?.trim() || 'CHU de Nantes',
-        lastName: senior.lastName.trim(),
-        loginId: senior.loginId?.trim(),
-        mustChangePassword: senior.mustChangePassword ?? true,
-        createdAt: senior.createdAt ?? new Date().toISOString(),
-        isCustom: true,
-        lastLoginAt: senior.lastLoginAt ?? null,
-        managedInternalIds: Array.isArray(senior.managedInternalIds)
-          ? senior.managedInternalIds.filter((id) => typeof id === 'string')
-          : [],
-      };
-    });
-}
-
-function hydrateNotebookDocuments(documents: NotebookDocument[]) {
-  return documents
-    .filter(
-      (document) =>
-        typeof document?.internalId === 'string' &&
-        typeof document?.contentHtml === 'string' &&
-        typeof document?.updatedAt === 'string'
-    )
-    .map((document) => ({
-      internalId: document.internalId,
-      contentHtml: document.contentHtml,
-      updatedAt: document.updatedAt,
-      updatedByProfileId: document.updatedByProfileId ?? null,
-      version: document.version,
-    }));
-}
-
-function evaluationsArrayToRecord(
-  evaluations: AdminInterventionEvaluation[]
-) {
-  return Object.fromEntries(
-    evaluations.map((evaluation) => [evaluation.interventionId, evaluation])
-  ) as Record<string, AdminInterventionEvaluation>;
-}
-
-function evaluationsRecordToArray(
-  evaluations: Record<string, AdminInterventionEvaluation>
-) {
-  return Object.values(evaluations);
-}
-
-function hydrateSavedIntervention(intervention: SavedIntervention) {
-  return {
-    ...intervention,
-    startTime: intervention.startTime ?? null,
-    operativeDurationMinutes: intervention.operativeDurationMinutes ?? null,
-    contextVariables: intervention.contextVariables ?? [],
-    customIndication: intervention.customIndication ?? null,
-    autonomyScore: intervention.autonomyScore ?? null,
-    complexity:
-      normalizeComplexityRating(
-        intervention.complexity as Parameters<typeof normalizeComplexityRating>[0]
-      ) ?? defaultComplexityRating,
-  };
-}
-
-function hydrateSavedInterventions(interventions: SavedIntervention[]) {
-  return interventions
-    .map(hydrateSavedIntervention)
-    .sort((left, right) => right.savedAt.localeCompare(left.savedAt));
-}
-
-function hydrateSurgicalInterventionDefinitions(
-  interventions: SurgicalInterventionDefinition[]
-) {
-  return interventions.map((intervention) =>
-    ensureSurgicalInterventionDefinitionShape(intervention)
-  );
-}
-
-function mergeRecordsById<T extends { id: string }>(current: T[], incoming: T[]) {
-  const recordsById = new Map(current.map((record) => [record.id, record]));
-
-  incoming.forEach((record) => {
-    recordsById.set(record.id, {
-      ...recordsById.get(record.id),
-      ...record,
-    });
-  });
-
-  return Array.from(recordsById.values());
-}
-
-function mergeNotebookDocumentsByInternalId(
-  current: NotebookDocument[],
-  incoming: NotebookDocument[]
-) {
-  const recordsByInternalId = new Map(
-    current.map((document) => [document.internalId, document])
-  );
-
-  incoming.forEach((document) => {
-    recordsByInternalId.set(document.internalId, {
-      ...recordsByInternalId.get(document.internalId),
-      ...document,
-    });
-  });
-
-  return Array.from(recordsByInternalId.values());
-}
-
-function sanitizeContactEmail(value: string) {
-  return value.trim().toLocaleLowerCase('fr-FR');
-}
-
-function isValidContactEmail(value: string) {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
-}
-
-function toInternalProfile(profile: BackendProfile): InternalProfile {
-  return hydrateInternalProfile({
-    avatarImageSrc: profile.avatarImageSrc,
-    contactEmail: profile.contactEmail,
-    createdAt: profile.createdAt,
-    firstName: profile.firstName,
-    id: profile.id,
-    institution: profile.institution?.trim() || 'CHU de Nantes',
-    institutionId: profile.institutionId,
-    isActive: profile.isActive,
-    lastLoginAt: profile.lastLoginAt,
-    lastName: profile.lastName,
-    loginCount: profile.loginCount,
-    loginId: profile.loginId,
-    mustChangePassword: profile.mustChangePassword,
-    promotion: profile.promotion ?? '',
-    semester: profile.semester ?? '',
-    updatedAt: profile.updatedAt,
-    updatedByProfileId: profile.updatedByProfileId,
-    version: profile.version,
-  });
-}
-
-function toSeniorProfile(profile: BackendProfile): Senior {
-  return {
-    contactEmail: profile.contactEmail,
-    createdAt: profile.createdAt,
-    firstName: profile.firstName,
-    id: profile.id,
-    institution: profile.institution?.trim() || 'CHU de Nantes',
-    institutionId: profile.institutionId,
-    isActive: profile.isActive,
-    isCustom: true,
-    lastLoginAt: profile.lastLoginAt,
-    lastName: profile.lastName,
-    loginId: profile.loginId,
-    managedInternalIds: [],
-    mustChangePassword: profile.mustChangePassword,
-    updatedAt: profile.updatedAt,
-    updatedByProfileId: profile.updatedByProfileId,
-    version: profile.version,
-  };
-}
-
-function toBackendProfileFromLogin(
-  profile: SupabaseLoginProfile
-): BackendProfile {
-  return {
-    authUserId: profile.authUserId,
-    avatarImageSrc: profile.avatarImageSrc,
-    contactEmail: profile.contactEmail,
-    createdAt: profile.createdAt,
-    firstName: profile.firstName,
-    id: profile.id,
-    institution: profile.institution,
-    institutionId: profile.institutionId,
-    isActive: profile.isActive,
-    lastLoginAt: profile.lastLoginAt,
-    lastName: profile.lastName,
-    loginCount: profile.loginCount,
-    loginId: profile.loginId,
-    mustChangePassword: profile.mustChangePassword,
-    promotion: profile.promotion,
-    role: profile.role,
-    semester: profile.semester,
-    updatedAt: profile.updatedAt,
-    updatedByProfileId: profile.updatedByProfileId,
-    version: profile.version,
-  };
-}
-
-function createClientUuid() {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID();
-  }
-
-  return '10000000-1000-4000-8000-100000000000'.replace(/[018]/g, (value) =>
-    (
-      Number(value) ^
-      (Math.random() * 16) >> (Number(value) / 4)
-    ).toString(16)
-  );
-}
-
-function createSavedInterventionId() {
-  return createClientUuid();
-}
-
-function createActivityLogEntryId() {
-  return createClientUuid();
-}
-
-function toLocalSavedIntervention(
-  intervention: BackendSavedIntervention,
-  localInternalId: string
-): SavedIntervention {
-  return {
-    ...intervention,
-    internalId: localInternalId,
-  };
-}
-
-function toLocalNotebookDocument(
-  document: BackendNotebookDocument,
-  localInternalId: string
-): NotebookDocument {
-  return {
-    contentHtml: document.contentHtml,
-    internalId: localInternalId,
-    updatedAt: document.updatedAt,
-    updatedByProfileId: document.updatedByProfileId,
-    version: document.version,
-  };
-}
-
-function toLocalActivityEntry(entry: BackendActivityLogEntry): ActivityLogEntry {
-  return {
-    action: entry.action,
-    actorId: entry.actorId ?? entry.profileId ?? null,
-    actorLabel: entry.actorLabel,
-    actorRole: entry.actorRole,
-    analyticsEvent: entry.analyticsEvent ?? null,
-    createdAt: entry.createdAt,
-    id: entry.id,
-    targetLabel: entry.targetLabel,
-    targetType: entry.targetType,
-    updatedAt: entry.updatedAt,
-    version: entry.version,
-  };
-}
-
-function hydrateAdminTrophies(trophies: AdminTrophyDefinition[]) {
-  return trophies.map((trophy) => ensureTrophyDefinitionShape(trophy));
-}
-
-function upsertSeniorRecord(currentSeniors: Senior[], senior: Senior) {
-  const nextSeniors = currentSeniors.filter((item) => item.id !== senior.id);
-  return [senior, ...nextSeniors];
-}
-
-function createEmptyChecklist() {
-  return allChecklistSteps.reduce<Record<string, ChecklistLevel | null>>(
-    (accumulator, step) => {
-      accumulator[step.id] = null;
-      return accumulator;
-    },
-    {}
-  );
-}
-
-function createChecklistSnapshot(
-  draft: InterventionDraft,
-  customSurgicalInterventions: SurgicalInterventionDefinition[]
-) {
-  const checklistSteps = getChecklistStepsForIntervention(
-    draft.procedure,
-    draft.indication,
-    draft.approach,
-    draft.entryTechnique,
-    customSurgicalInterventions
-  );
-
-  return checklistSteps.reduce<Record<string, ChecklistLevel | null>>(
-    (accumulator, step) => {
-      accumulator[step.id] = draft.checklist[step.id] ?? null;
-      return accumulator;
-    },
-    {}
-  );
-}
-
-function getAvailableApproachesForDraft(
-  draft: InterventionDraft,
-  interventionDefinition?: SurgicalInterventionDefinition
-): SurgicalApproach[] {
-  if (!draft.procedure) {
-    return [];
-  }
-
-  if (draft.procedure === 'salpingectomie') {
-    const approachesForIndication = getApproachOptionsForIndication(
-      draft.indication
-    ).map((option) => option.value);
-
-    return interventionDefinition?.isCustom
-      ? approachesForIndication.filter((approach) =>
-          interventionDefinition.allowedApproaches.includes(approach)
-        )
-      : approachesForIndication;
-  }
-
-  return interventionDefinition?.allowedApproaches ?? [];
-}
-
-function createInitialDraft(internalId: string | null): InterventionDraft {
-  return {
-    date: getTodayIsoDate(),
-    startTime: null,
-    operativeDurationMinutes: null,
-    internalId,
-    seniorId: null,
-    procedure: null,
-    indication: null,
-    indicationComment: '',
-    customIndication: null,
-    approach: null,
-    entryTechnique: null,
-    laterality: null,
-    context: null,
-    contextVariables: createEmptyClinicalContext(),
-    complexity: defaultComplexityRating,
-    role: null,
-    checklist: createEmptyChecklist(),
-  };
-}
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const isChecklistPreviewEnabled = shouldEnableChecklistPreview();
@@ -811,6 +468,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [draft, setDraft] = useState<InterventionDraft>(
     isChecklistPreviewEnabled ? createChecklistPreviewDraft() : createInitialDraft(null)
   );
+  const [offlineDraftRecovery, setOfflineDraftRecovery] = useState<{
+    draft: InterventionDraft;
+    updatedAt: string;
+  } | null>(null);
+  const [offlineDraftStatus, setOfflineDraftStatus] = useState<
+    AppContextValue['offlineDraftStatus']
+  >('idle');
+  const [offlineDraftHydratedProfileId, setOfflineDraftHydratedProfileId] =
+    useState<string | null>(null);
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator === 'undefined' ? true : navigator.onLine
+  );
   const [lastSavedIntervention, setLastSavedIntervention] =
     useState<SavedIntervention | null>(null);
   const [savedInterventions, setSavedInterventions] =
@@ -853,6 +522,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     draftSignature: string;
     intervention: SavedIntervention;
   } | null>(null);
+  const offlineDraftWriteGenerationRef = useRef(0);
+  const offlineDraftPendingWritesRef = useRef<Promise<unknown>>(Promise.resolve());
   const backendRefreshPromiseRef = useRef<Promise<void> | null>(null);
   const backendRefreshIdentityRef = useRef<string | null>(null);
   const activeBackendIdentityRef = useRef<string | null>(null);
@@ -880,6 +551,112 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const selectedSenior =
     selectableSeniors.find((senior) => senior.id === selectedSeniorId) ?? null;
   const surgicalProcedureOptions = getProcedureOptions(customSurgicalInterventions);
+
+  useEffect(() => {
+    const updateConnectionState = () => setIsOnline(navigator.onLine);
+
+    window.addEventListener('online', updateConnectionState);
+    window.addEventListener('offline', updateConnectionState);
+
+    return () => {
+      window.removeEventListener('online', updateConnectionState);
+      window.removeEventListener('offline', updateConnectionState);
+    };
+  }, []);
+
+  useEffect(() => {
+    offlineDraftWriteGenerationRef.current += 1;
+    setOfflineDraftRecovery(null);
+    setOfflineDraftHydratedProfileId(null);
+
+    if (sessionRole !== 'internal' || !durableInternalProfileId) {
+      setOfflineDraftStatus('idle');
+      return;
+    }
+
+    const profileId = durableInternalProfileId;
+    let cancelled = false;
+    setOfflineDraftStatus('loading');
+
+    void readOfflineInterventionDraft(profileId)
+      .then((recovery) => {
+        if (cancelled) {
+          return;
+        }
+
+        if (recovery && isMeaningfulInterventionDraft(recovery.draft)) {
+          setOfflineDraftRecovery(recovery);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setOfflineDraftStatus('error');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setOfflineDraftHydratedProfileId(profileId);
+          setOfflineDraftStatus((current) =>
+            current === 'error' ? current : 'idle'
+          );
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [durableInternalProfileId, sessionRole]);
+
+  useEffect(() => {
+    if (
+      sessionRole !== 'internal' ||
+      !durableInternalProfileId ||
+      offlineDraftHydratedProfileId !== durableInternalProfileId ||
+      offlineDraftRecovery
+    ) {
+      return;
+    }
+
+    const profileId = durableInternalProfileId;
+    const generation = offlineDraftWriteGenerationRef.current + 1;
+    offlineDraftWriteGenerationRef.current = generation;
+    const hasContent = isMeaningfulInterventionDraft(draft);
+
+    if (hasContent) {
+      setOfflineDraftStatus('saving');
+    }
+
+    const saveTimer = window.setTimeout(() => {
+      const operation = offlineDraftPendingWritesRef.current
+        .catch(() => undefined)
+        .then(() =>
+          hasContent
+            ? writeOfflineInterventionDraft(profileId, draft)
+            : clearOfflineInterventionDraft(profileId).then(() => null)
+        );
+      offlineDraftPendingWritesRef.current = operation;
+
+      void operation
+        .then(() => {
+          if (generation === offlineDraftWriteGenerationRef.current) {
+            setOfflineDraftStatus(hasContent ? 'saved' : 'idle');
+          }
+        })
+        .catch(() => {
+          if (generation === offlineDraftWriteGenerationRef.current) {
+            setOfflineDraftStatus('error');
+          }
+        });
+    }, 600);
+
+    return () => window.clearTimeout(saveTimer);
+  }, [
+    draft,
+    durableInternalProfileId,
+    offlineDraftHydratedProfileId,
+    offlineDraftRecovery,
+    sessionRole,
+  ]);
 
   const seedTrophyAwards = useCallback((nextAwards: TrophyAward[]) => {
     knownTrophyAwardKeysRef.current = new Set(
@@ -1278,6 +1055,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const backendNotebookDocuments = payload.userData.notebookDocuments.map(
       (document) => toLocalNotebookDocument(document, profile.id)
     );
+    const hydratedNotebookDocuments = hydrateNotebookDocuments(
+      backendNotebookDocuments
+    );
     const backendActivityLog = payload.userData.activityLog.map(
       toLocalActivityEntry
     );
@@ -1288,7 +1068,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setInstitutions(payload.referenceData.institutions);
     setCustomSeniors(hydrateCustomSeniors(backendSeniors));
     setSavedInterventions(hydrateSavedInterventions(backendInterventions));
-    setNotebookDocuments(hydrateNotebookDocuments(backendNotebookDocuments));
+    notebookDocumentsRef.current = hydratedNotebookDocuments;
+    setNotebookDocuments(hydratedNotebookDocuments);
     setActivityLog(
       backendActivityLog.sort((left, right) =>
         right.createdAt.localeCompare(left.createdAt)
@@ -1458,7 +1239,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
 
       if (!payload) {
-        throw new Error('Aucune donnée Interne reçue de Supabase.');
+        throw new Error('Aucune donnée Interne reçue du serveur.');
       }
 
       applyBackendBootstrapForInternal(profile, payload, awardsBeforeLogin);
@@ -1476,7 +1257,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
 
       if (!payload) {
-        throw new Error('Aucune donnée Senior reçue de Supabase.');
+        throw new Error('Aucune donnée Senior reçue du serveur.');
       }
 
       senior = {
@@ -1572,6 +1353,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return 'authenticated' as const;
   };
 
+  const activateBackendProfileRef = useRef(activateBackendProfile);
+  activateBackendProfileRef.current = activateBackendProfile;
+
   const refreshBackendData = useCallback(async () => {
     const activeProfileId =
       sessionRole === 'internal'
@@ -1600,7 +1384,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const payload = await loadBackendBootstrapPayload(activeProfileId);
 
         if (!payload) {
-          throw new Error('Aucune donnée Interne reçue de Supabase.');
+          throw new Error('Aucune donnée Interne reçue du serveur.');
         }
 
         if (activeBackendIdentityRef.current !== refreshIdentity) {
@@ -1614,6 +1398,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const backendNotebookDocuments = payload.userData.notebookDocuments.map(
           (document) => toLocalNotebookDocument(document, profile.id)
         );
+        const hydratedNotebookDocuments = hydrateNotebookDocuments(
+          backendNotebookDocuments
+        );
 
         setInternalProfiles([profile]);
         setCustomSurgicalInterventions(
@@ -1624,7 +1411,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setInstitutions(payload.referenceData.institutions);
         setCustomSeniors(hydrateCustomSeniors(payload.referenceData.seniors));
         setSavedInterventions(hydrateSavedInterventions(backendInterventions));
-        setNotebookDocuments(hydrateNotebookDocuments(backendNotebookDocuments));
+        notebookDocumentsRef.current = hydratedNotebookDocuments;
+        setNotebookDocuments(hydratedNotebookDocuments);
         setAdminEvaluations(
           evaluationsArrayToRecord(payload.userData.evaluations)
         );
@@ -1647,7 +1435,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const payload = await loadBackendBootstrapPayload(activeProfileId);
 
         if (!payload) {
-          throw new Error('Aucune donnée Senior reçue de Supabase.');
+          throw new Error('Aucune donnée Senior reçue du serveur.');
         }
 
         if (activeBackendIdentityRef.current !== refreshIdentity) {
@@ -1745,7 +1533,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       if (activeBackendIdentityRef.current === refreshIdentity) {
         setBackendRefreshWarning(
-          'Les données n’ont pas pu être actualisées depuis Supabase. Vérifie la connexion puis réessaie.'
+          'Les données n’ont pas pu être actualisées depuis le serveur. Vérifie la connexion puis réessaie.'
         );
       }
       throw error;
@@ -1758,7 +1546,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [
     activeAdminProfileId,
     durableInternalProfileId,
+    reconcileTrophyAwards,
     selectedSeniorId,
+    seedTrophyAwards,
     sessionRole,
   ]);
 
@@ -1807,7 +1597,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  const login = async (loginId: string, password: string) => {
+  const login = async (loginId: string, password: string, mfaCode?: string) => {
     activeBackendIdentityRef.current = null;
     setSupabaseAccessToken(null);
     setDurableInternalProfileId(null);
@@ -1823,8 +1613,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const { profile: loginProfile } =
-        await signInWithSupabaseLoginId(loginId, password);
+      const loginResult = await signInWithSupabaseLoginId(
+        loginId,
+        password,
+        mfaCode
+      );
+
+      if (loginResult.requiresMfa) {
+        return {
+          message: loginResult.message,
+          status: 'mfa-required',
+        } as const;
+      }
+
+      const { profile: loginProfile } = loginResult;
 
       if (loginProfile.mustChangePassword) {
         activeBackendIdentityRef.current = null;
@@ -1868,6 +1670,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
         typeof error === 'object' && error && 'status' in error
           ? Number(error.status)
           : 0;
+      const authenticationErrorMessage =
+        error instanceof Error && error.message.trim()
+          ? error.message.trim()
+          : '';
+      const requiresMfa = Boolean(
+        typeof error === 'object' &&
+          error &&
+          'details' in error &&
+          error.details &&
+          typeof error.details === 'object' &&
+          'requiresMfa' in error.details &&
+          error.details.requiresMfa
+      );
       const isIncompleteAdminBootstrap =
         error instanceof Error &&
         error.message.startsWith(
@@ -1878,12 +1693,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
         message:
           isIncompleteAdminBootstrap
             ? error.message
+            : status === 403
+              ? authenticationErrorMessage ||
+                'Confirme d’abord ton adresse e-mail avec le lien reçu pour activer ton compte.'
             : status === 429
             ? 'Trop de tentatives. Réessaie dans quelques minutes.'
             : status === 400 || status === 401
               ? 'Identifiant ou mot de passe incorrect.'
-              : 'Connexion à Supabase impossible. Vérifie le réseau puis réessaie.',
-        status: 'error',
+              : 'Connexion au service sécurisé impossible. Vérifie le réseau puis réessaie.',
+        status: requiresMfa ? 'mfa-required' : 'error',
       } as const;
     }
   };
@@ -1949,7 +1767,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (challenge.reason === 'forced' && !currentPassword) {
         return {
           message:
-            'La session de première connexion a expiré. Reconnecte-toi avec le mot de passe temporaire.',
+            'La session de première connexion a expiré. Reconnecte-toi avec la clé provisoire.',
           success: false,
         };
       }
@@ -1959,19 +1777,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
           currentPassword,
           sanitizedPassword,
           {
-          completeSetupContactEmail: sanitizedContactEmail,
+            completeSetupContactEmail: sanitizedContactEmail,
           }
         );
-
         setPasswordChangeChallengeState(null);
-        await signOutFromSupabase({ scope: 'current' });
-        setSupabaseAccessToken(null);
         setPersistentSyncIssues({});
 
+        setSupabaseAccessToken(null);
         return {
           message:
             confirmationRequest.message ||
-            'Un lien de confirmation vient d’être envoyé. Ouvre-le pour activer ton compte.',
+            'Un lien de confirmation vient d’être envoyé. Ouvre-le pour activer ton compte et accéder à ton espace.',
+          requiresLogin: true,
           success: true,
         };
       } else {
@@ -2075,6 +1892,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
+    offlineDraftWriteGenerationRef.current += 1;
+    await offlineDraftPendingWritesRef.current.catch(() => undefined);
+    await clearAllOfflineInterventionDrafts().catch(() => undefined);
     await signOutFromSupabase();
     cancelInterventionFormAnalyticsSession();
     activeBackendIdentityRef.current = null;
@@ -2091,6 +1911,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSelectedInternalId(null);
     setSelectedSeniorId(null);
     setDraft(createInitialDraft(null));
+    setOfflineDraftRecovery(null);
+    setOfflineDraftHydratedProfileId(null);
+    setOfflineDraftStatus('idle');
     setLastSavedIntervention(null);
     setInternalProfiles([]);
     setInstitutions([]);
@@ -2139,6 +1962,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const restoreAuthentication = async () => {
       try {
         const callback = await consumeSupabaseAuthCallback();
+
+        if (callback?.requiresLogin) {
+          return;
+        }
+
         const session = callback?.session ?? (await restoreSupabaseSession());
 
         if (!session || isCancelled) {
@@ -2152,13 +1980,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        await activateBackendProfile(backendProfile, {
+        await activateBackendProfileRef.current(backendProfile, {
           forcePasswordChangeReason:
             callback?.type === 'recovery' ? 'recovery' : null,
           recordLogin: false,
         });
       } catch (error) {
-        console.warn('Unable to restore the Supabase session.', error);
+        console.warn('Unable to restore the application session.', error);
         await signOutFromSupabase({ scope: 'current' }).catch(() => undefined);
       }
     };
@@ -2168,7 +1996,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => {
       isCancelled = true;
     };
-  }, []);
+  }, [isChecklistPreviewEnabled]);
 
   useEffect(() => {
     if (
@@ -2182,7 +2010,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     const runReferenceRefresh = () => {
       void refreshBackendData().catch((error) => {
-        console.warn('Unable to reconcile authenticated Supabase data.', error);
+        console.warn('Unable to reconcile authenticated server data.', error);
       });
     };
     const scheduleRealtimeRefresh = () => {
@@ -2204,7 +2032,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       scheduleRealtimeRefresh,
       (status) => {
         if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-          console.warn(`Supabase Realtime indisponible (${status}).`);
+          console.warn(`Synchronisation en temps réel indisponible (${status}).`);
         }
       }
     );
@@ -2357,10 +2185,48 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const startNewIntervention = () => {
+    const internalId = durableInternalProfileId;
+
+    offlineDraftWriteGenerationRef.current += 1;
+    setOfflineDraftRecovery(null);
+    if (internalId) {
+      void offlineDraftPendingWritesRef.current
+        .catch(() => undefined)
+        .then(() => clearOfflineInterventionDraft(internalId))
+        .catch(() => setOfflineDraftStatus('error'));
+    }
     startInterventionFormAnalyticsSession();
     setDraft(createInitialDraft(selectedInternal?.id ?? null));
     setSummaryMode('review');
     setScreen(selectedInternal ? 'form' : 'welcome');
+  };
+
+  const restoreOfflineInterventionDraft = () => {
+    if (
+      !offlineDraftRecovery ||
+      offlineDraftRecovery.draft.internalId !== durableInternalProfileId
+    ) {
+      return;
+    }
+
+    startInterventionFormAnalyticsSession();
+    setDraft(offlineDraftRecovery.draft);
+    setOfflineDraftRecovery(null);
+    setOfflineDraftStatus('saved');
+    setSummaryMode('review');
+    setScreen('form');
+  };
+
+  const discardOfflineInterventionDraft = async () => {
+    const internalId = durableInternalProfileId;
+
+    offlineDraftWriteGenerationRef.current += 1;
+    setOfflineDraftRecovery(null);
+    if (internalId) {
+      await offlineDraftPendingWritesRef.current.catch(() => undefined);
+      await clearOfflineInterventionDraft(internalId);
+    }
+    setOfflineDraftStatus('idle');
   };
 
   const saveIntervention = async () => {
@@ -2428,6 +2294,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       ])
     );
     setLastSavedIntervention(confirmedIntervention);
+    offlineDraftWriteGenerationRef.current += 1;
+    setOfflineDraftRecovery(null);
+    await offlineDraftPendingWritesRef.current.catch(() => undefined);
+    await clearOfflineInterventionDraft(internalId).catch(() => undefined);
     setDraft(createInitialDraft(internalId));
     setSummaryMode('review');
     setScreen('welcome');
@@ -2766,7 +2636,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await updateSupabasePassword(input.currentPassword ?? null, input.password);
       return {
         success: true,
-        message: 'Le mot de passe a bien été modifié dans Supabase Auth.',
+        message: 'Le mot de passe a bien été modifié.',
         profile: existingProfile,
       };
     } catch {
@@ -3092,7 +2962,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         await updateSupabasePassword(input.currentPassword ?? null, input.password);
         return {
           success: true,
-          message: 'Le mot de passe a bien été modifié dans Supabase Auth.',
+          message: 'Le mot de passe a bien été modifié.',
           senior: existingSenior,
         };
       } catch {
@@ -3280,7 +3150,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
 
       if (!intervention) {
-        throw new Error('La définition n’a pas été retournée par Supabase.');
+        throw new Error('La définition n’a pas été retournée par le serveur.');
       }
 
       setCustomSurgicalInterventions((current) => [intervention, ...current]);
@@ -3315,7 +3185,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       );
 
       if (!intervention) {
-        throw new Error('La définition n’a pas été retournée par Supabase.');
+        throw new Error('La définition n’a pas été retournée par le serveur.');
       }
 
       setCustomSurgicalInterventions((current) => [
@@ -3387,8 +3257,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   };
 
   const updateNotebookDocument = (
-    contentHtml: string
+    contentHtml: string,
+    expectedVersion?: number
   ): Promise<NotebookDocument> => {
+    const sanitizedContentHtml = sanitizeNotebookHtml(contentHtml);
     const internalId = selectedInternal?.id ?? null;
     const profileId = durableInternalProfileId;
 
@@ -3420,17 +3292,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const existingDocument = notebookDocumentsRef.current.find(
           (document) => document.internalId === internalId
         );
+        const currentVersion = existingDocument?.version ?? 0;
+
+        if (
+          expectedVersion !== undefined &&
+          currentVersion !== expectedVersion
+        ) {
+          throw new Error(
+            'Une version plus récente du bloc-notes existe sur le serveur.'
+          );
+        }
+
         const savedDocument = await upsertBackendNotebookDocument({
-          contentHtml,
+          contentHtml: sanitizedContentHtml,
           internalId,
           profileId,
           updatedAt: new Date().toISOString(),
           updatedByProfileId: existingDocument?.updatedByProfileId ?? null,
-          version: existingDocument?.version ?? 0,
+          version: expectedVersion ?? currentVersion,
         });
 
         if (!savedDocument) {
-          throw new Error('Supabase n’a pas confirmé la sauvegarde du bloc-notes.');
+          throw new Error('Le serveur n’a pas confirmé la sauvegarde du bloc-notes.');
         }
 
         const confirmedDocument = toLocalNotebookDocument(
@@ -3443,6 +3326,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
           activeBackendIdentityRef.current !== expectedIdentity
         ) {
           throw new Error('La session a changé pendant la sauvegarde du bloc-notes.');
+        }
+
+        const latestKnownDocument = notebookDocumentsRef.current.find(
+          (document) => document.internalId === internalId
+        );
+
+        if (
+          latestKnownDocument &&
+          (latestKnownDocument.version ?? 0) >
+            (confirmedDocument.version ?? 0)
+        ) {
+          throw new Error(
+            'Une version plus récente du bloc-notes existe sur le serveur.'
+          );
         }
 
         const nextDocuments = [
@@ -3468,7 +3365,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       });
   };
 
-  const clearNotebookDocument = () => updateNotebookDocument('');
+  const clearNotebookDocument = (expectedVersion?: number) =>
+    updateNotebookDocument('', expectedVersion);
 
   const deleteCustomSurgicalIntervention = async (interventionId: string) => {
     const intervention = customSurgicalInterventions.find(
@@ -3506,7 +3404,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const savedTrophy = await saveBackendTrophyDefinition(trophy);
 
     if (!savedTrophy) {
-      throw new Error('Le trophée n’a pas été retourné par Supabase.');
+      throw new Error('Le trophée n’a pas été retourné par le serveur.');
     }
 
     setAdminTrophies((current) => [
@@ -3780,6 +3678,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
         selectedInternal,
         selectedSenior,
         draft,
+        offlineDraftRecovery,
+        offlineDraftStatus,
+        isOnline,
         lastSavedIntervention,
         savedInterventions,
         activityLog,
@@ -3836,6 +3737,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         backToContextVariables,
         backToWelcome,
         startNewIntervention,
+        restoreOfflineInterventionDraft,
+        discardOfflineInterventionDraft,
         saveIntervention,
         refreshBackendData,
         markUserNotificationRead,
