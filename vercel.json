@@ -8,6 +8,18 @@
     {
       "source": "/api/client-telemetry",
       "destination": "/api/backend?_project1_route=client-telemetry"
+    },
+    {
+      "source": "/informations-legales",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/mentions-legales",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/politique-confidentialite",
+      "destination": "/index.html"
     }
   ],
   "headers": [

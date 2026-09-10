@@ -38,3 +38,18 @@ test('les réponses Vercel déclarent les principaux en-têtes navigateur', () =
   assert.match(contentSecurityPolicy, /frame-ancestors 'none'/);
   assert.match(contentSecurityPolicy, /base-uri 'self'/);
 });
+
+test('les routes publiques de l’application utilisent le point d’entrée SPA', () => {
+  const spaPaths = new Set(
+    vercelConfig.rewrites
+      ?.filter((rule) => rule.destination === '/index.html')
+      .map((rule) => rule.source)
+  );
+
+  assert.deepEqual(spaPaths, new Set([
+    '/informations-legales',
+    '/mentions-legales',
+    '/politique-confidentialite',
+  ]));
+  assert.equal(spaPaths.has('/(.*)'), false, 'les API ne doivent pas être capturées');
+});
