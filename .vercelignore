@@ -5,6 +5,8 @@ node_modules
 mobile
 build
 dist
+playwright-report
+test-results
 .DS_Store
 *.log
 .env

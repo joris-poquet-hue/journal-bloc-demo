@@ -47,6 +47,7 @@ test.describe('Parcours Interne', () => {
     ).toBeVisible();
 
     const editor = page.getByTestId('notebook-editor');
+    await expect(editor).toBeVisible({ timeout: 20_000 });
     const saveStatus = page.getByTestId('notebook-save-status');
     const originalHtml = await editor.evaluate((element) => element.innerHTML);
     const marker = `Mutation E2E ${Date.now()}`;
@@ -131,7 +132,7 @@ test.describe('Parcours Interne', () => {
     );
     expect(seniorValue).not.toBe('');
     await seniorSelect.selectOption(seniorValue);
-    await page.getByLabel('Intervention').selectOption('salpingectomie');
+    await page.getByLabel('Intervention', { exact: true }).selectOption('salpingectomie');
     await page.getByRole('button', { name: 'GEU', exact: true }).click();
     await page.getByLabel('Voie d’abord').selectOption('laparotomie');
     await page.getByRole('button', { name: 'Bloc programmé' }).click();
