@@ -256,11 +256,10 @@ et non uniquement par l'affichage ou le masquage de boutons.
   reste disponible en secours.
 - Une déconnexion globale ou une désactivation du compte invalide également
   l'accès biométrique.
-- La double authentification TOTP peut être activée depuis le compte. Dès qu'un
-  facteur est activé, son code est exigé à chaque nouvelle connexion. Elle est
-  signalée comme protection attendue pour les Seniors et Administrateurs.
-- L'activation et la désactivation du second facteur exigent le mot de passe
-  actuel. Leur confirmation révoque les autres sessions par précaution.
+- Le produit ne propose pas de double authentification. Une connexion standard
+  utilise uniquement l'identifiant unique et le mot de passe personnel.
+- Les facteurs de double authentification précédemment inscrits sont supprimés
+  des comptes lors du retrait du système.
 
 ### 4.8 Cycle de vie du compte
 
@@ -864,9 +863,9 @@ dans les rapports versionnés du dossier `docs`.
    l'a terminée. La confirmation de l'adresse e-mail est obligatoire avant la
    première connexion standard ; la récupération du mot de passe reste
    indisponible avant cette confirmation et l'interface l'annonce clairement.
-   Les appareils actifs sont consultables et révocables, et le second facteur
-   TOTP protège toute nouvelle connexion dès son activation. Si la rotation
-   de session échoue après l'activation, l'utilisateur se reconnecte avec son
+   Les appareils actifs sont consultables et révocables. Le produit ne propose
+   plus de second facteur d'authentification. Si la rotation de session échoue
+   après l'activation, l'utilisateur se reconnecte avec son
    nouveau mot de passe sans pouvoir réutiliser la clé provisoire. Par ailleurs,
    la désactivation est réversible lorsque l'identité Auth existe encore, les
    adresses e-mail sont confirmées et modifiables, et les établissements

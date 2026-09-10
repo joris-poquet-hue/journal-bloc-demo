@@ -5,23 +5,11 @@ export type AccountSession = {
   id: string;
   isCurrent: boolean;
   lastSeenAt: string;
-  mfaVerifiedAt: string | null;
 };
 
 export type AccountSecurityStatus = {
   currentSessionId: string;
-  mfa: {
-    enabled: boolean;
-    requiredForRole: boolean;
-  };
   sessions: AccountSession[];
-};
-
-export type MfaEnrollment = {
-  factorId: string;
-  qrCode: string | null;
-  secret: string;
-  uri: string | null;
 };
 
 async function accountSecurityRequest<T>(
@@ -54,39 +42,6 @@ async function accountSecurityRequest<T>(
 
 export function loadAccountSecurityStatus() {
   return accountSecurityRequest<AccountSecurityStatus>('GET');
-}
-
-export async function beginMfaEnrollment(currentPassword: string) {
-  const result = await accountSecurityRequest<{
-    enrollment: MfaEnrollment;
-    success: true;
-  }>('POST', {
-    action: 'begin-mfa-enrollment',
-    currentPassword,
-  });
-
-  return result.enrollment;
-}
-
-export function verifyMfaEnrollment(
-  currentPassword: string,
-  factorId: string,
-  code: string
-) {
-  return accountSecurityRequest<{ success: true }>('POST', {
-    action: 'verify-mfa-enrollment',
-    code,
-    currentPassword,
-    factorId,
-  });
-}
-
-export function disableMfa(currentPassword: string, code: string) {
-  return accountSecurityRequest<{ success: true }>('POST', {
-    action: 'disable-mfa',
-    code,
-    currentPassword,
-  });
 }
 
 export function revokeAccountSession(sessionId: string) {

@@ -39,11 +39,6 @@ export type SupabaseAuthSession = {
   user: SupabaseAuthUser;
 };
 
-export type MfaLoginChallenge = {
-  message: string;
-  requiresMfa: true;
-};
-
 export class SupabaseRestError extends Error {
   details: unknown;
   status: number;
@@ -298,11 +293,10 @@ export function setSupabaseSession(session: SupabaseAuthSession | null) {
 
 export async function signInWithSupabaseLoginId(
   loginId: string,
-  password: string,
-  mfaCode?: string
+  password: string
 ) {
   const response = await fetch('/api/auth-login', {
-    body: JSON.stringify({ loginId, mfaCode, password }),
+    body: JSON.stringify({ loginId, password }),
     cache: 'no-store',
     credentials: 'same-origin',
     headers: {
@@ -312,25 +306,7 @@ export async function signInWithSupabaseLoginId(
     method: 'POST',
   });
 
-  if (response.status === 202) {
-    const payload = (await response.json().catch(() => null)) as
-      | { message?: string; requiresMfa?: boolean }
-      | null;
-
-    if (payload?.requiresMfa) {
-      return {
-        message:
-          payload.message ??
-          'Saisis le code de ton application d’authentification.',
-        requiresMfa: true,
-      } satisfies MfaLoginChallenge;
-    }
-  }
-
-  return {
-    ...(await parseApplicationProfileResponse(response)),
-    requiresMfa: false as const,
-  };
+  return parseApplicationProfileResponse(response);
 }
 
 export async function restoreSupabaseSession() {

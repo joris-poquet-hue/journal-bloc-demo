@@ -21,6 +21,8 @@
     "auth:invite": "node scripts/invite-auth-users.mjs --apply",
     "auth:invalidate:dry-run": "node scripts/invalidate-legacy-secrets.mjs",
     "auth:invalidate": "node scripts/invalidate-legacy-secrets.mjs --apply",
+    "auth:factors:remove:dry-run": "node scripts/remove-auth-factors.mjs",
+    "auth:factors:remove": "node scripts/remove-auth-factors.mjs --apply --confirm=REMOVE-AUTH-FACTORS",
     "migrate:legacy:dry-run": "node scripts/import-legacy-app-state.mjs",
     "migrate:legacy:apply": "node scripts/import-legacy-app-state.mjs --apply",
     "repair:joris:dry-run": "node scripts/repair-joris-profile-data.mjs",

@@ -2,21 +2,16 @@ import {
   Laptop,
   LoaderCircle,
   RefreshCw,
-  ShieldCheck,
   Smartphone,
   Trash2,
 } from 'lucide-react';
-import { FormEvent, useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import {
-  beginMfaEnrollment,
-  disableMfa,
   loadAccountSecurityStatus,
   revokeAccountSession,
   revokeOtherAccountSessions,
-  verifyMfaEnrollment,
   type AccountSecurityStatus,
-  type MfaEnrollment,
 } from '../services/accountSecurityService';
 
 type SecurityFeedback = {
@@ -37,9 +32,6 @@ function formatSessionDate(value: string) {
 
 export function AccountSecurityPanel() {
   const [status, setStatus] = useState<AccountSecurityStatus | null>(null);
-  const [enrollment, setEnrollment] = useState<MfaEnrollment | null>(null);
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [verificationCode, setVerificationCode] = useState('');
   const [feedback, setFeedback] = useState<SecurityFeedback>(null);
   const [operation, setOperation] = useState<string | null>('load');
 
@@ -65,92 +57,6 @@ export function AccountSecurityPanel() {
   useEffect(() => {
     void refreshStatus();
   }, [refreshStatus]);
-
-  const handleBeginEnrollment = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setOperation('begin-mfa');
-    setFeedback(null);
-
-    try {
-      setEnrollment(await beginMfaEnrollment(currentPassword));
-      setVerificationCode('');
-      setFeedback({
-        message:
-          'Scanne le QR code puis confirme avec le code temporaire affiché.',
-        tone: 'success',
-      });
-    } catch (error) {
-      setFeedback({
-        message:
-          error instanceof Error ? error.message : 'Configuration impossible.',
-        tone: 'error',
-      });
-    } finally {
-      setOperation(null);
-    }
-  };
-
-  const handleVerifyEnrollment = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
-    if (!enrollment) {
-      return;
-    }
-
-    setOperation('verify-mfa');
-    setFeedback(null);
-
-    try {
-      await verifyMfaEnrollment(
-        currentPassword,
-        enrollment.factorId,
-        verificationCode
-      );
-      setEnrollment(null);
-      setCurrentPassword('');
-      setVerificationCode('');
-      await refreshStatus();
-      setFeedback({
-        message:
-          'Double authentification activée. Les autres sessions ont été révoquées.',
-        tone: 'success',
-      });
-    } catch (error) {
-      setFeedback({
-        message:
-          error instanceof Error ? error.message : 'Vérification impossible.',
-        tone: 'error',
-      });
-    } finally {
-      setOperation(null);
-    }
-  };
-
-  const handleDisableMfa = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setOperation('disable-mfa');
-    setFeedback(null);
-
-    try {
-      await disableMfa(currentPassword, verificationCode);
-      setCurrentPassword('');
-      setVerificationCode('');
-      await refreshStatus();
-      setFeedback({
-        message:
-          'Double authentification désactivée. Les autres sessions ont été révoquées.',
-        tone: 'success',
-      });
-    } catch (error) {
-      setFeedback({
-        message:
-          error instanceof Error ? error.message : 'Désactivation impossible.',
-        tone: 'error',
-      });
-    } finally {
-      setOperation(null);
-    }
-  };
 
   const handleRevokeSession = async (sessionId: string) => {
     setOperation(`revoke:${sessionId}`);
@@ -216,158 +122,6 @@ export function AccountSecurityPanel() {
       <section className="account-security-card">
         <header className="account-security-card__header">
           <span className="account-security-card__icon" aria-hidden="true">
-            <ShieldCheck />
-          </span>
-          <div>
-            <h3>Double authentification</h3>
-            <p>
-              Un code temporaire protège la connexion en plus du mot de passe.
-            </p>
-          </div>
-        </header>
-
-        {operation === 'load' && !status ? (
-          <p className="account-security-loading" role="status">
-            <LoaderCircle aria-hidden="true" /> Chargement…
-          </p>
-        ) : null}
-
-        {status?.mfa.enabled ? (
-          <div className="account-security-stack">
-            <p className="account-security-state account-security-state--enabled">
-              <ShieldCheck aria-hidden="true" /> Protection active
-            </p>
-            <details className="account-security-details">
-              <summary>Désactiver la double authentification</summary>
-              <form onSubmit={handleDisableMfa} className="account-security-form">
-                <label>
-                  <span>Mot de passe actuel</span>
-                  <input
-                    autoComplete="current-password"
-                    disabled={isBusy}
-                    onChange={(event) => setCurrentPassword(event.target.value)}
-                    required
-                    type="password"
-                    value={currentPassword}
-                  />
-                </label>
-                <label>
-                  <span>Code de vérification</span>
-                  <input
-                    autoComplete="one-time-code"
-                    disabled={isBusy}
-                    inputMode="numeric"
-                    maxLength={6}
-                    onChange={(event) =>
-                      setVerificationCode(
-                        event.target.value.replace(/\D/g, '').slice(0, 6)
-                      )
-                    }
-                    pattern="[0-9]{6}"
-                    required
-                    value={verificationCode}
-                  />
-                </label>
-                <button className="account-button account-button--danger" disabled={isBusy} type="submit">
-                  Désactiver
-                </button>
-              </form>
-            </details>
-          </div>
-        ) : null}
-
-        {status && !status.mfa.enabled && !enrollment ? (
-          <form
-            className="account-security-form"
-            onSubmit={handleBeginEnrollment}
-          >
-            {status.mfa.requiredForRole ? (
-              <p className="account-security-recommendation">
-                Cette protection est fortement recommandée pour ton rôle.
-              </p>
-            ) : null}
-            <label>
-              <span>Mot de passe actuel</span>
-              <input
-                autoComplete="current-password"
-                disabled={isBusy}
-                onChange={(event) => setCurrentPassword(event.target.value)}
-                required
-                type="password"
-                value={currentPassword}
-              />
-            </label>
-            <button className="account-button" disabled={isBusy} type="submit">
-              Configurer une application d’authentification
-            </button>
-          </form>
-        ) : null}
-
-        {enrollment ? (
-          <form
-            className="account-security-enrollment"
-            onSubmit={handleVerifyEnrollment}
-          >
-            <p>
-              Scanne ce QR code avec ton application d’authentification. En cas
-              d’impossibilité, saisis la clé manuellement.
-            </p>
-            {enrollment.qrCode ? (
-              <img
-                alt="QR code de configuration de la double authentification"
-                className="account-security-enrollment__qr"
-                src={enrollment.qrCode}
-              />
-            ) : null}
-            <code className="account-security-enrollment__secret">
-              {enrollment.secret}
-            </code>
-            <p className="account-security-recommendation">
-              Conserve cette clé dans un gestionnaire de mots de passe sécurisé :
-              elle permet de reconfigurer l’application si tu changes de téléphone.
-            </p>
-            <label>
-              <span>Code à six chiffres</span>
-              <input
-                autoComplete="one-time-code"
-                autoFocus
-                disabled={isBusy}
-                inputMode="numeric"
-                maxLength={6}
-                onChange={(event) =>
-                  setVerificationCode(
-                    event.target.value.replace(/\D/g, '').slice(0, 6)
-                  )
-                }
-                pattern="[0-9]{6}"
-                required
-                value={verificationCode}
-              />
-            </label>
-            <div className="account-security-actions">
-              <button
-                className="account-button"
-                disabled={isBusy}
-                onClick={() => {
-                  setEnrollment(null);
-                  setCurrentPassword('');
-                  setVerificationCode('');
-                }}
-                type="button"
-              >
-                Annuler
-              </button>
-              <button className="account-button" disabled={isBusy} type="submit">
-                Activer la protection
-              </button>
-            </div>
-          </form>
-        ) : null}
-      </section>
-
-      <section className="account-security-card">
-        <header className="account-security-card__header">
-          <span className="account-security-card__icon" aria-hidden="true">
             <Laptop />
           </span>
           <div>
@@ -384,6 +138,12 @@ export function AccountSecurityPanel() {
             <RefreshCw aria-hidden="true" />
           </button>
         </header>
+
+        {operation === 'load' && !status ? (
+          <p className="account-security-loading" role="status">
+            <LoaderCircle aria-hidden="true" /> Chargement…
+          </p>
+        ) : null}
 
         <div className="account-security-sessions">
           {status?.sessions.map((session) => (

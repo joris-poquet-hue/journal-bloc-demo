@@ -1,6 +1,5 @@
 const {
   buildRateLimitScope,
-  challengeAndVerifyAnyTotp,
   checkRateLimit,
   clearAuthFailures,
   createApplicationSession,
@@ -9,7 +8,6 @@ const {
   getRequestBody,
   isApplicationSessionConfigured,
   isMobileApplicationRequest,
-  listMfaFactors,
   logoutSupabaseAccessToken,
   normalizeEmail,
   normalizeLoginId,
@@ -52,7 +50,6 @@ module.exports = async function handler(request, response) {
 
   const loginId = normalizeLoginId(body?.loginId);
   const password = typeof body?.password === 'string' ? body.password : '';
-  const mfaCode = typeof body?.mfaCode === 'string' ? body.mfaCode.trim() : '';
 
   if (!loginId || !password) {
     return sendJson(response, 401, { error: 'Identifiants incorrects.' });
@@ -185,51 +182,7 @@ module.exports = async function handler(request, response) {
       });
     }
 
-    let mfaVerified = false;
-
-    if (!profile.must_change_password) {
-      const verifiedTotpFactors = (await listMfaFactors(profile.auth_user_id))
-        .filter(
-          (factor) =>
-            factor?.factor_type === 'totp' && factor?.status === 'verified'
-        )
-        .sort((left, right) =>
-          String(right.updated_at ?? '').localeCompare(
-            String(left.updated_at ?? '')
-          )
-        );
-
-      if (verifiedTotpFactors.length > 0 && !mfaCode) {
-        await clearAuthFailures(rateLimitScope);
-        return sendJson(response, 202, {
-          message:
-            'Saisis le code à six chiffres de ton application d’authentification.',
-          requiresMfa: true,
-        });
-      }
-
-      if (verifiedTotpFactors.length > 0) {
-        try {
-          const verifiedFactor = await challengeAndVerifyAnyTotp(
-            transientAccessToken,
-            verifiedTotpFactors,
-            mfaCode
-          );
-          transientAccessToken = verifiedFactor.session.access_token;
-          mfaVerified = true;
-        } catch {
-          await registerAuthFailure(rateLimitScope);
-          return sendJson(response, 401, {
-            error: 'Le code de vérification est incorrect ou expiré.',
-            requiresMfa: true,
-          });
-        }
-      }
-    }
-
-    const applicationSession = await createApplicationSession(profile, request, {
-      mfaVerified,
-    });
+    const applicationSession = await createApplicationSession(profile, request);
     createdApplicationSessionId = applicationSession.session.id;
 
     const refreshedProfile = await getProfileByLoginId(loginId);
@@ -257,9 +210,6 @@ module.exports = async function handler(request, response) {
         ? { mobileSessionToken: applicationSession.token }
         : {}),
       profile: toPublicProfile(refreshedProfile),
-      security: {
-        mfaVerified,
-      },
     });
   } catch (error) {
     if (createdApplicationSessionId) {

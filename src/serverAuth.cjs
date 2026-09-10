@@ -19,7 +19,6 @@ const RATE_LIMIT_MAX_FAILURES = 5;
 const APPLICATION_SESSION_COOKIE_NAME = '__Host-monjdb_session';
 const WEB_IDLE_TIMEOUT_SECONDS = 30 * 60;
 const APPLICATION_JWT_LIFETIME_SECONDS = 2 * 60;
-const MFA_CODE_PATTERN = /^\d{6}$/;
 
 function sendJson(response, statusCode, payload) {
   response.statusCode = statusCode;
@@ -354,39 +353,6 @@ async function authAdminRequest(path, options = {}) {
   return payload;
 }
 
-async function userAuthRequest(accessToken, path, options = {}) {
-  const { payload, response } = await supabaseRequest(
-    `${SUPABASE_URL}/auth/v1/${path}`,
-    {
-      body:
-        options.body === undefined ? undefined : JSON.stringify(options.body),
-      headers: {
-        apikey: SUPABASE_ANON_KEY,
-        Authorization: `Bearer ${accessToken}`,
-        ...(options.body === undefined
-          ? {}
-          : { 'Content-Type': 'application/json' }),
-      },
-      method: options.method ?? 'GET',
-    }
-  );
-
-  if (!response.ok) {
-    const error = new Error(
-      payload?.msg ||
-        payload?.message ||
-        payload?.error_description ||
-        payload?.error ||
-        `Authentication service error ${response.status}`
-    );
-    error.status = response.status;
-    error.details = payload;
-    throw error;
-  }
-
-  return payload;
-}
-
 async function signInAuthUserWithPassword(email, password, request) {
   const { payload, response } = await supabaseRequest(
     `${SUPABASE_URL}/auth/v1/token?grant_type=password`,
@@ -409,71 +375,6 @@ async function signInAuthUserWithPassword(email, password, request) {
   }
 
   return payload;
-}
-
-async function listMfaFactors(authUserId) {
-  const factors = await authAdminRequest(
-    `admin/users/${encodeURIComponent(authUserId)}/factors`
-  );
-
-  return Array.isArray(factors) ? factors : factors?.factors ?? [];
-}
-
-async function challengeAndVerifyTotp(accessToken, factorId, code) {
-  if (!MFA_CODE_PATTERN.test(String(code ?? '').trim())) {
-    const error = new Error('Invalid verification code.');
-    error.status = 400;
-    throw error;
-  }
-
-  const challenge = await userAuthRequest(
-    accessToken,
-    `factors/${encodeURIComponent(factorId)}/challenge`,
-    { body: {}, method: 'POST' }
-  );
-
-  if (!challenge?.id) {
-    throw new Error('Unable to create the MFA challenge.');
-  }
-
-  const verifiedSession = await userAuthRequest(
-    accessToken,
-    `factors/${encodeURIComponent(factorId)}/verify`,
-    {
-      body: {
-        challenge_id: challenge.id,
-        code: String(code).trim(),
-      },
-      method: 'POST',
-    }
-  );
-
-  if (!verifiedSession?.access_token) {
-    throw new Error('Unable to verify the MFA challenge.');
-  }
-
-  return verifiedSession;
-}
-
-async function challengeAndVerifyAnyTotp(accessToken, factors, code) {
-  let lastError = null;
-
-  for (const factor of factors) {
-    if (!factor?.id) {
-      continue;
-    }
-
-    try {
-      return {
-        factorId: factor.id,
-        session: await challengeAndVerifyTotp(accessToken, factor.id, code),
-      };
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw lastError ?? new Error('Unable to verify an MFA challenge.');
 }
 
 async function logoutSupabaseAccessToken(accessToken) {
@@ -540,9 +441,6 @@ async function createApplicationSession(profile, request, options = {}) {
       device_label: getDeviceLabel(request),
       idle_timeout_seconds:
         clientKind === 'web' ? WEB_IDLE_TIMEOUT_SECONDS : null,
-      mfa_verified_at: options.mfaVerified
-        ? new Date().toISOString()
-        : null,
       profile_id: profile.id,
       token_hash: tokenHash,
       user_agent_hash: userAgent
@@ -555,7 +453,7 @@ async function createApplicationSession(profile, request, options = {}) {
     method: 'POST',
     searchParams: {
       select:
-        'id,profile_id,auth_user_id,client_kind,auth_context,idle_timeout_seconds,created_at,last_seen_at,device_label,mfa_verified_at',
+        'id,profile_id,auth_user_id,client_kind,auth_context,idle_timeout_seconds,created_at,last_seen_at,device_label',
     },
   });
   const session = rows?.[0] ?? null;
@@ -911,11 +809,9 @@ module.exports = {
   authenticateBusinessApplicationSession,
   authenticateRequest,
   buildRateLimitScope,
-  challengeAndVerifyAnyTotp,
   checkRateLimit,
   clearAuthFailures,
   clearApplicationSessionCookie,
-  challengeAndVerifyTotp,
   createApplicationSession,
   createSupabaseApplicationJwt,
   findApplicationSessionByToken,
@@ -934,7 +830,6 @@ module.exports = {
   isMobileApplicationRequest,
   isValidEmail,
   logoutSupabaseAccessToken,
-  listMfaFactors,
   normalizeEmail,
   normalizeLoginId,
   registerAuthFailure,
@@ -949,6 +844,5 @@ module.exports = {
   setApplicationSessionCookie,
   supabaseRequest,
   toPublicProfile,
-  userAuthRequest,
   validatePassword,
 };

@@ -7,7 +7,7 @@ est indépendante de l'interface Supabase et regroupe dans une archive unique :
 
 - un dump PostgreSQL complet de secours ;
 - le schéma et les données du domaine `public` ;
-- les comptes `auth.users`, leurs identités et leurs facteurs MFA, afin de
+- les comptes `auth.users` et leurs identités, afin de
   conserver les mots de passe hachés ;
 - la configuration des buckets Supabase Storage et le contenu réel de chaque
   objet ;

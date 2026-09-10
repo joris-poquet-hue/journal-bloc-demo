@@ -226,14 +226,12 @@ type AppContextValue = {
   checklistProgress: ReturnType<typeof getChecklistProgress>;
   login: (
     loginId: string,
-    password: string,
-    mfaCode?: string
+    password: string
   ) => Promise<{
     message?: string;
     status:
       | 'authenticated'
       | 'error'
-      | 'mfa-required'
       | 'password-change-required';
   }>;
   logout: () => Promise<void>;
@@ -1597,7 +1595,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  const login = async (loginId: string, password: string, mfaCode?: string) => {
+  const login = async (loginId: string, password: string) => {
     activeBackendIdentityRef.current = null;
     setSupabaseAccessToken(null);
     setDurableInternalProfileId(null);
@@ -1613,18 +1611,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }
 
     try {
-      const loginResult = await signInWithSupabaseLoginId(
-        loginId,
-        password,
-        mfaCode
-      );
-
-      if (loginResult.requiresMfa) {
-        return {
-          message: loginResult.message,
-          status: 'mfa-required',
-        } as const;
-      }
+      const loginResult = await signInWithSupabaseLoginId(loginId, password);
 
       const { profile: loginProfile } = loginResult;
 
@@ -1674,15 +1661,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
         error instanceof Error && error.message.trim()
           ? error.message.trim()
           : '';
-      const requiresMfa = Boolean(
-        typeof error === 'object' &&
-          error &&
-          'details' in error &&
-          error.details &&
-          typeof error.details === 'object' &&
-          'requiresMfa' in error.details &&
-          error.details.requiresMfa
-      );
       const isIncompleteAdminBootstrap =
         error instanceof Error &&
         error.message.startsWith(
@@ -1701,7 +1679,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
             : status === 400 || status === 401
               ? 'Identifiant ou mot de passe incorrect.'
               : 'Connexion au service sécurisé impossible. Vérifie le réseau puis réessaie.',
-        status: requiresMfa ? 'mfa-required' : 'error',
+        status: 'error',
       } as const;
     }
   };

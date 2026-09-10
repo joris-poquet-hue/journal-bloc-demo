@@ -169,9 +169,11 @@ try {
   );
   await writeFile(
     authRestorePath,
-    authDumpSql.replace(
-      /^ALTER TABLE auth\..+\s+(?:DISABLE|ENABLE) TRIGGER ALL;\s*$/gim,
-      ''
+    stripRetiredAuthFactorData(
+      authDumpSql.replace(
+        /^ALTER TABLE auth\..+\s+(?:DISABLE|ENABLE) TRIGGER ALL;\s*$/gim,
+        ''
+      )
     ),
     { mode: 0o600 }
   );
@@ -346,6 +348,12 @@ function quoteIdentifier(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
 }
 
+function stripRetiredAuthFactorData(sql) {
+  return sql
+    .replace(/^COPY auth\.mfa_factors\b[\s\S]*?^\\\.\s*$/gim, '')
+    .replace(/^INSERT INTO auth\.mfa_factors\b[\s\S]*?;\s*$/gim, '');
+}
+
 async function restoreStorage({
   pgClient,
   supabaseUrl,
@@ -456,6 +464,10 @@ async function verifyRestoredDatabase(client, metadata) {
   }
 
   for (const [tableName, expectedCount] of Object.entries(metadata.authRowCounts)) {
+    if (tableName === 'mfa_factors') {
+      continue;
+    }
+
     const result = await client.query(
       `select count(*)::bigint as count from auth.${quoteIdentifier(tableName)}`
     );
@@ -466,6 +478,16 @@ async function verifyRestoredDatabase(client, metadata) {
         `Contrôle de restauration échoué pour auth.${tableName} : ${actualCount} au lieu de ${expectedCount}.`
       );
     }
+  }
+
+  const retiredFactorCount = await client.query(
+    'select count(*)::bigint as count from auth.mfa_factors'
+  );
+
+  if (Number(retiredFactorCount.rows[0].count) !== 0) {
+    throw new Error(
+      'Contrôle de restauration échoué : des facteurs d’authentification retirés ont été restaurés.'
+    );
   }
 }
 

@@ -1,44 +1,11 @@
 import { expect, type Page } from '@playwright/test';
-import { createHmac } from 'node:crypto';
 
 export type TestedRole = 'internal' | 'senior' | 'admin';
 
 type Credentials = {
   loginId: string;
-  mfaSecret?: string;
   password: string;
 };
-
-function decodeBase32(value: string) {
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
-  const normalized = value.toUpperCase().replace(/[^A-Z2-7]/g, '');
-  let bits = '';
-
-  for (const character of normalized) {
-    bits += alphabet.indexOf(character).toString(2).padStart(5, '0');
-  }
-
-  return Buffer.from(
-    bits.match(/.{8}/g)?.map((byte) => Number.parseInt(byte, 2)) ?? []
-  );
-}
-
-function createTotp(secret: string) {
-  const counterBytes = Buffer.alloc(8);
-  counterBytes.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30_000)));
-  const digest = createHmac('sha1', decodeBase32(secret))
-    .update(counterBytes)
-    .digest();
-  const offset = digest[digest.length - 1] & 0x0f;
-  const code =
-    (((digest[offset] & 0x7f) << 24) |
-      ((digest[offset + 1] & 0xff) << 16) |
-      ((digest[offset + 2] & 0xff) << 8) |
-      (digest[offset + 3] & 0xff)) %
-    1_000_000;
-
-  return String(code).padStart(6, '0');
-}
 
 const ENV_PREFIX_BY_ROLE: Record<TestedRole, string> = {
   internal: 'E2E_INTERNAL',
@@ -97,7 +64,6 @@ export function getRoleCredentials(role: TestedRole): Credentials | null {
   const prefix = ENV_PREFIX_BY_ROLE[role];
   const loginId = process.env[`${prefix}_LOGIN_ID`]?.trim();
   const password = process.env[`${prefix}_PASSWORD`];
-  const mfaSecret = process.env[`${prefix}_MFA_SECRET`]?.trim();
 
   if (!loginId || !password) {
     if (process.env.REQUIRE_AUTHENTICATED_E2E === '1') {
@@ -109,7 +75,7 @@ export function getRoleCredentials(role: TestedRole): Credentials | null {
     return null;
   }
 
-  return { loginId, mfaSecret, password };
+  return { loginId, password };
 }
 
 export async function dismissTrophyCelebrationIfPresent(page: Page) {
@@ -145,31 +111,6 @@ export async function loginAs(page: Page, credentials: Credentials) {
     );
   }
 
-  if (loginResponse.status() === 202) {
-    if (!credentials.mfaSecret) {
-      throw new Error(
-        'Ce compte E2E exige la double authentification, mais son secret MFA de test n’est pas configuré.'
-      );
-    }
-
-    await page.getByLabel('Code de vérification').fill(
-      createTotp(credentials.mfaSecret)
-    );
-    const verificationResponsePromise = page.waitForResponse(
-      (response) =>
-        response.url().includes('/api/auth-login') &&
-        response.request().method() === 'POST',
-      { timeout: 30_000 }
-    );
-    await page.getByRole('button', { name: 'Vérifier et se connecter' }).click();
-    const verificationResponse = await verificationResponsePromise;
-
-    if (!verificationResponse.ok()) {
-      throw new Error(
-        `La vérification MFA E2E a échoué avec le statut ${verificationResponse.status()}.`
-      );
-    }
-  }
   await expect(page.getByRole('region', { name: 'Connexion' })).toBeHidden({
     timeout: 20_000,
   });

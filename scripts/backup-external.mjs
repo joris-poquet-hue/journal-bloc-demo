@@ -161,8 +161,6 @@ try {
         select 'users' as name, count(*)::bigint as count from auth.users
         union all
         select 'identities', count(*)::bigint from auth.identities
-        union all
-        select 'mfa_factors', count(*)::bigint from auth.mfa_factors
       `)
     ).rows.map((row) => [row.name, Number(row.count)])
   );
@@ -183,6 +181,7 @@ try {
         ...dumpCommonArguments,
         '--format=custom',
         '--compress=9',
+        '--exclude-table-data=auth.mfa_factors',
         `--file=${join(databaseDirectory, 'full.dump')}`,
       ],
       { env: postgresEnvironment }
@@ -216,7 +215,6 @@ try {
         ...dumpCommonArguments,
         '--table=auth.users',
         '--table=auth.identities',
-        '--table=auth.mfa_factors',
         '--data-only',
         '--format=plain',
         `--file=${join(databaseDirectory, 'auth-data.sql')}`,
@@ -256,7 +254,7 @@ try {
   const databaseMetadata = {
     serverVersion: databaseVersion,
     publicTables,
-    authTables: ['users', 'identities', 'mfa_factors'],
+    authTables: ['users', 'identities'],
     publicRowCounts,
     authRowCounts,
   };

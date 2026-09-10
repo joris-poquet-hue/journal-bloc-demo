@@ -38,7 +38,7 @@ export function AdminAccountView({
 
       <SectionCard
         className="admin-dashboard-card"
-        description="Activez le second facteur et contrôlez chaque session ouverte."
+        description="Consultez et contrôlez chaque session ouverte."
         title="Sécurité et appareils"
       >
         <AccountSecurityPanel />

@@ -686,7 +686,7 @@ export function ProfileScreen() {
             onClick={() => openSheet('password')}
           />
           <AccountActionRow
-            description="Double authentification et appareils connectés"
+            description="Consulter et déconnecter les appareils connectés"
             icon={<ShieldCheck strokeWidth={2.05} />}
             label="Sécurité du compte"
             onClick={() => openSheet('security')}

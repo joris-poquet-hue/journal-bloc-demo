@@ -88,8 +88,6 @@ export function LoginScreen() {
   const [contactEmail, setContactEmail] = useState('');
   const [nextPassword, setNextPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [mfaCode, setMfaCode] = useState('');
-  const [isMfaMode, setIsMfaMode] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
@@ -150,29 +148,11 @@ export function LoginScreen() {
       return;
     }
 
-    const result = await login(
-      loginId,
-      password,
-      isMfaMode ? mfaCode : undefined
-    );
+    const result = await login(loginId, password);
     setIsLoggingIn(false);
 
     if (result.status === 'authenticated') {
       setErrorMessage('');
-      setMfaCode('');
-      setIsMfaMode(false);
-      return;
-    }
-
-    if (result.status === 'mfa-required') {
-      setIsMfaMode(true);
-      setStatusMessage(
-        result.message ??
-          'Saisis le code affiché dans ton application d’authentification.'
-      );
-      setErrorMessage(
-        mfaCode ? result.message ?? 'Le code est incorrect ou expiré.' : ''
-      );
       return;
     }
 
@@ -184,14 +164,6 @@ export function LoginScreen() {
     }
 
     setErrorMessage(result.message ?? 'Identifiant ou mot de passe incorrect.');
-  };
-
-  const handleCancelMfa = () => {
-    setIsMfaMode(false);
-    setMfaCode('');
-    setPassword('');
-    setErrorMessage('');
-    setStatusMessage('');
   };
 
   const handleCancelPasswordChange = () => {
@@ -370,35 +342,6 @@ export function LoginScreen() {
                   </span>
                 </label>
               </>
-            ) : isMfaMode ? (
-              <>
-                <p className="login-note login-note--compact">
-                  La connexion est protégée par un second facteur. Ouvre ton
-                  application d’authentification et saisis le code temporaire.
-                </p>
-                <label className="login-field">
-                  <span className="login-field__label">Code de vérification</span>
-                  <span className="login-field__control">
-                    <ShieldIcon />
-                    <input
-                      autoComplete="one-time-code"
-                      autoFocus
-                      className="login-field__input"
-                      inputMode="numeric"
-                      maxLength={6}
-                      onChange={(event) => {
-                        setMfaCode(
-                          event.target.value.replace(/\D/g, '').slice(0, 6)
-                        );
-                        setErrorMessage('');
-                      }}
-                      pattern="[0-9]{6}"
-                      placeholder="000000"
-                      value={mfaCode}
-                    />
-                  </span>
-                </label>
-              </>
             ) : (
               <>
                 <label className="login-field">
@@ -468,8 +411,6 @@ export function LoginScreen() {
                   ? passwordChangeChallenge?.isFirstLogin
                     ? 'Envoyer le lien d’activation'
                     : 'Mettre à jour le mot de passe'
-                  : isMfaMode
-                    ? 'Vérifier et se connecter'
                   : 'Se connecter'}
             </button>
 
@@ -480,14 +421,6 @@ export function LoginScreen() {
                 type="button"
               >
                 Retour à l'écran de connexion
-              </button>
-            ) : isMfaMode ? (
-              <button
-                className="login-submit login-submit--secondary"
-                onClick={handleCancelMfa}
-                type="button"
-              >
-                Recommencer la connexion
               </button>
             ) : (
               <button
