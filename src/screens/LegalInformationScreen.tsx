@@ -1,4 +1,4 @@
-import { ArrowLeft, ExternalLink, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ExternalLink } from 'lucide-react';
 import { useEffect } from 'react';
 
 import { SUPPORT_EMAIL } from '../supportConfig';
@@ -282,34 +282,18 @@ export function LegalInformationScreen() {
             <ArrowLeft aria-hidden="true" />
             Retour à l’application
           </a>
-          <img
-            alt="Mon Journal de Bloc"
-            className="legal-page__logo"
-            src="/images/brand/MonJDB_logoH.png"
-          />
           <div className="legal-page__title-row">
-            <span className="legal-page__icon" aria-hidden="true">
-              <ShieldCheck />
-            </span>
-            <div>
-              <p>Mon Journal de Bloc</p>
-              <h1>Informations légales et confidentialité</h1>
-            </div>
+            <img
+              alt="Mon Journal de Bloc"
+              className="legal-page__title-logo"
+              src="/images/brand/MonJDB_logoH.png"
+            />
+            <h1>Informations légales et confidentialité</h1>
           </div>
-          <p className="legal-page__intro">
-            Une présentation claire de l’éditeur, du cadre d’utilisation du
-            service et de la protection des données personnelles.
-          </p>
           <p className="legal-page__updated">
             Dernière mise à jour : {LAST_UPDATED_LABEL}
           </p>
         </header>
-
-        <nav aria-label="Sommaire de la page" className="legal-page__navigation">
-          <span>Sur cette page</span>
-          <a href="#mentions-legales">Mentions légales</a>
-          <a href="#confidentialite">Politique de confidentialité</a>
-        </nav>
 
         <article className="legal-document">
           <LegalNoticeSection />

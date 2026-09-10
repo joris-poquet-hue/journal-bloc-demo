@@ -20,6 +20,21 @@ test.describe('Informations légales publiques', () => {
       })
     ).toBeVisible();
     await expect(
+      page.locator('.legal-page__title-row').getByRole('img', {
+        name: 'Mon Journal de Bloc',
+      })
+    ).toBeVisible();
+    await expect(page.locator('.legal-page__title-row > p')).toHaveCount(0);
+    await expect(page.locator('.legal-page__title-row > svg')).toHaveCount(0);
+    await expect(
+      page.getByRole('navigation', { name: 'Sommaire de la page' })
+    ).toHaveCount(0);
+    await expect(
+      page.getByText(
+        'Une présentation claire de l’éditeur, du cadre d’utilisation du service et de la protection des données personnelles.'
+      )
+    ).toHaveCount(0);
+    await expect(
       page.getByRole('heading', { level: 2, name: 'Mentions légales' })
     ).toBeVisible();
     await expect(
