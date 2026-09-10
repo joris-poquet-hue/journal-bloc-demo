@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { createServer } from 'vite';
 
 import {
   buildEvaluationPeriodCounts,
@@ -94,6 +95,70 @@ test('le générateur produit un vrai conteneur XLSX', async () => {
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
   );
   assert.deepEqual(Array.from(bytes.slice(0, 4)), [0x50, 0x4b, 0x03, 0x04]);
+});
+
+test('le libellé du niveau exporte sa description et non sa valeur numérique', async () => {
+  const server = await createServer({
+    appType: 'custom',
+    logLevel: 'silent',
+    server: { middlewareMode: true },
+  });
+
+  try {
+    const { buildInterventionsWorksheets } = await server.ssrLoadModule(
+      '/src/utils/interventionsXlsx.ts'
+    );
+    const intervention = {
+      approach: 'coelioscopie',
+      autonomyScore: null,
+      checklist: { 'step-export': '2' },
+      complexity: 5,
+      context: 'programme',
+      contextVariables: [],
+      customIndication: null,
+      date: '2026-09-01',
+      definitionSnapshot: {
+        applicableChecklistSteps: [
+          {
+            id: 'step-export',
+            label: 'Étape de test',
+            order: 1,
+            scored: true,
+          },
+        ],
+        definition: {},
+        source: {
+          id: 'procedure-test',
+          name: 'Procédure de test',
+          status: 'active',
+          version: 1,
+        },
+      },
+      entryTechnique: 'open',
+      id: 'intervention-export',
+      indication: 'geu',
+      indicationComment: '',
+      internalId: null,
+      laterality: 'droite',
+      procedure: 'procedure-test',
+      role: 'operateur_principal',
+      savedAt: '2026-09-01T10:00:00.000Z',
+      seniorId: null,
+    };
+    const worksheets = buildInterventionsWorksheets([intervention], []);
+    const stepsWorksheet = worksheets.find(
+      (worksheet) => worksheet.name === 'Étapes opératoires'
+    );
+
+    assert.ok(stepsWorksheet);
+    assert.equal(stepsWorksheet.rows[1][9], 2);
+    assert.equal(
+      stepsWorksheet.rows[1][10],
+      'Réalisé avec assistance active du senior'
+    );
+  } finally {
+    await server.close();
+  }
 });
 
 test('les contrats de colonnes exportent l’évaluation complète sans identifiants privés', () => {

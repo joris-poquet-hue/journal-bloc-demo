@@ -216,9 +216,9 @@ function getChecklistLabel(value: string | null | undefined) {
     return '';
   }
 
-  return value === 'NA'
-    ? 'Non applicable'
-    : getChoiceLabel(checklistLevelOptions, value, '');
+  return (
+    checklistLevelOptions.find((option) => option.value === value)?.description ?? ''
+  );
 }
 
 function buildInterventionContext(
