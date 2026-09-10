@@ -283,11 +283,6 @@ export function LegalInformationScreen() {
             Retour à l’application
           </a>
           <div className="legal-page__title-row">
-            <img
-              alt="Mon Journal de Bloc"
-              className="legal-page__title-logo"
-              src="/images/brand/MonJDB_logoH.png"
-            />
             <div className="legal-page__title-copy">
               <h1>Informations légales et confidentialité</h1>
               <p className="legal-page__updated">

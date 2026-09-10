@@ -23,7 +23,7 @@ test.describe('Informations légales publiques', () => {
       page.locator('.legal-page__title-row').getByRole('img', {
         name: 'Mon Journal de Bloc',
       })
-    ).toBeVisible();
+    ).toHaveCount(0);
     await expect(
       page.locator('.legal-page__title-copy').getByText(
         'Mis à jour le 10 septembre 2026'

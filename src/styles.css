@@ -9601,16 +9601,7 @@ button {
 }
 
 .legal-page__title-row {
-  display: grid;
-  grid-template-columns: clamp(108px, 14vw, 124px) minmax(0, 1fr);
-  align-items: center;
-  gap: clamp(22px, 3vw, 32px);
-}
-
-.legal-page__title-logo {
-  width: 100%;
-  height: auto;
-  display: block;
+  max-width: 720px;
 }
 
 .legal-page__title-copy {
@@ -9767,9 +9758,7 @@ button {
   }
 
   .legal-page__title-row {
-    grid-template-columns: clamp(68px, 22vw, 86px) minmax(0, 1fr);
-    align-items: start;
-    gap: 16px;
+    max-width: none;
   }
 
   .legal-page__title-copy {
