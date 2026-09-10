@@ -125,14 +125,15 @@ jobs:
   e2e-mutations-isolated:
     name: E2E mutations complètes — environnement isolé
     if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs: supabase-isolated
     environment: isolated-e2e
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
       ALLOW_REMOTE_MUTATION_E2E: '1'
-      E2E_AUTH_BASE_URL: ${{ secrets.E2E_MUTATION_BASE_URL }}
-      E2E_INTERNAL_LOGIN_ID: ${{ secrets.E2E_MUTATION_INTERNAL_LOGIN_ID }}
-      E2E_INTERNAL_PASSWORD: ${{ secrets.E2E_MUTATION_INTERNAL_PASSWORD }}
+      E2E_AUTH_BASE_URL: ${{ secrets.E2E_MUTATION_BASE_URL || secrets.E2E_AUTH_BASE_URL }}
+      E2E_INTERNAL_LOGIN_ID: ${{ secrets.E2E_MUTATION_INTERNAL_LOGIN_ID || secrets.E2E_INTERNAL_LOGIN_ID }}
+      E2E_INTERNAL_PASSWORD: ${{ secrets.E2E_MUTATION_INTERNAL_PASSWORD || secrets.E2E_INTERNAL_PASSWORD }}
       REQUIRE_AUTHENTICATED_E2E: '1'
       REQUIRE_MUTATION_E2E: '1'
     steps:
