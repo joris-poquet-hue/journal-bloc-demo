@@ -17194,9 +17194,16 @@ html.monjdb-web-app .senior-evaluation-clinical-overview {
 
   html.monjdb-web-app .login-card {
     align-self: center;
-    padding: 36px;
+    padding: 36px 30px;
     border-radius: 32px;
     box-shadow: 0 28px 72px rgba(7, 26, 61, 0.13);
+  }
+
+  html.monjdb-web-app .login-meta {
+    flex-wrap: nowrap;
+    gap: 5px;
+    font-size: 0.74rem;
+    white-space: nowrap;
   }
 
   html.monjdb-web-app .login-card__header--web {

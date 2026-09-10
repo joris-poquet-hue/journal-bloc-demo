@@ -37,6 +37,25 @@ test.describe('Connexion publique', () => {
         name: 'Informations légales et confidentialité',
       })
     ).toHaveAttribute('href', '/informations-legales');
+    const footerLine = page.locator('.login-meta');
+    await expect
+      .poll(async () =>
+        footerLine.evaluate((element) => {
+          const topPositions = Array.from(element.children).map((child) =>
+            Math.round(child.getBoundingClientRect().top)
+          );
+
+          return new Set(topPositions).size;
+        })
+      )
+      .toBe(1);
+    await expect
+      .poll(() =>
+        footerLine.evaluate(
+          (element) => element.scrollWidth <= element.clientWidth
+        )
+      )
+      .toBe(true);
 
     await page.keyboard.press('Tab');
     await expect(page.getByLabel('Identifiant')).toBeFocused();
