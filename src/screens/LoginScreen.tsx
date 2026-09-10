@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 
 import { PUBLIC_SITE_VERSION } from '../appMetadata';
 import { useAppContext } from '../context/AppContext';
+import { LEGAL_INFORMATION_PATH } from '../legalRoutes';
 import { buildSupportMailto } from '../supportConfig';
 import { PASSWORD_POLICY_HELP } from '../utils/passwordPolicy';
 
@@ -445,6 +446,12 @@ export function LoginScreen() {
                   href={contactHref}
                 >
                   Contact
+                </a>
+                <span aria-hidden="true" className="login-meta__separator">
+                  ·
+                </span>
+                <a className="login-meta__contact" href={LEGAL_INFORMATION_PATH}>
+                  Informations légales et confidentialité
                 </a>
                 <span aria-hidden="true" className="login-meta__separator">
                   ·

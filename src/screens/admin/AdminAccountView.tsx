@@ -1,6 +1,7 @@
 import { AccountSecurityPanel } from '../../components/AccountSecurityPanel';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { SectionCard } from '../../components/SectionCard';
+import { LEGAL_INFORMATION_PATH } from '../../legalRoutes';
 import { AdminPageShell } from './AdminPageShell';
 
 export function AdminAccountView({
@@ -55,6 +56,18 @@ export function AdminAccountView({
             onPress={onSupport}
             variant="secondary"
           />
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        className="admin-dashboard-card"
+        description="Informations sur l’éditeur et le traitement des données personnelles."
+        title="Informations légales"
+      >
+        <div className="legal-link-list">
+          <a href={LEGAL_INFORMATION_PATH}>
+            Consulter les informations légales et la politique de confidentialité
+          </a>
         </div>
       </SectionCard>
     </AdminPageShell>

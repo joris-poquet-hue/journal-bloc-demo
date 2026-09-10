@@ -19,6 +19,7 @@ import packageJson from '../../package.json';
 import { AccountSecurityPanel } from '../components/AccountSecurityPanel';
 import { InternalAvatar } from '../components/InternalAvatar';
 import { ScreenContainer } from '../components/ScreenContainer';
+import { LEGAL_INFORMATION_PATH } from '../legalRoutes';
 import { buildSupportMailto } from '../supportConfig';
 import { useAppContext } from '../context/AppContext';
 import { PASSWORD_POLICY_HELP, validatePasswordStrength } from '../utils/passwordPolicy';
@@ -1218,7 +1219,7 @@ export function ProfileScreen() {
 
             {activeSheet === 'about' ? (
               <AccountSheetFrame
-                description="Les contenus détaillés seront complétés ensuite."
+                description="Version du service et informations accessibles à tout moment."
                 eyebrow="À propos"
                 icon={<Info strokeWidth={2} />}
                 title="À propos de Mon Journal de Bloc"
@@ -1231,12 +1232,8 @@ export function ProfileScreen() {
                       <span>{packageJson.version}</span>
                     </div>
                     <div>
-                      <strong>Mentions légales</strong>
-                      <span>À rédiger</span>
-                    </div>
-                    <div>
-                      <strong>Politique de confidentialité</strong>
-                      <span>À rédiger</span>
+                      <strong>Informations légales et confidentialité</strong>
+                      <a href={LEGAL_INFORMATION_PATH}>Consulter le document</a>
                     </div>
                   </div>
                 </div>

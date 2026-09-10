@@ -27,3 +27,15 @@ test('la page de connexion ne présente aucune violation WCAG A ou AA détectabl
 
   expect(results.violations).toEqual([]);
 });
+
+test('la page d’informations légales ne présente aucune violation WCAG A ou AA détectable', async ({
+  page,
+}) => {
+  await page.goto('/informations-legales');
+
+  const results = await new AxeBuilder({ page })
+    .withTags(WCAG_AA_TAGS)
+    .analyze();
+
+  expect(results.violations).toEqual([]);
+});

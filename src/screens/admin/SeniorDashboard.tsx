@@ -3,6 +3,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FileDown,
+  FileText,
   LogOut,
   Mail,
   Pencil,
@@ -29,6 +30,7 @@ import { NotificationCenter } from '../../components/NotificationCenter';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { SectionCard } from '../../components/SectionCard';
+import { LEGAL_INFORMATION_PATH } from '../../legalRoutes';
 import { buildSupportMailto } from '../../supportConfig';
 import {
   formatDisplayName,
@@ -833,6 +835,15 @@ export function SeniorDashboard({
           <Mail aria-hidden="true" />
           <span>Contacter le support</span>
         </button>
+        <a
+          className="senior-settings__menu-item"
+          href={LEGAL_INFORMATION_PATH}
+          onClick={() => setIsSettingsMenuOpen(false)}
+          role="menuitem"
+        >
+          <FileText aria-hidden="true" />
+          <span>Informations légales et confidentialité</span>
+        </a>
         {includeLogout ? (
           <button
             className={`senior-settings__menu-item senior-settings__menu-item--danger ${
@@ -1065,6 +1076,11 @@ export function SeniorDashboard({
               onPress={onLogout}
               variant="danger"
             />
+          </div>
+          <div className="legal-inline-links">
+            <a href={LEGAL_INFORMATION_PATH}>
+              Informations légales et confidentialité
+            </a>
           </div>
         </SectionCard>
       ) : null}

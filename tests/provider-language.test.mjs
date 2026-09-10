@@ -14,12 +14,16 @@ function listTsxFiles(directoryUrl) {
   });
 }
 
-test('les écrans ne présentent pas le nom du fournisseur de données', () => {
+test('les écrans opérationnels ne présentent pas le nom du fournisseur de données', () => {
+  const legalDocumentPath = new URL(
+    '../src/screens/LegalInformationScreen.tsx',
+    import.meta.url
+  ).pathname;
   const userInterfaceFiles = [
     ...listTsxFiles(new URL('../src/screens/', import.meta.url)),
     ...listTsxFiles(new URL('../src/components/', import.meta.url)),
     new URL('../mobile/WebAppShell.tsx', import.meta.url),
-  ];
+  ].filter((fileUrl) => fileUrl.pathname !== legalDocumentPath);
 
   userInterfaceFiles.forEach((fileUrl) => {
     const source = readFileSync(fileUrl, 'utf8');
@@ -30,4 +34,13 @@ test('les écrans ne présentent pas le nom du fournisseur de données', () => {
       `${fileUrl.pathname} contient encore une mention visible du fournisseur`
     );
   });
+});
+
+test('la politique de confidentialité identifie le sous-traitant de données', () => {
+  const source = readFileSync(
+    new URL('../src/screens/LegalInformationScreen.tsx', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(source, /Supabase/);
 });

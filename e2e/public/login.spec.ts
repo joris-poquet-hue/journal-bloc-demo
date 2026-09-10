@@ -32,6 +32,11 @@ test.describe('Connexion publique', () => {
       'href',
       /^mailto:contact@monjournaldebloc\.fr\?subject=Contact/
     );
+    await expect(
+      page.getByRole('link', {
+        name: 'Informations légales et confidentialité',
+      })
+    ).toHaveAttribute('href', '/informations-legales');
 
     await page.keyboard.press('Tab');
     await expect(page.getByLabel('Identifiant')).toBeFocused();
