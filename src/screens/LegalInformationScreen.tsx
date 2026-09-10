@@ -288,11 +288,13 @@ export function LegalInformationScreen() {
               className="legal-page__title-logo"
               src="/images/brand/MonJDB_logoH.png"
             />
-            <h1>Informations légales et confidentialité</h1>
+            <div className="legal-page__title-copy">
+              <h1>Informations légales et confidentialité</h1>
+              <p className="legal-page__updated">
+                Mis à jour le {LAST_UPDATED_LABEL}
+              </p>
+            </div>
           </div>
-          <p className="legal-page__updated">
-            Dernière mise à jour : {LAST_UPDATED_LABEL}
-          </p>
         </header>
 
         <article className="legal-document">

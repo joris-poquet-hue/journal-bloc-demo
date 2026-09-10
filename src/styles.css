@@ -9560,7 +9560,7 @@ button {
 
 .legal-page__header {
   position: relative;
-  padding: clamp(26px, 5vw, 48px);
+  padding: clamp(26px, 4vw, 40px);
   border-radius: 32px;
   overflow: hidden;
 }
@@ -9583,7 +9583,7 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 28px;
+  margin-bottom: 22px;
   color: #0b5360;
   font-weight: 800;
   text-decoration: none;
@@ -9601,16 +9601,22 @@ button {
 }
 
 .legal-page__title-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: clamp(108px, 14vw, 124px) minmax(0, 1fr);
   align-items: center;
-  gap: clamp(18px, 3vw, 30px);
+  gap: clamp(22px, 3vw, 32px);
 }
 
 .legal-page__title-logo {
-  width: clamp(145px, 22vw, 205px);
+  width: 100%;
   height: auto;
   display: block;
-  flex: 0 0 auto;
+}
+
+.legal-page__title-copy {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
 }
 
 .legal-page__title-row h1,
@@ -9621,15 +9627,15 @@ button {
 .legal-page__title-row h1 {
   min-width: 0;
   color: #071a3d;
-  font-size: clamp(2rem, 5vw, 3.35rem);
-  line-height: 1.04;
+  font-size: clamp(1.9rem, 3.6vw, 2.25rem);
+  line-height: 1.08;
+  letter-spacing: -0.025em;
   overflow-wrap: normal;
 }
 
 .legal-page__updated {
-  margin-top: 18px;
   color: #708097;
-  font-size: 0.88rem;
+  font-size: 0.84rem;
   font-weight: 700;
 }
 
@@ -9761,16 +9767,23 @@ button {
   }
 
   .legal-page__title-row {
-    gap: 14px;
+    grid-template-columns: clamp(68px, 22vw, 86px) minmax(0, 1fr);
+    align-items: start;
+    gap: 16px;
   }
 
-  .legal-page__title-logo {
-    width: clamp(78px, 24vw, 100px);
+  .legal-page__title-copy {
+    gap: 9px;
   }
 
   .legal-page__title-row h1 {
-    font-size: clamp(1.25rem, 5.8vw, 1.65rem);
+    font-size: clamp(1.2rem, 5.4vw, 1.5rem);
     line-height: 1.1;
+  }
+
+  .legal-page__updated {
+    font-size: 0.74rem;
+    line-height: 1.35;
   }
 }
 

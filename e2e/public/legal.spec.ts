@@ -24,6 +24,11 @@ test.describe('Informations légales publiques', () => {
         name: 'Mon Journal de Bloc',
       })
     ).toBeVisible();
+    await expect(
+      page.locator('.legal-page__title-copy').getByText(
+        'Mis à jour le 10 septembre 2026'
+      )
+    ).toBeVisible();
     await expect(page.locator('.legal-page__title-row > p')).toHaveCount(0);
     await expect(page.locator('.legal-page__title-row > svg')).toHaveCount(0);
     await expect(
