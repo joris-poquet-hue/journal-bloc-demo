@@ -112,6 +112,17 @@ export function getRoleCredentials(role: TestedRole): Credentials | null {
   return { loginId, mfaSecret, password };
 }
 
+export async function dismissTrophyCelebrationIfPresent(page: Page) {
+  const closeButton = page.getByRole('button', {
+    name: 'Fermer la célébration',
+  });
+
+  if (await closeButton.isVisible()) {
+    await closeButton.click();
+    await expect(closeButton).toBeHidden();
+  }
+}
+
 export async function loginAs(page: Page, credentials: Credentials) {
   await page.goto('/');
   await page.getByLabel('Identifiant').fill(credentials.loginId);
@@ -163,4 +174,5 @@ export async function loginAs(page: Page, credentials: Credentials) {
     timeout: 20_000,
   });
   await expect(page.getByRole('alert')).toHaveCount(0);
+  await dismissTrophyCelebrationIfPresent(page);
 }

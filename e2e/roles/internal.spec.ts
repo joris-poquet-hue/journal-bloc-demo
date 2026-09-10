@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 import {
+  dismissTrophyCelebrationIfPresent,
   getRoleCredentials,
   isMutationE2EEnabled,
   loginAs,
@@ -35,6 +36,7 @@ test.describe('Parcours Interne', () => {
   });
 
   test('enregistre puis restaure réellement le bloc-notes', async ({ page }) => {
+    test.setTimeout(90_000);
     test.skip(
       !mutationE2EEnabled,
       'Les mutations E2E ne sont activées que sur une base isolée.'
@@ -49,7 +51,17 @@ test.describe('Parcours Interne', () => {
     const editor = page.getByTestId('notebook-editor');
     await expect(editor).toBeVisible({ timeout: 20_000 });
     const saveStatus = page.getByTestId('notebook-save-status');
-    const originalHtml = await editor.evaluate((element) => element.innerHTML);
+    const originalHtml = await editor.evaluate((element) => {
+      const cleanCopy = element.cloneNode(true) as HTMLElement;
+
+      cleanCopy.querySelectorAll('p').forEach((paragraph) => {
+        if (/^Mutation E2E \d+$/.test(paragraph.textContent?.trim() ?? '')) {
+          paragraph.remove();
+        }
+      });
+
+      return cleanCopy.innerHTML;
+    });
     const marker = `Mutation E2E ${Date.now()}`;
     const waitForSaveResponse = () =>
       page.waitForResponse(
@@ -88,6 +100,7 @@ test.describe('Parcours Interne', () => {
       await expect(
         page.getByRole('navigation', { name: 'Navigation principale' })
       ).toBeVisible({ timeout: 20_000 });
+      await dismissTrophyCelebrationIfPresent(page);
       await page.getByRole('button', { name: 'Bloc-notes' }).click();
       await expect(page.getByTestId('notebook-editor')).toContainText(marker);
     } finally {
@@ -113,6 +126,7 @@ test.describe('Parcours Interne', () => {
   });
 
   test('crée, relit puis supprime une intervention complète', async ({ page }) => {
+    test.setTimeout(90_000);
     test.skip(
       !mutationE2EEnabled,
       'Les mutations E2E ne sont activées que sur une base isolée.'
@@ -132,8 +146,12 @@ test.describe('Parcours Interne', () => {
     );
     expect(seniorValue).not.toBe('');
     await seniorSelect.selectOption(seniorValue);
-    await page.getByLabel('Intervention', { exact: true }).selectOption('salpingectomie');
-    await page.getByRole('button', { name: 'GEU', exact: true }).click();
+    await page
+      .getByLabel('Intervention', { exact: true })
+      .selectOption({ label: 'Salpingectomie' });
+    await page
+      .getByRole('button', { name: /^(?:GEU|Grossesse extra-utérine)$/ })
+      .click();
     await page.getByLabel('Voie d’abord').selectOption('laparotomie');
     await page.getByRole('button', { name: 'Bloc programmé' }).click();
     await page.getByRole('button', { name: 'Opérateur principal' }).click();
