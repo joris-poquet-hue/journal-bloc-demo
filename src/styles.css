@@ -6963,6 +6963,165 @@ button {
   white-space: nowrap;
 }
 
+.autonomy-step-analysis {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.autonomy-step-analysis__tabs {
+  align-self: flex-end;
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(216, 231, 239, 0.9);
+  border-radius: 14px;
+  background: #f3f8fb;
+}
+
+.autonomy-step-analysis__tab {
+  min-height: 36px;
+  padding: 7px 13px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #60708a;
+  font-size: 0.82rem;
+  font-weight: 800;
+  line-height: 1.2;
+  transition: background-color 140ms ease, box-shadow 140ms ease, color 140ms ease;
+}
+
+.autonomy-step-analysis__tab:hover:not(:disabled) {
+  color: #071a3d;
+}
+
+.autonomy-step-analysis__tab--active {
+  background: #ffffff;
+  color: #071a3d;
+  box-shadow: 0 5px 14px rgba(7, 26, 61, 0.1);
+}
+
+.autonomy-step-analysis__tab:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.autonomy-step-analysis__list-panel {
+  min-width: 0;
+}
+
+.autonomy-radar-chart {
+  position: relative;
+  min-width: 0;
+}
+
+.autonomy-radar-chart svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  overflow: visible;
+}
+
+.autonomy-radar-chart__ring,
+.autonomy-radar-chart__axis {
+  fill: none;
+  stroke: #d8e7ef;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.autonomy-radar-chart__ring--4 {
+  stroke: #afc9d5;
+  stroke-width: 1.4;
+}
+
+.autonomy-radar-chart__scale-label {
+  fill: #60708a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.autonomy-radar-chart__area {
+  fill: rgba(0, 169, 191, 0.2);
+  stroke: #00a9bf;
+  stroke-linejoin: round;
+  stroke-width: 2.5;
+  vector-effect: non-scaling-stroke;
+}
+
+.autonomy-radar-chart__point {
+  fill: #00a9bf;
+  stroke: #ffffff;
+  stroke-width: 3;
+  pointer-events: none;
+  transition: r 120ms ease;
+  vector-effect: non-scaling-stroke;
+}
+
+.autonomy-radar-chart__point--active {
+  fill: #071a3d;
+}
+
+.autonomy-radar-chart__hit-area {
+  fill: transparent;
+  cursor: help;
+}
+
+.autonomy-radar-chart__hit-area:focus-visible {
+  outline: none;
+  fill: rgba(0, 169, 191, 0.11);
+  stroke: rgba(0, 126, 145, 0.72);
+  stroke-width: 2;
+}
+
+.autonomy-radar-chart__tooltip {
+  position: absolute;
+  z-index: 3;
+  left: var(--autonomy-radar-tooltip-left);
+  top: var(--autonomy-radar-tooltip-top);
+  width: max-content;
+  max-width: min(280px, calc(100% - 24px));
+  padding: 9px 12px;
+  border-radius: 11px;
+  background: #071a3d;
+  color: #ffffff;
+  box-shadow: 0 12px 28px rgba(7, 26, 61, 0.24);
+  font-size: 0.8rem;
+  font-weight: 800;
+  line-height: 1.35;
+  pointer-events: none;
+  text-align: center;
+  transform: translate(-50%, calc(-100% - 13px));
+}
+
+.autonomy-radar-chart__tooltip--bottom {
+  transform: translate(-50%, 13px);
+}
+
+.autonomy-radar-chart__hint {
+  margin: -4px 0 0;
+  color: #60708a;
+  font-size: 0.8rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+@media (max-width: 480px) {
+  .autonomy-step-analysis__tabs {
+    width: 100%;
+  }
+
+  .autonomy-step-analysis__tab {
+    flex: 1 1 0;
+  }
+
+  .autonomy-radar-chart__tooltip {
+    font-size: 0.76rem;
+  }
+}
+
 .progress-focus-card {
   position: relative;
   display: grid;

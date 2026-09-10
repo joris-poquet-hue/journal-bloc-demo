@@ -18,6 +18,7 @@ import {
   getInterventionApproachLabel,
 } from '../components/ApproachIcon';
 import { AutonomyLineChart } from '../components/AutonomyLineChart';
+import { AutonomyStepAnalysis } from '../components/AutonomyStepAnalysis';
 import { ClinicalContextOverview } from '../components/ClinicalContextOverview';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -621,7 +622,10 @@ function buildStepRows(
   customSurgicalInterventions: SurgicalInterventionDefinition[]
 ) {
   const recentItems = getChronologicalItems(group).slice(-5);
-  const stepScores = new Map<string, { label: string; scoreTotal: number; count: number }>();
+  const stepScores = new Map<
+    string,
+    { count: number; label: string; order: number; scoreTotal: number }
+  >();
   const knownStepLabels = new Map(
     [
       ...allChecklistSteps,
@@ -638,13 +642,16 @@ function buildStepRows(
       intervention,
       customSurgicalInterventions
     );
-    const stepsById = new Map(definedSteps.map((step) => [step.id, step]));
+    const stepsById = new Map(
+      definedSteps.map((step, index) => [step.id, { ...step, order: index }])
+    );
 
     Object.keys(checklist).forEach((stepId) => {
       if (!stepsById.has(stepId)) {
         stepsById.set(stepId, {
           id: stepId,
           label: knownStepLabels.get(stepId) ?? stepId,
+          order: Number.MAX_SAFE_INTEGER,
         });
       }
     });
@@ -658,20 +665,28 @@ function buildStepRows(
 
       const current = stepScores.get(step.id) ?? {
         label: step.label,
+        order: step.order,
         scoreTotal: 0,
         count: 0,
       };
       current.scoreTotal += score;
       current.count += 1;
+      current.order = Math.min(current.order, step.order);
       stepScores.set(step.id, current);
     });
   });
 
-  const rows = Array.from(stepScores.entries()).map(([id, item]) => ({
-    id,
-    label: item.label,
-    score: Math.round(item.scoreTotal / item.count),
-  }));
+  const rows = Array.from(stepScores.entries())
+    .sort((left, right) =>
+      left[1].order !== right[1].order
+        ? left[1].order - right[1].order
+        : left[1].label.localeCompare(right[1].label, 'fr-FR')
+    )
+    .map(([id, item]) => ({
+      id,
+      label: item.label,
+      score: Math.round(item.scoreTotal / item.count),
+    }));
 
   if (!rows.length) {
     return [];
@@ -1079,33 +1094,35 @@ export function SurgeryHistoryScreen() {
       }
       title="Analyse par temps opératoire"
     >
-      <div className="progress-steps-list">
-        {stepGroups.length ? (
-          stepGroups.map((group) => (
-            <section
-              className={`progress-step-group progress-step-group--${group.tone}`}
-              key={group.tone}
-            >
-              <h3>
-                {group.label} <span aria-hidden="true">·</span>{' '}
-                {group.rows.length}
-              </h3>
-              <div className="progress-step-group__rows">
-                {group.rows.map((row) => (
-                  <div className="progress-step-row" key={row.id}>
-                    <span>{row.label}</span>
-                    <strong>{row.score}%</strong>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ))
-        ) : (
-          <p className="field-helper">
-            Aucun temps opératoire évalué pour cette sélection.
-          </p>
-        )}
-      </div>
+      {stepGroups.length ? (
+        <AutonomyStepAnalysis points={stepRows}>
+          <div className="progress-steps-list">
+            {stepGroups.map((group) => (
+              <section
+                className={`progress-step-group progress-step-group--${group.tone}`}
+                key={group.tone}
+              >
+                <h3>
+                  {group.label} <span aria-hidden="true">·</span>{' '}
+                  {group.rows.length}
+                </h3>
+                <div className="progress-step-group__rows">
+                  {group.rows.map((row) => (
+                    <div className="progress-step-row" key={row.id}>
+                      <span>{row.label}</span>
+                      <strong>{row.score}%</strong>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        </AutonomyStepAnalysis>
+      ) : (
+        <p className="field-helper">
+          Aucun temps opératoire évalué pour cette sélection.
+        </p>
+      )}
     </SectionCard>
   );
 
