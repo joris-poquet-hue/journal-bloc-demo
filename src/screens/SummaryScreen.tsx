@@ -118,7 +118,7 @@ export function SummaryScreen() {
       setSaveError(
         error instanceof Error && error.message.trim()
           ? error.message
-          : 'Supabase n’a pas confirmé l’enregistrement. Vérifie la connexion puis réessaie.'
+          : 'Le serveur n’a pas confirmé l’enregistrement. Vérifie la connexion puis réessaie.'
       );
     } finally {
       setIsSaving(false);
@@ -142,11 +142,7 @@ export function SummaryScreen() {
           />
           <div className="flow-review-hero__copy">
             <span className="flow-review-hero__time">
-              {formatIsoDate(draft.date)} ·{' '}
-              {draft.startTime ?? 'Heure non renseignée'} ·{' '}
-              {draft.operativeDurationMinutes
-                ? `${draft.operativeDurationMinutes} min`
-                : 'Durée non renseignée'}
+              {formatIsoDate(draft.date)}
             </span>
             <h2>{procedureLabel}</h2>
             <p>
@@ -231,7 +227,7 @@ export function SummaryScreen() {
             type="button"
           >
             {isSaving
-              ? 'Enregistrement dans Supabase…'
+              ? 'Enregistrement en cours…'
               : 'Enregistrer l’intervention'}
             {!isSaving ? <ArrowRight aria-hidden="true" strokeWidth={2.4} /> : null}
           </button>

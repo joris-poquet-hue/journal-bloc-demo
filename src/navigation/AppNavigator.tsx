@@ -56,7 +56,7 @@ const TrophiesScreen = lazy(() =>
 
 export function AppNavigator() {
   const { isAuthenticated, persistentSyncWarning, screen, sessionRole } = useAppContext();
-  useScrollResetOnChange([isAuthenticated, screen, sessionRole]);
+  useScrollResetOnChange(`${isAuthenticated}:${sessionRole ?? 'none'}:${screen}`);
 
   if (!isAuthenticated) {
     return <LoginScreen />;

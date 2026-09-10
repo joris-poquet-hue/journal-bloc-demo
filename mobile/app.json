@@ -55,7 +55,8 @@
           "enableBackgroundRemoteNotifications": false
         }
       ],
-      "expo-status-bar"
+      "expo-status-bar",
+      "expo-sharing"
     ],
     "extra": {
       "eas": {

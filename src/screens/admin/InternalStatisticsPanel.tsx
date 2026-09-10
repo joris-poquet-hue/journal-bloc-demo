@@ -18,6 +18,7 @@ import {
   getInterventionApproachLabel,
 } from '../../components/ApproachIcon';
 import { AutonomyLineChart } from '../../components/AutonomyLineChart';
+import { AutonomyStepAnalysis } from '../../components/AutonomyStepAnalysis';
 import { ClinicalContextOverview } from '../../components/ClinicalContextOverview';
 import { SectionCard } from '../../components/SectionCard';
 import {
@@ -310,6 +311,15 @@ export function InternalStatisticsPanel({
       ].filter((group) => group.rows.length > 0),
     [stepStats]
   );
+  const radarStepStats = useMemo(
+    () =>
+      stepStats.flatMap((step) =>
+        step.score == null
+          ? []
+          : [{ id: step.id, label: step.label, score: step.score }]
+      ),
+    [stepStats]
+  );
   const hasProgressVisualizationData =
     autonomySeries.length > 0 || stepGroups.length > 0;
   const shouldShowWebEvaluationEmptyState =
@@ -509,27 +519,29 @@ export function InternalStatisticsPanel({
       title="Analyse par temps opératoire"
     >
       {stepGroups.length ? (
-        <div className="progress-steps-list">
-          {stepGroups.map((group) => (
-            <section
-              className={`progress-step-group progress-step-group--${group.tone}`}
-              key={group.tone}
-            >
-              <h3>
-                {group.label} <span aria-hidden="true">·</span>{' '}
-                {group.rows.length}
-              </h3>
-              <div className="progress-step-group__rows">
-                {group.rows.map((step) => (
-                  <div className="progress-step-row" key={step.id}>
-                    <span>{step.label}</span>
-                    <strong>{step.score}%</strong>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
+        <AutonomyStepAnalysis points={radarStepStats}>
+          <div className="progress-steps-list">
+            {stepGroups.map((group) => (
+              <section
+                className={`progress-step-group progress-step-group--${group.tone}`}
+                key={group.tone}
+              >
+                <h3>
+                  {group.label} <span aria-hidden="true">·</span>{' '}
+                  {group.rows.length}
+                </h3>
+                <div className="progress-step-group__rows">
+                  {group.rows.map((step) => (
+                    <div className="progress-step-row" key={step.id}>
+                      <span>{step.label}</span>
+                      <strong>{step.score}%</strong>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        </AutonomyStepAnalysis>
       ) : (
         <div className="validation-box">
           <strong>Aucun temps opératoire disponible</strong>

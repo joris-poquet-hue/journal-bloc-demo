@@ -1,6 +1,7 @@
 import { ChevronRight, Target, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import {
+  useCallback,
   useEffect,
   useId,
   useRef,
@@ -73,14 +74,14 @@ export function InternalTrophyCard({
     setIsDetailsOpen(false);
     window.requestAnimationFrame(() => triggerRef.current?.focus());
   };
-  const openDetails = (trigger: HTMLButtonElement) => {
+  const openDetails = useCallback((trigger: HTMLButtonElement) => {
     if (onOpenDetails) {
       onOpenDetails(trigger);
       return;
     }
 
     setIsDetailsOpen(true);
-  };
+  }, [onOpenDetails]);
 
   useEffect(() => {
     if (!autoOpen || autoOpenHandledRef.current || !triggerRef.current) {
@@ -90,7 +91,7 @@ export function InternalTrophyCard({
     autoOpenHandledRef.current = true;
     openDetails(triggerRef.current);
     onAutoOpen?.();
-  }, [autoOpen, onAutoOpen]);
+  }, [autoOpen, onAutoOpen, openDetails]);
 
   useEffect(() => {
     if (!isDetailsOpen || onOpenDetails) {

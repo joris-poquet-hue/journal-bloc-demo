@@ -112,14 +112,27 @@ try {
   });
   await targetClient.connect();
 
+  if (args.get('rebuild-public-schema')) {
+    if (process.env.PROJECT1_RESTORE_DRILL !== '1') {
+      throw new Error(
+        'La reconstruction du schéma public est réservée à un exercice de restauration explicitement autorisé.'
+      );
+    }
+
+    await rebuildTargetPublicSchema(targetClient);
+  }
+
+  const databaseMetadata = JSON.parse(
+    await readFile(join(databaseDirectory, 'database-metadata.json'), 'utf8')
+  );
+
   await applyBundledMigrations(
     targetClient,
     join(extractedDirectory, 'migrations')
   );
-  await ensureSupabaseApiPrivileges(targetClient);
-
-  const databaseMetadata = JSON.parse(
-    await readFile(join(databaseDirectory, 'database-metadata.json'), 'utf8')
+  await ensureHistoricalPublicTables(
+    targetClient,
+    databaseMetadata.publicTables
   );
   const prepareRestorePath = join(
     verification.temporaryDirectory,
@@ -156,9 +169,11 @@ try {
   );
   await writeFile(
     authRestorePath,
-    authDumpSql.replace(
-      /^ALTER TABLE auth\..+\s+(?:DISABLE|ENABLE) TRIGGER ALL;\s*$/gim,
-      ''
+    stripRetiredAuthFactorData(
+      authDumpSql.replace(
+        /^ALTER TABLE auth\..+\s+(?:DISABLE|ENABLE) TRIGGER ALL;\s*$/gim,
+        ''
+      )
     ),
     { mode: 0o600 }
   );
@@ -267,36 +282,48 @@ async function applyBundledMigrations(client, migrationDirectory) {
   }
 }
 
-async function ensureSupabaseApiPrivileges(client) {
+async function rebuildTargetPublicSchema(client) {
   await client.query('begin');
 
   try {
+    await client.query('drop schema if exists public cascade');
+    await client.query('create schema public');
     await client.query(
       'grant usage on schema public to anon, authenticated, service_role'
     );
+    await client.query('grant all on schema public to postgres, service_role');
     await client.query(
-      'grant select, insert, update, delete on all tables in schema public to anon, authenticated, service_role'
+      'alter default privileges for role postgres in schema public grant all on tables to anon, authenticated, service_role'
     );
     await client.query(
-      'grant usage, select on all sequences in schema public to anon, authenticated, service_role'
+      'alter default privileges for role postgres in schema public grant all on sequences to anon, authenticated, service_role'
     );
     await client.query(
-      'grant execute on all routines in schema public to anon, authenticated, service_role'
-    );
-    await client.query(
-      'alter default privileges in schema public grant select, insert, update, delete on tables to anon, authenticated, service_role'
-    );
-    await client.query(
-      'alter default privileges in schema public grant usage, select on sequences to anon, authenticated, service_role'
-    );
-    await client.query(
-      'alter default privileges in schema public grant execute on routines to anon, authenticated, service_role'
+      'alter default privileges for role postgres in schema public grant execute on functions to anon, authenticated, service_role'
     );
     await client.query('commit');
   } catch (error) {
     await client.query('rollback').catch(() => {});
     throw error;
   }
+}
+
+async function ensureHistoricalPublicTables(client, publicTables) {
+  if (!publicTables.includes('app_state')) {
+    return;
+  }
+
+  await client.query(`
+    create table if not exists public.app_state (
+      key text primary key,
+      data jsonb not null default '[]'::jsonb,
+      updated_at timestamptz not null default now()
+    )
+  `);
+  await client.query('alter table public.app_state enable row level security');
+  await client.query(
+    'revoke all privileges on table public.app_state from public, anon, authenticated'
+  );
 }
 
 function buildPrepareRestoreSql(publicTables) {
@@ -319,6 +346,12 @@ function buildPrepareRestoreSql(publicTables) {
 
 function quoteIdentifier(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
+}
+
+function stripRetiredAuthFactorData(sql) {
+  return sql
+    .replace(/^COPY auth\.mfa_factors\b[\s\S]*?^\\\.\s*$/gim, '')
+    .replace(/^INSERT INTO auth\.mfa_factors\b[\s\S]*?;\s*$/gim, '');
 }
 
 async function restoreStorage({
@@ -431,6 +464,10 @@ async function verifyRestoredDatabase(client, metadata) {
   }
 
   for (const [tableName, expectedCount] of Object.entries(metadata.authRowCounts)) {
+    if (tableName === 'mfa_factors') {
+      continue;
+    }
+
     const result = await client.query(
       `select count(*)::bigint as count from auth.${quoteIdentifier(tableName)}`
     );
@@ -441,6 +478,16 @@ async function verifyRestoredDatabase(client, metadata) {
         `Contrôle de restauration échoué pour auth.${tableName} : ${actualCount} au lieu de ${expectedCount}.`
       );
     }
+  }
+
+  const retiredFactorCount = await client.query(
+    'select count(*)::bigint as count from auth.mfa_factors'
+  );
+
+  if (Number(retiredFactorCount.rows[0].count) !== 0) {
+    throw new Error(
+      'Contrôle de restauration échoué : des facteurs d’authentification retirés ont été restaurés.'
+    );
   }
 }
 

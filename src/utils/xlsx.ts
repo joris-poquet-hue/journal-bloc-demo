@@ -25,6 +25,12 @@ export type XlsxWorksheet = {
   rows: XlsxCellValue[][];
 };
 
+export type DownloadDelivery = 'browser-download' | 'native-share';
+
+const XLSX_MIME_TYPE =
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const MAX_NATIVE_EXPORT_BYTES = 20 * 1024 * 1024;
+
 const textEncoder = new TextEncoder();
 const styleIndexes: Record<XlsxCellStyle, number> = {
   default: 0,
@@ -153,10 +159,16 @@ function buildWorksheetXml(worksheet: XlsxWorksheet) {
     : '';
   const rows = worksheet.rows
     .map(
-      (row, rowIndex) =>
-        `<row r="${rowIndex + 1}">${row
+      (row, rowIndex) => {
+        const headerHeight =
+          rowIndex === 0 && (worksheet.autoFilter || worksheet.freezeHeader)
+            ? ' ht="36" customHeight="1"'
+            : '';
+
+        return `<row r="${rowIndex + 1}"${headerHeight}>${row
           .map((cell, columnIndex) => serializeCell(cell, rowIndex, columnIndex))
-          .join('')}</row>`
+          .join('')}</row>`;
+      }
     )
     .join('');
   const autoFilter =
@@ -454,12 +466,66 @@ export function createXlsxBlob(worksheets: XlsxWorksheet[]) {
   ];
 
   return new Blob([createZip(files)], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    type: XLSX_MIME_TYPE,
   });
 }
 
-export function downloadXlsxWorkbook(worksheets: XlsxWorksheet[], filename: string) {
-  const blob = createXlsxBlob(worksheets);
+function readBlobAsBase64(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      if (typeof reader.result !== 'string') {
+        reject(new Error("Impossible de préparer le fichier pour l'application."));
+        return;
+      }
+
+      const separatorIndex = reader.result.indexOf(',');
+
+      if (separatorIndex < 0) {
+        reject(new Error("Impossible de préparer le fichier pour l'application."));
+        return;
+      }
+
+      resolve(reader.result.slice(separatorIndex + 1));
+    };
+    reader.onerror = () =>
+      reject(new Error("Impossible de préparer le fichier pour l'application."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+export async function deliverDownloadableFile(
+  blob: Blob,
+  filename: string
+): Promise<DownloadDelivery> {
+  const nativeBridge = (
+    window as Window & {
+      ReactNativeWebView?: { postMessage: (message: string) => void };
+    }
+  ).ReactNativeWebView;
+
+  if (nativeBridge) {
+    if (blob.size > MAX_NATIVE_EXPORT_BYTES) {
+      throw new Error(
+        "L’export est trop volumineux pour être partagé depuis l’application mobile. Utilisez le site web pour le télécharger."
+      );
+    }
+
+    const base64 = await readBlobAsBase64(blob);
+
+    nativeBridge.postMessage(
+      JSON.stringify({
+        base64,
+        byteLength: blob.size,
+        filename,
+        mimeType: blob.type || XLSX_MIME_TYPE,
+        type: 'MONJDB_FILE_EXPORT',
+      })
+    );
+    return 'native-share';
+  }
+
   const url = window.URL.createObjectURL(blob);
   const link = document.createElement('a');
 
@@ -469,4 +535,12 @@ export function downloadXlsxWorkbook(worksheets: XlsxWorksheet[], filename: stri
   link.click();
   document.body.removeChild(link);
   window.URL.revokeObjectURL(url);
+  return 'browser-download';
+}
+
+export function downloadXlsxWorkbook(
+  worksheets: XlsxWorksheet[],
+  filename: string
+) {
+  return deliverDownloadableFile(createXlsxBlob(worksheets), filename);
 }

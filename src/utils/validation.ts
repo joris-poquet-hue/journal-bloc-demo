@@ -31,17 +31,6 @@ export function getMissingFormFields(
     missingFields.push('date valide');
   }
 
-  if (!draft.startTime || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(draft.startTime)) {
-    missingFields.push('heure de début');
-  }
-
-  if (
-    !Number.isInteger(draft.operativeDurationMinutes) ||
-    (draft.operativeDurationMinutes ?? 0) < 1
-  ) {
-    missingFields.push('durée opératoire');
-  }
-
   if (!draft.internalId) {
     missingFields.push('interne');
   }

@@ -26,12 +26,15 @@ jobs:
           cache: npm
           node-version: 24
       - run: npm ci
-      - run: npm audit --audit-level=high
+      - run: npm ci --prefix mobile
+      - run: npm run audit:dependencies
+      - run: npm run lint
       - run: npm test
       - run: npm run typecheck
       - run: npm run build
-      - run: npm ci --prefix mobile
-      - run: npm audit --prefix mobile --audit-level=high
+      - run: npm run test:security --prefix mobile
+      - run: npx expo install --check
+        working-directory: mobile
       - run: npm run typecheck --prefix mobile
       - run: npm run mobile:config:check
 
@@ -81,7 +84,7 @@ jobs:
       - run: npm run build
       - run: npx playwright install --with-deps ${{ matrix.browser }}
       - run: npx playwright test e2e/public --project=${{ matrix.project }}
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         if: ${{ !cancelled() }}
         with:
           name: playwright-public-${{ matrix.project }}
@@ -94,11 +97,13 @@ jobs:
     timeout-minutes: 30
     env:
       E2E_ADMIN_LOGIN_ID: ${{ secrets.E2E_ADMIN_LOGIN_ID }}
+      E2E_ADMIN_MFA_SECRET: ${{ secrets.E2E_ADMIN_MFA_SECRET }}
       E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
       E2E_AUTH_BASE_URL: ${{ secrets.E2E_AUTH_BASE_URL }}
       E2E_INTERNAL_LOGIN_ID: ${{ secrets.E2E_INTERNAL_LOGIN_ID }}
       E2E_INTERNAL_PASSWORD: ${{ secrets.E2E_INTERNAL_PASSWORD }}
       E2E_SENIOR_LOGIN_ID: ${{ secrets.E2E_SENIOR_LOGIN_ID }}
+      E2E_SENIOR_MFA_SECRET: ${{ secrets.E2E_SENIOR_MFA_SECRET }}
       E2E_SENIOR_PASSWORD: ${{ secrets.E2E_SENIOR_PASSWORD }}
       REQUIRE_AUTHENTICATED_E2E: '1'
     steps:
@@ -110,10 +115,40 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e:roles
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v6
         if: ${{ !cancelled() }}
         with:
           name: playwright-authenticated
+          path: playwright-report/
+          retention-days: 14
+
+  e2e-mutations-isolated:
+    name: E2E mutations complètes — environnement isolé
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs: supabase-isolated
+    environment: isolated-e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ALLOW_REMOTE_MUTATION_E2E: '1'
+      E2E_AUTH_BASE_URL: ${{ secrets.E2E_MUTATION_BASE_URL || secrets.E2E_AUTH_BASE_URL }}
+      E2E_INTERNAL_LOGIN_ID: ${{ secrets.E2E_MUTATION_INTERNAL_LOGIN_ID || secrets.E2E_INTERNAL_LOGIN_ID }}
+      E2E_INTERNAL_PASSWORD: ${{ secrets.E2E_MUTATION_INTERNAL_PASSWORD || secrets.E2E_INTERNAL_PASSWORD }}
+      REQUIRE_AUTHENTICATED_E2E: '1'
+      REQUIRE_MUTATION_E2E: '1'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          cache: npm
+          node-version: 24
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e:mutations
+      - uses: actions/upload-artifact@v6
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-mutations-isolated
           path: playwright-report/
           retention-days: 14
 

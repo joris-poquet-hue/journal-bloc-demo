@@ -3,7 +3,6 @@ import {
   ChevronDown,
   CirclePlus,
   ClipboardList,
-  Clock3,
   Eye,
   Gauge,
   LucideIcon,
@@ -56,37 +55,6 @@ function SurgicalMaskIcon(props: LucideProps) {
   );
 }
 
-function formatStartTimeInput(value: string) {
-  const digits = value.replace(/\D/g, '').slice(0, 4);
-
-  if (digits.length <= 2) {
-    return digits;
-  }
-
-  return `${digits.slice(0, 2)}:${digits.slice(2)}`;
-}
-
-function normalizeStartTimeInput(value: string | null) {
-  if (!value) {
-    return null;
-  }
-
-  const match = value.match(/^(\d{1,2}):(\d{2})$/);
-
-  if (!match) {
-    return value;
-  }
-
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-
-  if (hours > 23 || minutes > 59) {
-    return value;
-  }
-
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-}
-
 export function InterventionFormScreen() {
   const {
     selectedInternal,
@@ -121,28 +89,6 @@ export function InterventionFormScreen() {
 
   const handleDateChange = (event: ChangeEvent<HTMLInputElement>) => {
     updateDraftField('date', event.target.value);
-  };
-
-  const handleStartTimeChange = (event: ChangeEvent<HTMLInputElement>) => {
-    updateDraftField(
-      'startTime',
-      formatStartTimeInput(event.target.value) || null
-    );
-  };
-
-  const handleStartTimeBlur = () => {
-    updateDraftField(
-      'startTime',
-      normalizeStartTimeInput(draft.startTime ?? null)
-    );
-  };
-
-  const handleDurationChange = (event: ChangeEvent<HTMLInputElement>) => {
-    const value = event.target.valueAsNumber;
-    updateDraftField(
-      'operativeDurationMinutes',
-      Number.isFinite(value) ? Math.round(value) : null
-    );
   };
 
   const handleCommentChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
@@ -251,50 +197,6 @@ export function InterventionFormScreen() {
         value={draft.seniorId}
         onChange={(value) => updateDraftField('seniorId', value)}
       />
-    </InterventionFlowCard>
-  );
-
-  const timingCard = (
-    <InterventionFlowCard
-      icon={Clock3}
-      title="Horaire et durée opératoire"
-    >
-      <div className="flow-field-grid flow-field-grid--timing">
-        <label className="flow-plain-field">
-          <span className="flow-plain-field__label">Heure de début</span>
-          <input
-            aria-label="Heure de début de l’intervention"
-            autoComplete="off"
-            className="flow-plain-field__control"
-            data-form-type="other"
-            inputMode="numeric"
-            maxLength={5}
-            onBlur={handleStartTimeBlur}
-            onChange={handleStartTimeChange}
-            pattern="[0-2][0-9]:[0-5][0-9]"
-            spellCheck={false}
-            type="text"
-            value={draft.startTime ?? ''}
-          />
-        </label>
-        <label className="flow-plain-field">
-          <span className="flow-plain-field__label">Durée en minutes</span>
-          <span className="flow-plain-field__number-shell">
-            <input
-              aria-label="Durée opératoire en minutes"
-              autoComplete="off"
-              className="flow-plain-field__control"
-              inputMode="numeric"
-              min="1"
-              onChange={handleDurationChange}
-              step="1"
-              type="number"
-              value={draft.operativeDurationMinutes ?? ''}
-            />
-            <span aria-hidden="true">min</span>
-          </span>
-        </label>
-      </div>
     </InterventionFlowCard>
   );
 
@@ -512,7 +414,6 @@ export function InterventionFormScreen() {
         title="Ajouter une intervention"
       >
         {dateCard}
-        {timingCard}
         {seniorCard}
         {assessmentCard}
         <div className="flow-grid flow-grid--single">
@@ -544,7 +445,6 @@ export function InterventionFormScreen() {
             {dateCard}
             {seniorCard}
           </div>
-          {timingCard}
           {procedureCard}
           <div className="intervention-form-web__two-columns intervention-form-web__two-columns--details">
             {indicationCard}

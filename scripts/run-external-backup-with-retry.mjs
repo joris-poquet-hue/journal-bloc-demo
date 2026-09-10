@@ -4,7 +4,16 @@ import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const DEFAULT_RETRY_DELAYS_MS = [0, 60_000, 180_000];
+// A scheduled backup often starts while the Mac is waking up and before DNS or
+// Wi-Fi is fully available. Keep retrying long enough to survive that window,
+// while leaving the schedule configurable for tests and exceptional setups.
+const DEFAULT_RETRY_DELAYS_MS = [
+  0,
+  60_000,
+  5 * 60_000,
+  15 * 60_000,
+  45 * 60_000,
+];
 const retryDelays = parseRetryDelays(
   process.env.PROJECT1_BACKUP_RETRY_DELAYS_MS
 );

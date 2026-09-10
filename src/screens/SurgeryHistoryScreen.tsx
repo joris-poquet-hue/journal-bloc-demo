@@ -7,7 +7,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
-  Info,
   MoveRight,
   SlidersHorizontal,
   Star,
@@ -19,6 +18,7 @@ import {
   getInterventionApproachLabel,
 } from '../components/ApproachIcon';
 import { AutonomyLineChart } from '../components/AutonomyLineChart';
+import { AutonomyStepAnalysis } from '../components/AutonomyStepAnalysis';
 import { ClinicalContextOverview } from '../components/ClinicalContextOverview';
 import { PrimaryButton } from '../components/PrimaryButton';
 import { ScreenContainer } from '../components/ScreenContainer';
@@ -31,7 +31,6 @@ import { useAppContext } from '../context/AppContext';
 import {
   approachOptions,
   allChecklistSteps,
-  formatDisplayName,
   formatSeniorDisplayName,
   formatSurgeryContext,
   getHistoricalChecklistSteps,
@@ -49,7 +48,6 @@ import {
 import {
   AdminInterventionEvaluation,
   ChecklistLevel,
-  InterventionType,
   SavedIntervention,
   SurgicalInterventionDefinition,
 } from '../types';
@@ -290,34 +288,7 @@ function getDayTitle(value: string) {
   }).format(parseIsoDate(value));
 }
 
-function getInterventionTime(intervention: SavedIntervention) {
-  if (intervention.startTime) {
-    return intervention.startTime.slice(0, 5);
-  }
-
-  const date = new Date(intervention.savedAt);
-
-  if (Number.isNaN(date.getTime())) {
-    return 'Heure non renseignée';
-  }
-
-  return new Intl.DateTimeFormat('fr-FR', {
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
-}
-
 function getInterventionSortValue(intervention: SavedIntervention) {
-  if (intervention.startTime) {
-    const interventionTime = new Date(
-      `${intervention.date}T${intervention.startTime}`
-    ).getTime();
-
-    if (!Number.isNaN(interventionTime)) {
-      return interventionTime;
-    }
-  }
-
   const savedAtTime = new Date(intervention.savedAt).getTime();
   const fallbackTime = parseIsoDate(intervention.date).getTime();
 
@@ -651,7 +622,10 @@ function buildStepRows(
   customSurgicalInterventions: SurgicalInterventionDefinition[]
 ) {
   const recentItems = getChronologicalItems(group).slice(-5);
-  const stepScores = new Map<string, { label: string; scoreTotal: number; count: number }>();
+  const stepScores = new Map<
+    string,
+    { count: number; label: string; order: number; scoreTotal: number }
+  >();
   const knownStepLabels = new Map(
     [
       ...allChecklistSteps,
@@ -668,13 +642,16 @@ function buildStepRows(
       intervention,
       customSurgicalInterventions
     );
-    const stepsById = new Map(definedSteps.map((step) => [step.id, step]));
+    const stepsById = new Map(
+      definedSteps.map((step, index) => [step.id, { ...step, order: index }])
+    );
 
     Object.keys(checklist).forEach((stepId) => {
       if (!stepsById.has(stepId)) {
         stepsById.set(stepId, {
           id: stepId,
           label: knownStepLabels.get(stepId) ?? stepId,
+          order: Number.MAX_SAFE_INTEGER,
         });
       }
     });
@@ -688,20 +665,28 @@ function buildStepRows(
 
       const current = stepScores.get(step.id) ?? {
         label: step.label,
+        order: step.order,
         scoreTotal: 0,
         count: 0,
       };
       current.scoreTotal += score;
       current.count += 1;
+      current.order = Math.min(current.order, step.order);
       stepScores.set(step.id, current);
     });
   });
 
-  const rows = Array.from(stepScores.entries()).map(([id, item]) => ({
-    id,
-    label: item.label,
-    score: Math.round(item.scoreTotal / item.count),
-  }));
+  const rows = Array.from(stepScores.entries())
+    .sort((left, right) =>
+      left[1].order !== right[1].order
+        ? left[1].order - right[1].order
+        : left[1].label.localeCompare(right[1].label, 'fr-FR')
+    )
+    .map(([id, item]) => ({
+      id,
+      label: item.label,
+      score: Math.round(item.scoreTotal / item.count),
+    }));
 
   if (!rows.length) {
     return [];
@@ -1109,33 +1094,35 @@ export function SurgeryHistoryScreen() {
       }
       title="Analyse par temps opératoire"
     >
-      <div className="progress-steps-list">
-        {stepGroups.length ? (
-          stepGroups.map((group) => (
-            <section
-              className={`progress-step-group progress-step-group--${group.tone}`}
-              key={group.tone}
-            >
-              <h3>
-                {group.label} <span aria-hidden="true">·</span>{' '}
-                {group.rows.length}
-              </h3>
-              <div className="progress-step-group__rows">
-                {group.rows.map((row) => (
-                  <div className="progress-step-row" key={row.id}>
-                    <span>{row.label}</span>
-                    <strong>{row.score}%</strong>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ))
-        ) : (
-          <p className="field-helper">
-            Aucun temps opératoire évalué pour cette sélection.
-          </p>
-        )}
-      </div>
+      {stepGroups.length ? (
+        <AutonomyStepAnalysis points={stepRows}>
+          <div className="progress-steps-list">
+            {stepGroups.map((group) => (
+              <section
+                className={`progress-step-group progress-step-group--${group.tone}`}
+                key={group.tone}
+              >
+                <h3>
+                  {group.label} <span aria-hidden="true">·</span>{' '}
+                  {group.rows.length}
+                </h3>
+                <div className="progress-step-group__rows">
+                  {group.rows.map((row) => (
+                    <div className="progress-step-row" key={row.id}>
+                      <span>{row.label}</span>
+                      <strong>{row.score}%</strong>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        </AutonomyStepAnalysis>
+      ) : (
+        <p className="field-helper">
+          Aucun temps opératoire évalué pour cette sélection.
+        </p>
+      )}
     </SectionCard>
   );
 
@@ -1173,8 +1160,7 @@ export function SurgeryHistoryScreen() {
             <ApproachIcon intervention={selectedDetail.intervention} />
             <div className="history-detail-card__summary">
               <span className="history-detail-card__date">
-                {formatIsoDate(selectedDetail.intervention.date)} ·{' '}
-                {getInterventionTime(selectedDetail.intervention)}
+                {formatIsoDate(selectedDetail.intervention.date)}
               </span>
               <h2>
                 {getHistoricalProcedureLabel(
@@ -1339,8 +1325,6 @@ export function SurgeryHistoryScreen() {
                     <span>
                       {formatIsoDate(selectedDetail.intervention.date)}
                     </span>
-                    <span aria-hidden="true">·</span>
-                    <span>{getInterventionTime(selectedDetail.intervention)}</span>
                     <span aria-hidden="true">·</span>
                     <span>
                       {selectedDetailSenior
@@ -1812,7 +1796,6 @@ function HistoryInterventionCard({
     <div className="history-day-entry">
       <SurgeryInterventionCard
         dateLabel={formatInterventionCardDate(intervention.intervention.date)}
-        dateMetaLabel={getInterventionTime(intervention.intervention)}
         intervention={intervention.intervention}
         isValidated={intervention.isValidated}
         onPress={onOpen}

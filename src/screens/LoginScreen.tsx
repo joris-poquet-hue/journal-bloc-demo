@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 
 import { PUBLIC_SITE_VERSION } from '../appMetadata';
 import { useAppContext } from '../context/AppContext';
+import { LEGAL_INFORMATION_PATH } from '../legalRoutes';
 import { buildSupportMailto } from '../supportConfig';
 import { PASSWORD_POLICY_HELP } from '../utils/passwordPolicy';
 
@@ -123,6 +124,16 @@ export function LoginScreen() {
         confirmPassword
       );
       setIsLoggingIn(false);
+
+      if (result.requiresLogin) {
+        setErrorMessage('');
+        setStatusMessage(result.message);
+        setPassword('');
+        setContactEmail('');
+        setNextPassword('');
+        setConfirmPassword('');
+        return;
+      }
 
       if (result.success) {
         setErrorMessage('');
@@ -259,9 +270,10 @@ export function LoginScreen() {
                 {passwordChangeChallenge?.isFirstLogin ? (
                   <>
                     <p className="login-note login-note--compact">
-                      Première connexion : renseigne ton adresse e-mail puis
+                      Première connexion : renseigne ton adresse e-mail puis
                       choisis ton mot de passe personnel. Un lien te sera envoyé
-                      pour activer le compte.
+                      à cette adresse : ouvre-le pour activer ton compte avant
+                      d’accéder à ton espace.
                     </p>
 
                     <label className="login-field">
@@ -398,7 +410,7 @@ export function LoginScreen() {
                   : 'Connexion...'
                 : isPasswordChangeMode
                   ? passwordChangeChallenge?.isFirstLogin
-                    ? 'Finaliser mon compte'
+                    ? 'Envoyer le lien d’activation'
                     : 'Mettre à jour le mot de passe'
                   : 'Se connecter'}
             </button>
@@ -434,6 +446,12 @@ export function LoginScreen() {
                   href={contactHref}
                 >
                   Contact
+                </a>
+                <span aria-hidden="true" className="login-meta__separator">
+                  ·
+                </span>
+                <a className="login-meta__contact" href={LEGAL_INFORMATION_PATH}>
+                  Informations légales et confidentialité
                 </a>
                 <span aria-hidden="true" className="login-meta__separator">
                   ·

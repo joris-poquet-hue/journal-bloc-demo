@@ -58,23 +58,6 @@ function comparePreviewTrophies(left: TrophyDisplayModel, right: TrophyDisplayMo
   return right.isUnlocked === left.isUnlocked ? 0 : right.isUnlocked ? 1 : -1;
 }
 
-function getInterventionTime(intervention: SavedIntervention) {
-  if (intervention.startTime) {
-    return intervention.startTime.slice(0, 5);
-  }
-
-  const date = new Date(intervention.savedAt);
-
-  if (Number.isNaN(date.getTime())) {
-    return undefined;
-  }
-
-  return new Intl.DateTimeFormat('fr-FR', {
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
-}
-
 export function WelcomeScreen() {
   const {
     adminEvaluations,
@@ -86,7 +69,6 @@ export function WelcomeScreen() {
     trophyAwards,
     userNotifications,
     deleteUserNotification,
-    goToProfile,
     goToTrophies,
     goToNotebook,
     goToSurgeryHistory,
@@ -95,7 +77,52 @@ export function WelcomeScreen() {
   } = useAppContext();
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
 
-  if (!selectedInternal) {
+  const trophyDisplay = useMemo(
+    () => {
+      if (!selectedInternal) {
+        return null;
+      }
+
+      return buildTrophyDisplayModels({
+        adminEvaluations,
+        adminTrophies,
+        customSurgicalInterventions,
+        profile: selectedInternal,
+        savedInterventions,
+        trophyAwards,
+      });
+    },
+    [
+      adminEvaluations,
+      adminTrophies,
+      customSurgicalInterventions,
+      savedInterventions,
+      selectedInternal,
+      trophyAwards,
+    ]
+  );
+  const trophyPreview = useMemo(() => {
+    if (!trophyDisplay) {
+      return [];
+    }
+
+    return [...trophyDisplay.earned, ...trophyDisplay.progress]
+      .sort(comparePreviewTrophies)
+      .slice(0, 3);
+  }, [trophyDisplay]);
+  const desktopTrophyFocus = useMemo(() => {
+    if (!trophyDisplay) {
+      return null;
+    }
+
+    return (
+      [...trophyDisplay.earned, ...trophyDisplay.progress]
+        .filter((item) => !item.isSecret || item.isUnlocked)
+        .sort(comparePreviewTrophies)[0] ?? null
+    );
+  }, [trophyDisplay]);
+
+  if (!selectedInternal || !trophyDisplay) {
     return null;
   }
 
@@ -107,37 +134,6 @@ export function WelcomeScreen() {
     selectedInternal.firstName,
     selectedInternal.lastName
   );
-  const trophyDisplay = useMemo(
-    () =>
-      buildTrophyDisplayModels({
-        adminEvaluations,
-        adminTrophies,
-        customSurgicalInterventions,
-        profile: selectedInternal,
-        savedInterventions,
-        trophyAwards,
-    }),
-    [
-      adminEvaluations,
-      adminTrophies,
-      customSurgicalInterventions,
-      savedInterventions,
-      selectedInternal,
-      trophyAwards,
-    ]
-  );
-  const trophyPreview = useMemo(() => {
-    return [...trophyDisplay.earned, ...trophyDisplay.progress]
-      .sort(comparePreviewTrophies)
-      .slice(0, 3);
-  }, [trophyDisplay.earned, trophyDisplay.progress]);
-  const desktopTrophyFocus = useMemo(() => {
-    return (
-      [...trophyDisplay.earned, ...trophyDisplay.progress]
-        .filter((item) => !item.isSecret || item.isUnlocked)
-        .sort(comparePreviewTrophies)[0] ?? null
-    );
-  }, [trophyDisplay.earned, trophyDisplay.progress]);
   const unreadNotificationCount = userNotifications.filter(
     (notification) => !notification.readAt
   ).length;
@@ -159,37 +155,13 @@ export function WelcomeScreen() {
       }
       return;
     }
-
-    if (notification.actionType !== 'internal_path') {
-      return;
-    }
-
-    switch (notification.actionTarget) {
-      case '/profil':
-        goToProfile();
-        break;
-      case '/progression':
-        goToSurgeryHistory(undefined, 'progress');
-        break;
-      case '/historique':
-        goToSurgeryHistory();
-        break;
-      case '/trophees':
-        goToTrophies();
-        break;
-      default:
-        break;
-    }
   };
   const isInterventionValidated = (intervention: SavedIntervention) => {
     const evaluation = adminEvaluations[intervention.id];
 
     return Boolean(evaluation?.globalPerformance && evaluation.categoryDifficulty);
   };
-  const renderInterventionCard = (
-    intervention: SavedIntervention,
-    showTime = false
-  ) => {
+  const renderInterventionCard = (intervention: SavedIntervention) => {
     const isValidated = isInterventionValidated(intervention);
     const senior = selectableSeniors.find(
       (candidate) => candidate.id === intervention.seniorId
@@ -198,7 +170,6 @@ export function WelcomeScreen() {
     return (
       <SurgeryInterventionCard
         dateLabel={formatInterventionCardDate(intervention.date)}
-        dateMetaLabel={showTime ? getInterventionTime(intervention) : undefined}
         intervention={intervention}
         isValidated={isValidated}
         onPress={
@@ -298,13 +269,13 @@ export function WelcomeScreen() {
                         : 'En attente'}
                     </strong>
                   </div>
-                  {renderInterventionCard(latestInterventions[0], true)}
+                  {renderInterventionCard(latestInterventions[0])}
                 </div>
                 {latestInterventions.length > 1 ? (
                   <div className="dashboard-intervention-feature__secondary">
                     {latestInterventions.slice(1).map((intervention) => (
                       <div key={intervention.id}>
-                        {renderInterventionCard(intervention, true)}
+                        {renderInterventionCard(intervention)}
                       </div>
                     ))}
                   </div>

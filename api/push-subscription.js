@@ -6,6 +6,7 @@ const {
   createSupabaseApplicationJwt,
   getRequestBody,
   isApplicationJwtConfigured,
+  isBusinessApplicationSession,
   sendJson,
 } = require('../src/serverAuth.cjs');
 
@@ -28,8 +29,20 @@ module.exports = async function handler(request, response) {
   try {
     const identity = await authenticateApplicationSession(request);
 
-    if (!identity || identity.session.client_kind !== 'mobile') {
+    if (!identity) {
       clearApplicationSessionCookie(response);
+      return sendJson(response, 401, {
+        error: 'Une session mobile active est requise.',
+      });
+    }
+
+    if (!isBusinessApplicationSession(identity)) {
+      return sendJson(response, 403, {
+        error: 'Finalisez la configuration du compte avant d’activer les notifications.',
+      });
+    }
+
+    if (identity.session.client_kind !== 'mobile') {
       return sendJson(response, 401, {
         error: 'Une session mobile active est requise.',
       });

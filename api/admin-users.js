@@ -16,6 +16,12 @@ const {
 const {
   changeAccountLifecycle,
 } = require('../src/serverAccountLifecycle.cjs');
+const {
+  compensateFailedAccountCreation,
+} = require('../src/serverAccountCreationCompensation.cjs');
+const {
+  permanentlyDeleteAccount,
+} = require('../src/serverPermanentAccountDeletion.cjs');
 
 const ALLOWED_ROLES = new Set(['internal', 'senior', 'admin']);
 
@@ -150,7 +156,7 @@ async function createAccount(input, adminIdentity) {
     authUserId = authUser?.id ?? null;
 
     if (!authUserId) {
-      throw new Error('Supabase Auth n’a pas retourné de compte utilisateur.');
+      throw new Error('Le service d’authentification n’a pas retourné de compte utilisateur.');
     }
 
     const rows = await restRequest('profiles', {
@@ -177,7 +183,7 @@ async function createAccount(input, adminIdentity) {
     profileId = profile?.id ?? null;
 
     if (!profile) {
-      throw new Error('Supabase n’a pas retourné le profil créé.');
+      throw new Error('Le serveur n’a pas retourné le profil créé.');
     }
 
     await restRequest('activity_log', {
@@ -185,8 +191,14 @@ async function createAccount(input, adminIdentity) {
         action: 'Compte créé avec clé d’accès provisoire',
         actor_label: `${adminIdentity.profile.first_name} ${adminIdentity.profile.last_name}`.trim(),
         actor_role: adminIdentity.profile.role,
+        analytics_event: {
+          kind: 'account_lifecycle',
+          targetAuthUserId: authUserId,
+          targetProfileId: profile.id,
+        },
         created_by_profile_id: adminIdentity.profile.id,
         profile_id: adminIdentity.profile.id,
+        target_profile_id: profile.id,
         target_label: `${profile.first_name} ${profile.last_name}`.trim(),
         target_type: 'Compte utilisateur',
       },
@@ -198,20 +210,43 @@ async function createAccount(input, adminIdentity) {
 
     return { accessKey, profile };
   } catch (error) {
-    if (profileId) {
-      await restRequest('profiles', {
-        method: 'DELETE',
-        searchParams: {
-          id: `eq.${profileId}`,
-        },
-      }).catch(() => null);
-    }
+    await compensateFailedAccountCreation({
+      authUserId,
+      deleteAuthUser: (candidateAuthUserId) =>
+        authAdminRequest(
+          `admin/users/${encodeURIComponent(candidateAuthUserId)}`,
+          { method: 'DELETE' }
+        ),
+      deleteProfile: (candidateProfileId) =>
+        restRequest('profiles', {
+          headers: {
+            Prefer: 'return=representation',
+          },
+          method: 'DELETE',
+          searchParams: {
+            id: `eq.${candidateProfileId}`,
+            select: 'id',
+          },
+        }),
+      profileExists: async (candidateProfileId) => {
+        const rows = await restRequest('profiles', {
+          searchParams: {
+            id: `eq.${candidateProfileId}`,
+            limit: '1',
+            select: 'id',
+          },
+        });
 
-    if (authUserId) {
-      await authAdminRequest(`admin/users/${encodeURIComponent(authUserId)}`, {
-        method: 'DELETE',
-      }).catch(() => null);
-    }
+        if (!Array.isArray(rows)) {
+          throw new Error(
+            'Réponse serveur invalide lors du contrôle de compensation.'
+          );
+        }
+
+        return rows.some((profile) => profile?.id === candidateProfileId);
+      },
+      profileId,
+    });
 
     throw error;
   }
@@ -221,7 +256,7 @@ async function updateAccount(input, adminIdentity) {
   const currentProfile = await findProfile(input.profileId);
 
   if (!currentProfile?.auth_user_id) {
-    const error = new Error('Ce profil n’est pas relié à Supabase Auth.');
+    const error = new Error('Ce profil n’est pas relié au service d’authentification.');
     error.status = 404;
     throw error;
   }
@@ -357,6 +392,37 @@ module.exports = async function handler(request, response) {
     body = await getRequestBody(request);
   } catch {
     return sendJson(response, 400, { error: 'Corps JSON invalide.' });
+  }
+
+  if (
+    request.method === 'POST' &&
+    String(body?.action ?? '').trim() === 'delete_permanently'
+  ) {
+    const confirmationLoginId = String(body?.confirmationLogin ?? '').trim();
+    const expectedVersion = Number(body?.expectedVersion ?? 0);
+    const profileId = String(body?.profileId ?? '').trim();
+
+    try {
+      const deletion = await permanentlyDeleteAccount({
+        adminIdentity,
+        confirmationLoginId,
+        expectedVersion,
+        profileId,
+      });
+
+      return sendJson(response, 200, {
+        deletedProfileId: deletion.deletedProfileId,
+        success: true,
+      });
+    } catch (error) {
+      console.error('Administrator permanent account deletion failed.', error);
+      return sendJson(response, error.status || 400, {
+        error:
+          error.message ||
+          'Impossible de supprimer définitivement ce profil.',
+        retryable: Boolean(error.retryable),
+      });
+    }
   }
 
   if (request.method === 'PUT') {

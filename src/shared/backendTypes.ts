@@ -95,7 +95,7 @@ export type BackendTrophyAward = TrophyAward & {
 export type BackendUserNotification = {
   actionLabel: string | null;
   actionTarget: string | null;
-  actionType: 'external_url' | 'internal_path' | 'intervention' | 'trophy' | null;
+  actionType: 'external_url' | 'intervention' | 'trophy' | null;
   adminMessageId: string | null;
   body: string;
   celebratedAt: string | null;
@@ -114,7 +114,7 @@ export type BackendUserNotification = {
 export type BackendAdminNotificationMessage = {
   actionLabel: string | null;
   actionTarget: string | null;
-  actionType: 'external_url' | 'internal_path' | null;
+  actionType: 'external_url' | null;
   audienceInstitutionId: string | null;
   audienceProfileId: string | null;
   audienceRole: 'internal' | 'senior' | null;
@@ -138,7 +138,7 @@ export type BackendAdminNotificationMessage = {
 export type BackendAdminNotificationMessageInput = {
   actionLabel?: string | null;
   actionTarget?: string | null;
-  actionType?: 'external_url' | 'internal_path' | null;
+  actionType?: 'external_url' | null;
   audienceInstitutionId?: string | null;
   audienceProfileId?: string | null;
   audienceRole?: 'internal' | 'senior' | null;
@@ -163,7 +163,9 @@ export type BackendReferenceData = {
 
 export type BackendUserData = {
   profile: BackendProfile;
+  directoryProfiles: BackendProfile[];
   managedInternalIds: string[];
+  seniorAssignments: BackendSeniorAssignment[];
   savedInterventions: BackendSavedIntervention[];
   evaluations: BackendInterventionEvaluation[];
   notebookDocuments: BackendNotebookDocument[];

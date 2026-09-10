@@ -5,8 +5,10 @@ const {
   authenticateRequest,
   buildRateLimitScope,
   checkRateLimit,
+  clearApplicationSessionCookie,
   clearAuthFailures,
   getForwardedAuthHeaders,
+  getAuthUser,
   getRequestBody,
   isConfigured,
   isValidEmail,
@@ -71,26 +73,34 @@ async function requestConfirmedEmailChange(request, accessToken, input) {
   }
 }
 
+async function requestPasswordGrant(request, email, password) {
+  return supabaseRequest(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+    body: JSON.stringify({ email, password }),
+    headers: {
+      apikey: SUPABASE_SERVICE_ROLE_KEY,
+      Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+      'Content-Type': 'application/json',
+      ...getForwardedAuthHeaders(request),
+    },
+    method: 'POST',
+  });
+}
+
+function getRpcObject(payload) {
+  return Array.isArray(payload) ? payload[0] ?? null : payload;
+}
+
 async function storePendingEmailConfirmation(profile, contactEmail, purpose) {
   const requestedAt = new Date().toISOString();
 
-  await restRequest('profiles', {
+  await restRequest('rpc/store_pending_email_confirmation', {
     body: {
-      metadata: {
-        ...(profile.metadata ?? {}),
-        pendingContactEmail: contactEmail,
-        pendingEmailPurpose: purpose,
-        pendingEmailRequestedAt: requestedAt,
-      },
-      updated_at: requestedAt,
+      p_contact_email: contactEmail,
+      p_profile_id: profile.id,
+      p_purpose: purpose,
+      p_requested_at: requestedAt,
     },
-    headers: {
-      Prefer: 'return=minimal',
-    },
-    method: 'PATCH',
-    searchParams: {
-      id: `eq.${profile.id}`,
-    },
+    method: 'POST',
   });
 }
 
@@ -193,9 +203,10 @@ module.exports = async function handler(request, response) {
     });
   }
 
-  if (action === 'change-email' && identity.profile.must_change_password) {
+  if (identity.profile.must_change_password && action !== 'complete-setup') {
     return sendJson(response, 409, {
-      error: 'Termine d’abord la confirmation de ta première adresse e-mail.',
+      error:
+        'Termine d’abord la première connexion avec ta clé provisoire et ton nouveau mot de passe.',
     });
   }
 
@@ -224,6 +235,8 @@ module.exports = async function handler(request, response) {
 
   try {
     let authenticatedAccessToken = null;
+    let verifiedAuthPassword = null;
+    let passwordAlreadyRotated = false;
 
     if (currentPassword) {
       const authenticationPassword =
@@ -232,22 +245,27 @@ module.exports = async function handler(request, response) {
         isAccessKey(currentPassword)
           ? toPendingAuthPassword(currentPassword)
           : currentPassword;
-      const { payload, response: authResponse } = await supabaseRequest(
-        `${SUPABASE_URL}/auth/v1/token?grant_type=password`,
-        {
-          body: JSON.stringify({
-            email: identity.user.email,
-            password: authenticationPassword,
-          }),
-          headers: {
-            apikey: SUPABASE_SERVICE_ROLE_KEY,
-            Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
-            'Content-Type': 'application/json',
-            ...getForwardedAuthHeaders(request),
-          },
-          method: 'POST',
-        }
+      let { payload, response: authResponse } = await requestPasswordGrant(
+        request,
+        identity.user.email,
+        authenticationPassword
       );
+
+      if (
+        (!authResponse.ok || !payload?.access_token) &&
+        action === 'complete-setup'
+      ) {
+        const resumedGrant = await requestPasswordGrant(
+          request,
+          identity.user.email,
+          password
+        );
+        payload = resumedGrant.payload;
+        authResponse = resumedGrant.response;
+        passwordAlreadyRotated = Boolean(
+          authResponse.ok && payload?.access_token
+        );
+      }
 
       if (!authResponse.ok || !payload?.access_token) {
         await registerAuthFailure(rateLimitScope);
@@ -257,26 +275,164 @@ module.exports = async function handler(request, response) {
       }
 
       authenticatedAccessToken = payload.access_token;
+      verifiedAuthPassword = passwordAlreadyRotated
+        ? password
+        : authenticationPassword;
       transientAccessTokens.add(payload.access_token);
     }
 
-    if (requestsEmailConfirmation) {
-      const purpose = action === 'complete-setup' ? 'activation' : 'change';
-
-      await requestConfirmedEmailChange(
-        request,
-        authenticatedAccessToken,
-        action === 'complete-setup'
-          ? {
-              data: { emailTemplatePurpose: purpose },
-              email: contactEmail,
-              password,
-            }
-          : {
-              data: { emailTemplatePurpose: purpose },
-              email: contactEmail,
-            }
+    if (action === 'complete-setup') {
+      const purpose = 'activation';
+      const setupStartedAt = new Date().toISOString();
+      const preparedSetup = getRpcObject(
+        await restRequest('rpc/begin_initial_account_setup', {
+          body: {
+            p_contact_email: contactEmail,
+            p_current_session_id: identity.session.session_id,
+            p_expected_version: identity.profile.version,
+            p_profile_id: identity.profile.id,
+            p_started_at: setupStartedAt,
+          },
+          method: 'POST',
+        })
       );
+      const operationId = String(preparedSetup?.operationId ?? '').trim();
+
+      if (!operationId) {
+        throw Object.assign(
+          new Error('La réservation de première connexion a échoué.'),
+          { status: 409 }
+        );
+      }
+
+      let currentAuthUser = await getAuthUser(identity.profile.auth_user_id);
+      let authOperationMatches =
+        currentAuthUser?.user_metadata?.initialSetupOperationId === operationId;
+
+      if (!passwordAlreadyRotated || !authOperationMatches) {
+        try {
+          await requestConfirmedEmailChange(request, authenticatedAccessToken, {
+            current_password: verifiedAuthPassword,
+            data: {
+              emailTemplatePurpose: purpose,
+              initialSetupOperationId: operationId,
+            },
+            email: contactEmail,
+            ...(passwordAlreadyRotated ? {} : { password }),
+          });
+        } catch (emailChangeError) {
+          currentAuthUser = await getAuthUser(
+            identity.profile.auth_user_id
+          ).catch(() => null);
+          authOperationMatches =
+            currentAuthUser?.user_metadata?.initialSetupOperationId ===
+            operationId;
+
+          if (!authOperationMatches) {
+            const status = Number(emailChangeError?.status ?? 0);
+            const authMarkerIsConfirmedAbsent = Boolean(
+              currentAuthUser &&
+                !currentAuthUser.user_metadata?.initialSetupOperationId
+            );
+
+            if (
+              status >= 400 &&
+              status < 500 &&
+              status !== 408 &&
+              status !== 499 &&
+              authMarkerIsConfirmedAbsent
+            ) {
+              await restRequest('rpc/cancel_initial_account_setup', {
+                body: {
+                  p_current_session_id: identity.session.session_id,
+                  p_operation_id: operationId,
+                  p_profile_id: identity.profile.id,
+                },
+                method: 'POST',
+              }).catch((cancellationError) => {
+                console.error(
+                  'Definitive Auth rejection left an initial setup reservation that could not be cancelled.',
+                  cancellationError
+                );
+              });
+            }
+
+            throw emailChangeError;
+          }
+        }
+      }
+
+      currentAuthUser = await getAuthUser(identity.profile.auth_user_id);
+      authOperationMatches =
+        currentAuthUser?.user_metadata?.initialSetupOperationId === operationId;
+
+      if (!authOperationMatches || !currentAuthUser?.email) {
+        throw Object.assign(
+          new Error('La rotation Auth ne correspond pas à la demande préparée.'),
+          { status: 409 }
+        );
+      }
+
+      const {
+        payload: verifiedPasswordPayload,
+        response: verifiedPasswordResponse,
+      } = await requestPasswordGrant(
+        request,
+        currentAuthUser.email,
+        password
+      );
+
+      if (!verifiedPasswordResponse.ok || !verifiedPasswordPayload?.access_token) {
+        throw Object.assign(
+          new Error(
+            'Le nouveau mot de passe n’a pas pu être vérifié. Reconnecte-toi puis réessaie.'
+          ),
+          { status: 409 }
+        );
+      }
+
+      transientAccessTokens.add(verifiedPasswordPayload.access_token);
+
+      const pendingConfirmation = getRpcObject(
+        await restRequest('rpc/await_initial_account_email_confirmation', {
+          body: {
+            p_current_session_id: identity.session.session_id,
+            p_operation_id: operationId,
+            p_profile_id: identity.profile.id,
+          },
+          method: 'POST',
+        })
+      );
+
+      if (pendingConfirmation?.confirmationPending !== true) {
+        throw Object.assign(
+          new Error(
+            'Le compte n’a pas pu être placé en attente de confirmation e-mail.'
+          ),
+          { status: 409 }
+        );
+      }
+
+      await clearAuthFailures(rateLimitScope);
+      clearApplicationSessionCookie(response);
+
+      return sendJson(response, 200, {
+        message:
+          'Un lien de confirmation vient d’être envoyé. Ouvre-le pour activer ton compte et accéder à ton espace.',
+        pendingEmailConfirmation: true,
+        profile: toPublicProfile(identity.profile),
+        requiresLogin: true,
+        success: true,
+      });
+    }
+
+    if (action === 'change-email') {
+      const purpose = 'change';
+
+      await requestConfirmedEmailChange(request, authenticatedAccessToken, {
+        data: { emailTemplatePurpose: purpose },
+        email: contactEmail,
+      });
 
       await storePendingEmailConfirmation(identity.profile, contactEmail, purpose);
       await recordEmailConfirmationRequest(identity.profile, purpose);
@@ -284,9 +440,7 @@ module.exports = async function handler(request, response) {
 
       return sendJson(response, 200, {
         message:
-          purpose === 'activation'
-            ? 'Un lien de confirmation vient d’être envoyé. Ouvre-le pour activer ton compte.'
-            : 'Un lien de confirmation vient d’être envoyé à la nouvelle adresse. L’adresse actuelle reste active jusque-là.',
+          'Un lien de confirmation vient d’être envoyé à la nouvelle adresse. L’adresse actuelle reste active jusque-là.',
         pendingEmailConfirmation: true,
         profile: toPublicProfile(identity.profile),
         success: true,
@@ -297,7 +451,10 @@ module.exports = async function handler(request, response) {
       const { payload, response: passwordResponse } = await supabaseRequest(
         `${SUPABASE_URL}/auth/v1/user`,
         {
-          body: JSON.stringify({ password }),
+          body: JSON.stringify({
+            current_password: verifiedAuthPassword || undefined,
+            password,
+          }),
           headers: {
             apikey: SUPABASE_SERVICE_ROLE_KEY,
             Authorization: `Bearer ${authenticatedAccessToken}`,

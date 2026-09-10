@@ -26,9 +26,38 @@ if (process.env.REQUIRE_AUTHENTICATED_E2E === '1') {
 
   if (hostname === 'monjournaldebloc.fr') {
     throw new Error(
-      'Les E2E authentifiés sont interdits sur la production. Configurez un déploiement relié à la base Supabase isolée.'
+      'Les E2E authentifiés sont interdits sur la production. Configurez un déploiement relié à la base isolée.'
     );
   }
+}
+
+export function isMutationE2EEnabled() {
+  if (process.env.REQUIRE_MUTATION_E2E !== '1') {
+    return false;
+  }
+
+  const authenticatedBaseUrl = process.env.E2E_AUTH_BASE_URL?.trim();
+
+  if (!authenticatedBaseUrl) {
+    throw new Error(
+      'E2E_AUTH_BASE_URL est obligatoire pour les parcours E2E avec mutations.'
+    );
+  }
+
+  const hostname = new URL(authenticatedBaseUrl).hostname.replace(/^www\./, '');
+  const isLocalTarget = ['127.0.0.1', '::1', 'localhost'].includes(hostname);
+
+  if (hostname === 'monjournaldebloc.fr') {
+    throw new Error('Les mutations E2E sont strictement interdites en production.');
+  }
+
+  if (!isLocalTarget && process.env.ALLOW_REMOTE_MUTATION_E2E !== '1') {
+    throw new Error(
+      'Une cible distante de mutation E2E exige ALLOW_REMOTE_MUTATION_E2E=1.'
+    );
+  }
+
+  return true;
 }
 
 export function getRoleCredentials(role: TestedRole): Credentials | null {
@@ -49,6 +78,17 @@ export function getRoleCredentials(role: TestedRole): Credentials | null {
   return { loginId, password };
 }
 
+export async function dismissTrophyCelebrationIfPresent(page: Page) {
+  const closeButton = page.getByRole('button', {
+    name: 'Fermer la célébration',
+  });
+
+  if (await closeButton.isVisible()) {
+    await closeButton.click();
+    await expect(closeButton).toBeHidden();
+  }
+}
+
 export async function loginAs(page: Page, credentials: Credentials) {
   await page.goto('/');
   await page.getByLabel('Identifiant').fill(credentials.loginId);
@@ -63,9 +103,17 @@ export async function loginAs(page: Page, credentials: Credentials) {
   await page.getByRole('button', { name: 'Se connecter' }).click();
 
   const loginResponse = await loginResponsePromise;
-  expect(loginResponse.ok()).toBe(true);
+  if (!loginResponse.ok()) {
+    const responseText = (await loginResponse.text()).trim().slice(0, 300);
+    throw new Error(
+      `La connexion E2E a échoué avec le statut ${loginResponse.status()}` +
+        (responseText ? ` : ${responseText}` : '.')
+    );
+  }
+
   await expect(page.getByRole('region', { name: 'Connexion' })).toBeHidden({
     timeout: 20_000,
   });
   await expect(page.getByRole('alert')).toHaveCount(0);
+  await dismissTrophyCelebrationIfPresent(page);
 }

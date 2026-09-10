@@ -7,7 +7,7 @@ est indépendante de l'interface Supabase et regroupe dans une archive unique :
 
 - un dump PostgreSQL complet de secours ;
 - le schéma et les données du domaine `public` ;
-- les comptes `auth.users`, leurs identités et leurs facteurs MFA, afin de
+- les comptes `auth.users` et leurs identités, afin de
   conserver les mots de passe hachés ;
 - la configuration des buckets Supabase Storage et le contenu réel de chaque
   objet ;
@@ -72,8 +72,11 @@ Activer ensuite la sauvegarde quotidienne à 03 h 15 :
 npm run backup:schedule:enable -- --env-file=.env.production.local
 ```
 
-Le LaunchAgent utilise un lanceur résilient : en cas de coupure réseau au réveil
-du Mac, il réessaie automatiquement après une minute puis après trois minutes.
+Le LaunchAgent utilise un lanceur résilient : en cas de coupure réseau ou de DNS
+au réveil du Mac, il effectue cinq tentatives réparties sur environ une heure
+(immédiatement, puis après 1, 5, 15 et 45 minutes). Le calendrier peut être
+adapté avec `PROJECT1_BACKUP_RETRY_DELAYS_MS`, sous la forme d'une liste de
+délais en millisecondes séparés par des virgules.
 
 La désactiver :
 
@@ -101,8 +104,15 @@ npm run backup:restore -- \
   --file=/chemin/vers/project1-supabase-date.p1backup \
   --target-env=/chemin/vers/.env.restore-test.local \
   --apply \
-  --replace-existing
+  --replace-existing \
+  --rebuild-public-schema
 ```
+
+L'option `--rebuild-public-schema` remet intégralement à zéro le schéma
+`public` de la cible avant de rejouer les migrations. Elle est réservée à une
+cible de test isolée : le fichier d'environnement doit aussi contenir
+`PROJECT1_RESTORE_DRILL=1`. Sans cette double confirmation, le script refuse la
+reconstruction.
 
 La procédure :
 
@@ -120,8 +130,8 @@ autorisation spécifique ; le test normal utilise donc un jeu synthétique.
 
 Pour un exercice d'effacement-restauration sur ce même projet isolé, le fichier
 d'environnement de test doit contenir `PROJECT1_RESTORE_DRILL=1` et la commande
-doit recevoir `--allow-same-project-drill`. Cette double exception ne doit jamais
-être configurée dans l'environnement de production.
+doit recevoir `--allow-same-project-drill`. Cette exception supplémentaire ne
+doit jamais être configurée dans l'environnement de production.
 
 ## Clé de récupération
 

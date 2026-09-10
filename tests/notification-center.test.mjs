@@ -9,6 +9,15 @@ function readSource(path) {
 const migration = readSource(
   '../supabase/migrations/202608020002_common_notification_center.sql'
 );
+const internalLinkRemovalMigration = readSource(
+  '../supabase/migrations/202608120001_remove_admin_internal_notification_links.sql'
+);
+const notificationStatisticsMigration = readSource(
+  '../supabase/migrations/202608120002_admin_notification_statistics.sql'
+);
+const irreversibleMessagesMigration = readSource(
+  '../supabase/migrations/202608120003_irreversible_admin_notifications.sql'
+);
 const context = readSource('../CONTEXTE_PROJET.md');
 const appContext = readSource('../src/context/AppContext.tsx');
 const repository = readSource('../src/services/backendRepository.ts');
@@ -64,7 +73,6 @@ test('les messages Administrateur couvrent les quatre ciblages et la programmati
   assert.match(migration, /create_admin_notification_message/);
   assert.match(migration, /update_admin_notification_message/);
   assert.match(migration, /cancel_admin_notification_message/);
-  assert.match(migration, /retract_admin_notification_message/);
   assert.match(migration, /dispatch_due_admin_notification_messages/);
   assert.match(migration, /cron\.schedule/);
   assert.match(migration, /action_type = 'external_url' and action_target ~\* '\^https:\/\/'/);
@@ -74,6 +82,27 @@ test('les messages Administrateur couvrent les quatre ciblages et la programmati
   assert.match(adminManager, /Programmer/);
   assert.match(adminManager, /Aperçu/);
   assert.match(adminManager, /destinataire/);
+});
+
+test('un message Administrateur exige une confirmation et devient définitif après envoi', () => {
+  assert.match(adminManager, /aria-modal="true"/);
+  assert.match(adminManager, /Confirmer l’envoi/);
+  assert.match(adminManager, /Confirmer la programmation/);
+  assert.match(adminManager, /Destinataires estimés/);
+  assert.match(adminManager, /ne pourra plus être retiré/);
+  assert.doesNotMatch(adminManager, /retractBackendAdminNotificationMessage/);
+  assert.doesNotMatch(adminManager, />\s*Retirer\s*</);
+  assert.doesNotMatch(repository, /retractBackendAdminNotificationMessage/);
+  assert.match(
+    irreversibleMessagesMigration,
+    /revoke all on function public\.retract_admin_notification_message\(uuid\)/
+  );
+  assert.match(
+    irreversibleMessagesMigration,
+    /drop function if exists public\.retract_admin_notification_message\(uuid\)/
+  );
+  assert.match(context, /fenêtre récapitulative[\s\S]*confirmation explicite/);
+  assert.match(context, /il ne peut plus être retiré des centres de notifications/);
 });
 
 test('la lecture respecte les deux politiques de conservation', () => {
@@ -109,8 +138,56 @@ test('l’Interne et le Senior partagent le centre, sans centre Administrateur',
 test('les actions ouvrent les détails métier et signalent les liens externes', () => {
   assert.match(notificationCenter, /window\.open\([^)]*'_blank'/s);
   assert.match(notificationCenter, /<ExternalLink/);
+  assert.match(notificationCenter, /notification\.actionLabel/);
+  assert.match(notificationCenter, /notification-center__action/);
+  assert.ok(
+    notificationCenter.indexOf('window.open(') <
+      notificationCenter.indexOf('await onRead(notification.id)')
+  );
   assert.match(welcomeScreen, /notification\.actionType === 'trophy'/);
   assert.match(welcomeScreen, /notification\.actionType === 'intervention'/);
   assert.match(appContext, /historyNavigationInterventionId/);
   assert.match(appContext, /trophyNavigationId/);
+});
+
+test('les statistiques Administrateur sont agrégées côté Supabase', () => {
+  assert.match(
+    repository,
+    /rpc\/list_admin_notification_messages_with_stats/
+  );
+  assert.match(
+    notificationStatisticsMigration,
+    /message\.status = 'scheduled'[\s\S]*admin_notification_recipient_ids/
+  );
+  assert.match(
+    notificationStatisticsMigration,
+    /count\(\*\) filter \(where notification\.read_at is null\)/
+  );
+  assert.match(
+    notificationStatisticsMigration,
+    /count\(\*\) filter \(where notification\.read_at is not null\)/
+  );
+
+  const loaderSource = repository.slice(
+    repository.indexOf('export async function loadBackendAdminNotificationMessages'),
+    repository.indexOf('export async function countBackendAdminNotificationRecipients')
+  );
+
+  assert.doesNotMatch(loaderSource, /selectSupabaseRows/);
+  assert.doesNotMatch(loaderSource, /user_notifications/);
+});
+
+test('les messages Administrateur ne proposent plus de destination interne', () => {
+  assert.doesNotMatch(adminManager, /internal_path|Page de l.application/);
+  assert.doesNotMatch(welcomeScreen, /internal_path/);
+  assert.doesNotMatch(seniorDashboard, /internal_path/);
+  assert.match(
+    internalLinkRemovalMigration,
+    /where action_type = 'internal_path'/
+  );
+  assert.match(
+    internalLinkRemovalMigration,
+    /action_type in \('trophy', 'intervention', 'external_url'\)/
+  );
+  assert.match(context, /ne proposent aucun lien interne/);
 });

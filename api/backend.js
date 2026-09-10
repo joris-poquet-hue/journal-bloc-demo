@@ -6,14 +6,34 @@ const {
   createSupabaseApplicationJwt,
   getRequestBody,
   isApplicationJwtConfigured,
+  isBusinessApplicationSession,
   sendJson,
 } = require('../src/serverAuth.cjs');
 const {
   dispatchPendingPushNotifications,
 } = require('../src/pushNotifications.cjs');
+const handleAccountSecurity = require('../src/serverAccountSecurity.cjs');
+const handleClientTelemetry = require('../src/serverClientTelemetry.cjs');
 
 const ALLOWED_METHODS = new Set(['GET', 'POST', 'PATCH', 'DELETE']);
 const MAX_JSON_BODY_BYTES = 2 * 1024 * 1024;
+const PUSH_DISPATCH_RPC_PATHS = new Set([
+  'rpc/create_admin_notification_message',
+  'rpc/create_intervention_v3',
+  'rpc/publish_trophy_definition_draft',
+  'rpc/record_profile_login',
+  'rpc/save_intervention_evaluation_v2',
+  'rpc/update_admin_notification_message',
+]);
+const INTERNAL_ROUTE_PARAMETER = '_project1_route';
+const INTERNAL_ROUTE_HANDLERS = new Map([
+  ['account-security', handleAccountSecurity],
+  ['client-telemetry', handleClientTelemetry],
+]);
+
+function shouldDispatchPushNotifications(request, target) {
+  return request.method === 'POST' && PUSH_DISPATCH_RPC_PATHS.has(target.path);
+}
 
 function getProxyTarget(request) {
   const requestUrl = new URL(request.url, 'https://project1.invalid');
@@ -31,7 +51,25 @@ function getProxyTarget(request) {
   };
 }
 
+function getInternalRoute(request) {
+  const requestUrl = new URL(request.url, 'https://project1.invalid');
+
+  return requestUrl.searchParams.get(INTERNAL_ROUTE_PARAMETER);
+}
+
 module.exports = async function handler(request, response) {
+  const internalRoute = getInternalRoute(request);
+
+  if (internalRoute) {
+    const internalHandler = INTERNAL_ROUTE_HANDLERS.get(internalRoute);
+
+    if (!internalHandler) {
+      return sendJson(response, 404, { error: 'Route interne introuvable.' });
+    }
+
+    return internalHandler(request, response);
+  }
+
   if (!ALLOWED_METHODS.has(request.method)) {
     response.setHeader('Allow', [...ALLOWED_METHODS].join(', '));
     return sendJson(response, 405, { error: 'Méthode non autorisée.' });
@@ -59,6 +97,12 @@ module.exports = async function handler(request, response) {
     if (!identity) {
       clearApplicationSessionCookie(response);
       return sendJson(response, 401, { error: 'Une authentification est requise.' });
+    }
+
+    if (!isBusinessApplicationSession(identity)) {
+      return sendJson(response, 403, {
+        error: 'Cette session ne permet pas encore d’accéder aux données métier.',
+      });
     }
 
     const body =
@@ -106,10 +150,9 @@ module.exports = async function handler(request, response) {
       }
     }
 
-    if (
-      upstreamResponse.ok &&
-      ['POST', 'PATCH', 'DELETE'].includes(request.method)
-    ) {
+    response.end(responseBody);
+
+    if (upstreamResponse.ok && shouldDispatchPushNotifications(request, target)) {
       await dispatchPendingPushNotifications().catch((error) => {
         console.warn(
           'Push notification dispatch deferred.',
@@ -117,12 +160,10 @@ module.exports = async function handler(request, response) {
         );
       });
     }
-
-    response.end(responseBody);
   } catch (error) {
     console.error('Protected backend proxy failed.', error);
     return sendJson(response, 502, {
-      error: error.message || 'Impossible de joindre Supabase.',
+      error: error.message || 'Impossible de joindre le serveur de données.',
     });
   }
 };

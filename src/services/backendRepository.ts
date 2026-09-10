@@ -11,6 +11,7 @@ import type {
   Institution,
   InterventionType,
   Laterality,
+  NotebookDocumentVersion,
   Senior,
   SessionRole,
   SurgeryContext,
@@ -26,6 +27,7 @@ import type {
   BackendNotebookDocument,
   BackendProfile,
   BackendReferenceData,
+  BackendSeniorAssignment,
   BackendSavedIntervention,
   BackendSurgicalInterventionDefinition,
   BackendTrophyAward,
@@ -188,6 +190,16 @@ type NotebookRow = {
   version: number;
 };
 
+type NotebookVersionRow = {
+  archived_at: string;
+  content_html: string;
+  id: string;
+  profile_id: string;
+  source_updated_at: string;
+  source_updated_by_profile_id: string | null;
+  source_version: number;
+};
+
 type TrophyDefinitionRow = {
   created_at: string;
   created_by_profile_id: string | null;
@@ -257,6 +269,12 @@ type AdminNotificationMessageRow = {
   updated_at: string;
 };
 
+type AdminNotificationMessageStatsRow = AdminNotificationMessageRow & {
+  read_count: number | string | null;
+  recipient_count: number | string | null;
+  unread_count: number | string | null;
+};
+
 type ActivityLogRow = {
   action: string;
   analytics_event: BackendActivityLogEntry['analyticsEvent'];
@@ -324,26 +342,6 @@ function toBackendProfile(row: ProfileRow): BackendProfile {
     promotion: row.promotion,
     role: row.role,
     semester: row.semester,
-    updatedAt: row.updated_at,
-    updatedByProfileId: row.updated_by_profile_id,
-    version: row.version,
-  };
-}
-
-function toSenior(row: ProfileRow): Senior {
-  return {
-    contactEmail: getProfileContactEmail(row.metadata),
-    createdAt: row.created_at,
-    firstName: row.first_name,
-    id: row.id,
-    institution: row.institution?.trim() || 'CHU de Nantes',
-    institutionId: row.institution_id,
-    isActive: row.is_active,
-    isCustom: true,
-    lastLoginAt: row.last_login_at,
-    lastName: row.last_name,
-    loginId: row.login_id,
-    mustChangePassword: row.must_change_password,
     updatedAt: row.updated_at,
     updatedByProfileId: row.updated_by_profile_id,
     version: row.version,
@@ -461,9 +459,7 @@ function toSavedIntervention(row: InterventionRow): BackendSavedIntervention {
     indication: row.indication,
     indicationComment: row.indication_comment ?? '',
     internalId: row.internal_profile_id,
-    startTime: row.intervention_start_time,
     laterality: row.laterality,
-    operativeDurationMinutes: row.operative_duration_minutes,
     procedure: row.procedure_id,
     role: row.role,
     savedAt: row.saved_at,
@@ -497,6 +493,20 @@ function toNotebookDocument(row: NotebookRow): BackendNotebookDocument {
     updatedAt: row.updated_at,
     updatedByProfileId: row.updated_by_profile_id,
     version: row.version,
+  };
+}
+
+function toNotebookDocumentVersion(
+  row: NotebookVersionRow
+): NotebookDocumentVersion {
+  return {
+    archivedAt: row.archived_at,
+    contentHtml: row.content_html,
+    id: row.id,
+    internalId: row.profile_id,
+    sourceUpdatedAt: row.source_updated_at,
+    sourceVersion: row.source_version,
+    updatedByProfileId: row.source_updated_by_profile_id,
   };
 }
 
@@ -811,7 +821,7 @@ export async function createBackendInstitution(
   const row = Array.isArray(result) ? result[0] : result;
 
   if (!row) {
-    throw new Error("Supabase n’a pas retourné l’établissement créé.");
+    throw new Error("Le serveur n’a pas retourné l’établissement créé.");
   }
 
   return toInstitution(row);
@@ -838,7 +848,7 @@ export async function renameBackendInstitution(
   const row = Array.isArray(result) ? result[0] : result;
 
   if (!row) {
-    throw new Error("Supabase n’a pas retourné l’établissement renommé.");
+    throw new Error("Le serveur n’a pas retourné l’établissement renommé.");
   }
 
   return toInstitution(row);
@@ -863,7 +873,7 @@ export async function archiveBackendInstitution(
   const row = Array.isArray(result) ? result[0] : result;
 
   if (!row) {
-    throw new Error("Supabase n’a pas retourné l’établissement archivé.");
+    throw new Error("Le serveur n’a pas retourné l’établissement archivé.");
   }
 
   return toInstitution(row);
@@ -890,7 +900,7 @@ export async function moveBackendProfileToInstitution(
   const row = Array.isArray(result) ? result[0] : result;
 
   if (!row) {
-    throw new Error('Supabase n’a pas retourné le profil déplacé.');
+    throw new Error('Le serveur n’a pas retourné le profil déplacé.');
   }
 
   return toBackendProfile(row);
@@ -987,35 +997,47 @@ export async function loadBackendReferenceData(
 
 export async function loadBackendUserData(
   profileId: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  initialProfile?: BackendProfile
 ): Promise<BackendUserData | null> {
-  const profile = await loadBackendProfile(profileId, signal);
+  const profile =
+    initialProfile?.id === profileId
+      ? initialProfile
+      : await loadBackendProfile(profileId, signal);
 
   if (!profile) {
     return null;
   }
 
-  const assignmentRows =
+  const [assignmentRows, directoryProfiles] = await Promise.all([
     profile.role === 'senior'
-      ? await selectSupabaseRows<AssignmentRow>('senior_internal_assignments', {
+      ? selectSupabaseRows<AssignmentRow>('senior_internal_assignments', {
           filters: {
             senior_profile_id: `eq.${profile.id}`,
           },
           signal,
         })
-      : [];
+      : profile.role === 'admin'
+        ? selectSupabaseRows<AssignmentRow>('senior_internal_assignments', {
+            signal,
+          })
+        : Promise.resolve([]),
+    profile.role === 'senior'
+      ? loadBackendVisibleInternalProfiles(signal)
+      : profile.role === 'admin'
+        ? loadBackendProfiles(signal)
+        : Promise.resolve([]),
+  ]);
   const managedInternalIds = assignmentRows.map(
     (assignment) => assignment.internal_profile_id
   );
   const seniorInternalIds =
     profile.role === 'senior'
-      ? (await loadBackendVisibleInternalProfiles(signal)).map(
-          (candidate) => candidate.id
-        )
+      ? directoryProfiles.map((candidate) => candidate.id)
       : [];
   const adminInternalIds =
     profile.role === 'admin'
-      ? (await loadBackendProfiles(signal))
+      ? directoryProfiles
           .filter((candidate) => candidate.role === 'internal')
           .map((candidate) => candidate.id)
       : [];
@@ -1043,14 +1065,16 @@ export async function loadBackendUserData(
           signal,
         }
       ),
-      selectRowsByIds<NotebookRow>(
-        'notebook_documents',
-        'profile_id',
-        readableInternalIds,
-        {
-          signal,
-        }
-      ),
+      profile.role === 'internal'
+        ? selectRowsByIds<NotebookRow>(
+            'notebook_documents',
+            'profile_id',
+            readableInternalIds,
+            {
+              signal,
+            }
+          )
+        : Promise.resolve([]),
       loadBackendTrophyAwards(readableInternalIds, signal),
       profile.role === 'internal' || profile.role === 'senior'
         ? selectSupabaseRows<UserNotificationRow>('user_notifications', {
@@ -1090,10 +1114,21 @@ export async function loadBackendUserData(
 
   return {
     activityLog: activityRows.map(toActivityLogEntry),
+    directoryProfiles,
     evaluations: evaluationRows.map(toEvaluation),
     managedInternalIds,
     notebookDocuments: notebookRows.map(toNotebookDocument),
     profile,
+    seniorAssignments: assignmentRows.map(
+      (row): BackendSeniorAssignment => ({
+        createdAt: row.created_at,
+        internalProfileId: row.internal_profile_id,
+        seniorProfileId: row.senior_profile_id,
+        updatedAt: row.updated_at,
+        updatedByProfileId: row.updated_by_profile_id,
+        version: row.version,
+      })
+    ),
     savedInterventions: interventionRows.map(toSavedIntervention),
     trophyAwards: trophyAwardRows,
     userNotifications: userNotificationRows.map(toUserNotification),
@@ -1149,14 +1184,15 @@ export async function deleteBackendUserNotification(
   });
 }
 
-function toAdminNotificationMessage(
-  row: AdminNotificationMessageRow,
-  notifications: UserNotificationRow[]
-): BackendAdminNotificationMessage {
-  const recipients = notifications.filter(
-    (notification) => notification.admin_message_id === row.id
-  );
+function toAdminNotificationCount(value: number | string | null) {
+  const count = Number(value);
 
+  return Number.isSafeInteger(count) && count >= 0 ? count : 0;
+}
+
+function toAdminNotificationMessage(
+  row: AdminNotificationMessageStatsRow
+): BackendAdminNotificationMessage {
   return {
     actionLabel: row.action_label,
     actionTarget: row.action_target,
@@ -1170,14 +1206,14 @@ function toAdminNotificationMessage(
     createdAt: row.created_at,
     deletionPolicy: row.deletion_policy,
     id: row.id,
-    readCount: recipients.filter((notification) => notification.read_at).length,
-    recipientCount: recipients.length,
+    readCount: toAdminNotificationCount(row.read_count),
+    recipientCount: toAdminNotificationCount(row.recipient_count),
     retractedAt: row.retracted_at,
     scheduledAt: row.scheduled_at,
     sentAt: row.sent_at,
     status: row.status,
     title: row.title,
-    unreadCount: recipients.filter((notification) => !notification.read_at).length,
+    unreadCount: toAdminNotificationCount(row.unread_count),
     updatedAt: row.updated_at,
   };
 }
@@ -1185,20 +1221,15 @@ function toAdminNotificationMessage(
 export async function loadBackendAdminNotificationMessages(
   signal?: AbortSignal
 ) {
-  const [messageRows, notificationRows] = await Promise.all([
-    selectSupabaseRows<AdminNotificationMessageRow>(
-      'admin_notification_messages',
-      { order: 'created_at.desc', signal }
-    ),
-    selectSupabaseRows<UserNotificationRow>('user_notifications', {
-      filters: { admin_message_id: 'not.is.null' },
-      signal,
-    }),
-  ]);
+  const messageRows = await supabaseRestRequest<
+    AdminNotificationMessageStatsRow[]
+  >('rpc/list_admin_notification_messages_with_stats', {
+    body: {},
+    method: 'POST',
+    signal,
+  });
 
-  return messageRows.map((row) =>
-    toAdminNotificationMessage(row, notificationRows)
-  );
+  return messageRows.map(toAdminNotificationMessage);
 }
 
 export async function countBackendAdminNotificationRecipients(
@@ -1286,24 +1317,14 @@ export async function cancelBackendAdminNotificationMessage(
   });
 }
 
-export async function retractBackendAdminNotificationMessage(
-  messageId: string,
-  signal?: AbortSignal
-) {
-  await supabaseRestRequest<null>('rpc/retract_admin_notification_message', {
-    body: { p_message_id: messageId },
-    method: 'POST',
-    signal,
-  });
-}
-
 export async function loadBackendBootstrapPayload(
   profileId: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  initialProfile?: BackendProfile
 ): Promise<BackendBootstrapPayload | null> {
   const [referenceData, userData] = await Promise.all([
     loadBackendReferenceData(signal),
-    loadBackendUserData(profileId, signal),
+    loadBackendUserData(profileId, signal, initialProfile),
   ]);
 
   if (!userData) {
@@ -1338,10 +1359,12 @@ export async function createBackendInterventionWithEvaluationRequest(
       p_indication: intervention.indication,
       p_indication_comment: intervention.indicationComment,
       p_intervention_date: intervention.date,
-      p_intervention_start_time: intervention.startTime,
+      // Kept only for compatibility with the legacy RPC signature. A database
+      // trigger strips both timing values before the row is stored.
+      p_intervention_start_time: '00:00',
       p_intervention_id: intervention.id,
       p_laterality: intervention.laterality,
-      p_operative_duration_minutes: intervention.operativeDurationMinutes,
+      p_operative_duration_minutes: 1,
       p_procedure_id: intervention.procedure,
       p_role: intervention.role,
       p_senior_profile_id: intervention.seniorId,
@@ -1403,6 +1426,48 @@ export async function upsertBackendNotebookDocument(
     : await insertRows<NotebookRow>('notebook_documents', body, signal);
 
   return rows[0] ? toNotebookDocument(rows[0]) : null;
+}
+
+export async function loadBackendNotebookVersions(
+  profileId: string,
+  signal?: AbortSignal
+) {
+  const rows = await selectSupabaseRows<NotebookVersionRow>(
+    'notebook_document_versions',
+    {
+      filters: { profile_id: `eq.${profileId}` },
+      limit: 50,
+      order: 'archived_at.desc',
+      signal,
+    }
+  );
+
+  return rows.map(toNotebookDocumentVersion);
+}
+
+export async function restoreBackendNotebookVersion(
+  snapshotId: string,
+  expectedVersion: number,
+  signal?: AbortSignal
+) {
+  const result = await supabaseRestRequest<NotebookRow[]>(
+    'rpc/restore_notebook_document_version',
+    {
+      body: {
+        p_expected_version: expectedVersion,
+        p_snapshot_id: snapshotId,
+      },
+      method: 'POST',
+      signal,
+    }
+  );
+  const row = result[0];
+
+  if (!row) {
+    throw new Error('La version restaurée n’a pas été retournée par le serveur.');
+  }
+
+  return toNotebookDocument(row);
 }
 
 export class BackendVersionConflictError extends Error {
@@ -1503,10 +1568,15 @@ export async function saveBackendSurgicalDefinition(
   signal?: AbortSignal
 ) {
   const now = new Date().toISOString();
+  const {
+    ownerProfileId: _discardedOwnerProfileId,
+    updatedByProfileId: _discardedUpdatedByProfileId,
+    ...cleanDefinition
+  } = definition;
   const body = {
     archived_at: definition.archivedAt ?? null,
     definition: {
-      ...definition,
+      ...cleanDefinition,
       updatedAt: now,
     },
     id: definition.id,
@@ -1558,6 +1628,8 @@ export async function saveBackendTrophyDefinition(
     pendingDraft: _discardedPendingDraft,
     everActivated: _discardedEverActivated,
     activatedAt: _discardedActivatedAt,
+    createdByProfileId: _discardedCreatedByProfileId,
+    updatedByProfileId: _discardedUpdatedByProfileId,
     ...cleanDefinition
   } = trophy;
   const draftResult = await supabaseRestRequest<{
@@ -1720,14 +1792,25 @@ export async function createBackendActivityLogEntry(
     return null;
   }
 
+  const profileTargetEvent =
+    entry.analyticsEvent?.kind === 'profile_target'
+      ? entry.analyticsEvent
+      : null;
   const result = await supabaseRestRequest<ActivityLogRow | ActivityLogRow[]>(
-    'rpc/record_user_activity_event',
+    profileTargetEvent
+      ? 'rpc/record_profile_target_activity_event'
+      : 'rpc/record_user_activity_event',
     {
-      body: {
-        p_analytics_event: entry.analyticsEvent ?? null,
-        p_event_kind: eventKind,
-        p_target_label: entry.targetLabel,
-      },
+      body: profileTargetEvent
+        ? {
+            p_event_kind: eventKind,
+            p_target_profile_id: profileTargetEvent.targetProfileId,
+          }
+        : {
+            p_analytics_event: entry.analyticsEvent ?? null,
+            p_event_kind: eventKind,
+            p_target_label: entry.targetLabel,
+          },
       method: 'POST',
       signal,
     }

@@ -1,6 +1,6 @@
-# Contexte de Project1 — Version 1.4
+# Contexte de Project1 — Version 1.6
 
-> **STATUT : ACTIF — version 1.4 validée le 29 juillet 2026**
+> **STATUT : ACTIF — version 1.6 validée le 9 septembre 2026**
 >
 > Ce document constitue la source de référence validée pour les règles produit,
 > métier, fonctionnelles, techniques et de sécurité de Project1. Il doit être lu
@@ -161,12 +161,21 @@ et non uniquement par l'affichage ou le masquage de boutons.
 - L'utilisateur saisit son identifiant et sa clé provisoire.
 - Il renseigne ensuite une seule fois son adresse e-mail et crée un mot de passe
   personnel, saisi deux fois pour confirmation.
-- Un lien de confirmation est envoyé à l'adresse e-mail renseignée.
-- Le compte reste en attente et l'utilisateur n'accède pas à son espace tant que
-  le lien n'a pas été confirmé.
+- Dès que cette étape aboutit, la clé provisoire est définitivement invalidée,
+  toutes les sessions provisoires ouvertes avec cette clé sont révoquées et le
+  serveur crée une nouvelle session standard réservée au client qui a terminé
+  l'inscription.
+- Le profil actualisé et, dans l'application mobile, le nouveau jeton de session
+  sécurisé sont renvoyés au client. L'utilisateur accède immédiatement à son
+  espace, sans nouvelle connexion.
+- Un lien de confirmation est envoyé à l'adresse e-mail renseignée. Cette
+  confirmation ne bloque pas l'accès au compte : elle valide l'adresse et rend
+  ensuite la récupération du mot de passe disponible.
 - Un nouveau lien peut être demandé si le précédent a expiré.
-- La confirmation de l'adresse active le compte et invalide définitivement la
-  clé provisoire.
+- Si la création de la nouvelle session échoue après l'enregistrement du mot de
+  passe, le compte reste activé et la clé reste invalidée. L'interface demande à
+  l'utilisateur de se reconnecter avec son identifiant et son nouveau mot de
+  passe ; elle ne lui demande jamais de réutiliser la clé.
 
 ### 4.3 Connexions suivantes
 
@@ -188,8 +197,11 @@ et non uniquement par l'affichage ou le masquage de boutons.
 ### 4.5 Adresse e-mail
 
 - L'interne et le senior gèrent eux-mêmes leur adresse e-mail.
-- La première adresse n'est activée qu'après confirmation du lien envoyé par
-  e-mail.
+- La première adresse reste en attente jusqu'à la confirmation du lien envoyé,
+  sans empêcher l'accès immédiat au compte après la création du mot de passe.
+- Tant que cette première adresse n'est pas confirmée, la récupération du mot de
+  passe et les notifications de sécurité qui exigent une adresse vérifiée sont
+  indisponibles. L'interface et l'e-mail d'activation l'indiquent explicitement.
 - Après la première connexion, changer l'adresse exige le mot de passe actuel et
   une confirmation envoyée à la nouvelle adresse.
 - La nouvelle adresse est saisie une seule fois. L'adresse actuelle reste active
@@ -220,6 +232,10 @@ et non uniquement par l'affichage ou le masquage de boutons.
 
 - Un même compte peut posséder plusieurs sessions actives simultanément sur le
   web et l'application.
+- L'utilisateur peut consulter ses appareils connectés, révoquer une session
+  distante précise ou révoquer toutes les autres sessions. Les libellés
+  d'appareil restent génériques et ne conservent ni adresse IP ni agent
+  utilisateur brut.
 - Le bouton « Se déconnecter » révoque toutes les sessions du compte sur tous les
   appareils.
 - La désactivation administrative d'un compte révoque immédiatement toutes ses
@@ -240,15 +256,44 @@ et non uniquement par l'affichage ou le masquage de boutons.
   reste disponible en secours.
 - Une déconnexion globale ou une désactivation du compte invalide également
   l'accès biométrique.
+- Le produit ne propose pas de double authentification. Une connexion standard
+  utilise uniquement l'identifiant unique et le mot de passe personnel.
+- Les facteurs de double authentification précédemment inscrits sont supprimés
+  des comptes lors du retrait du système.
 
 ### 4.8 Cycle de vie du compte
 
-- Un compte ayant produit des données n'est jamais supprimé physiquement.
-- L'administrateur le désactive, tandis que ses interventions, évaluations et
-  traces historiques restent conservées.
-- Aucune donnée d'un compte désactivé n'est supprimée automatiquement.
-- Toute future politique de durée de conservation ou d'anonymisation doit être
-  définie séparément et validée explicitement avant son application.
+- La désactivation reste réversible et ne supprime aucune donnée. Elle révoque
+  immédiatement toutes les sessions du compte et constitue un préalable
+  obligatoire à toute suppression définitive.
+- Seul un Administrateur actif peut demander la suppression définitive d'un
+  profil déjà désactivé. Il ne peut jamais supprimer son propre compte connecté.
+- L'interface exige une confirmation destructive explicite avec l'identifiant de
+  connexion exact du profil. La condition de désactivation et l'autorisation
+  Administrateur sont également contrôlées par le serveur et la base de données.
+- La suppression définitive efface l'identité Supabase Auth, le profil et toutes
+  les données personnelles et métier directement rattachées à ce profil. Elle
+  efface aussi les données partagées auxquelles le profil participe, notamment
+  les interventions, demandes d'évaluation et évaluations concernées, même si
+  elles apparaissaient auparavant dans l'historique d'autres utilisateurs.
+- Les sessions, abonnements push, bloc-notes, affectations, trophées obtenus,
+  notifications, messages ciblant exclusivement le profil et traces d'audit
+  rattachées sont également supprimés.
+- Les compteurs pseudonymisés de limitation des tentatives d'authentification
+  constituent une télémétrie technique anti-abus, sans identifiant de profil ni
+  login ou adresse IP en clair. Ils deviennent éligibles à la purge une heure
+  après leur dernière mise à jour et sont supprimés au passage horaire suivant,
+  soit une présence physique inférieure à deux heures hors blocage encore actif.
+- Les référentiels partagés qui ne constituent pas les données du compte, comme
+  les établissements, le catalogue commun, les formules et les définitions de
+  trophées, restent conservés ; toute référence d'auteur ou de modification vers
+  le profil supprimé est retirée.
+- L'effacement applicatif est transactionnel. La coordination avec Supabase Auth
+  utilise une opération récupérable en plusieurs phases afin qu'un échec
+  intermédiaire laisse uniquement un profil désactivé pouvant être repris, et
+  jamais un compte réactivé ou un succès partiel présenté comme définitif.
+- Après confirmation, l'action est irréversible depuis l'interface et le profil
+  ne peut plus être réactivé.
 
 ## 5. Supabase, connexion réseau, stockage et synchronisation
 
@@ -281,15 +326,18 @@ et non uniquement par l'affichage ou le masquage de boutons.
 
 ### 5.2 Connexion et stockage local
 
-- Une connexion Internet est obligatoire pour consulter ou modifier les données.
+- Une connexion Internet est obligatoire pour consulter les données et pour
+  confirmer toute écriture officielle.
 - Supabase et les composants serveur autorisés constituent l'unique source de
   vérité.
-- L'application et le web ne proposent pas de mode hors ligne pour les données
-  métier.
-- Aucune donnée métier sensible ne doit être conservée durablement dans
+- L'application et le web ne proposent pas de consultation hors ligne des
+  données métier enregistrées. Une exception strictement limitée existe pour le
+  brouillon d'intervention en cours.
+- Aucune donnée métier sensible enregistrée ne doit être conservée durablement dans
   `localStorage`, `sessionStorage`, IndexedDB ou le cache du navigateur. Cela
   inclut notamment les profils, interventions, checklists, évaluations,
-  bloc-notes et journaux d'activité.
+  bloc-notes et journaux d'activité. Le brouillon temporaire autorisé ci-dessous
+  n'est jamais considéré comme une donnée enregistrée.
 - Sur le web, les données chargées restent uniquement en mémoire pendant la
   session active. Les identifiants de session ne sont jamais stockés dans les API
   de stockage JavaScript ; ils utilisent un mécanisme serveur protégé par un
@@ -300,15 +348,29 @@ et non uniquement par l'affichage ou le masquage de boutons.
 - Le stockage local reste autorisé uniquement pour des préférences d'interface
   sans donnée personnelle ou métier, comme un filtre ou une position de
   navigation.
-- La fin de session efface l'état en mémoire et les caches privés associés.
+- Un brouillon d'intervention non validé peut être conservé dans IndexedDB pour
+  résister à une coupure ou une fermeture accidentelle. Il est chiffré en
+  AES-GCM avec une clé non extractible propre au profil et à l'appareil, expire
+  après 72 heures et est supprimé après enregistrement, abandon explicite ou
+  déconnexion.
+- La fin de session efface l'état en mémoire et les caches privés associés,
+  y compris tout brouillon d'intervention local.
 - Aucune modification ne doit être considérée comme réussie si le serveur ne l'a
   pas confirmée.
 - Une perte de connexion affiche un état clair et permet de réessayer.
-- Aucun brouillon d'intervention n'est conservé hors ligne. Si la connexion est
-  perdue avant la validation finale, l'interne recommence la saisie.
+- Une perte de connexion ne bloque pas la saisie du brouillon. L'interface
+  indique clairement son état local chiffré ; la validation finale attend le
+  retour du serveur et propose la reprise du brouillon au prochain accès.
 - Le bloc-notes est sauvegardé automatiquement sur le serveur pendant la saisie,
   sans bouton « Enregistrer ».
 - Le même bloc-notes est retrouvé sur le web et l'application.
+- Une modification distante du bloc-notes recharge l'éditeur lorsqu'il n'existe
+  aucune saisie locale. En cas de modifications concurrentes, l'utilisateur
+  compare les deux versions et choisit la version distante, la version locale
+  ou une fusion explicite sans écrasement silencieux.
+- Le serveur conserve au maximum 50 instantanés privés du bloc-notes, espacés
+  d'au moins cinq minutes, afin de permettre une restauration volontaire. Ces
+  instantanés suivent exactement les mêmes règles d'accès privé que le document.
 - Une erreur de sauvegarde ne doit jamais être présentée comme un succès.
 
 ### 5.3 Cohérence de l'historique Interne-Senior
@@ -402,7 +464,9 @@ Le parcours reste :
   attente`. L'historique conserve son architecture de consultation : une
   intervention en attente y reste verrouillée et non ouvrable.
 - Dès qu'une évaluation existe, l'intervention ne peut plus être modifiée ou
-  supprimée par personne, y compris un administrateur.
+  supprimée individuellement par personne, y compris un administrateur. La seule
+  exception est l'effacement global déclenché par la suppression définitive d'un
+  profil participant, conformément au cycle de vie du compte.
 - La suppression d'une intervention en attente retire également la demande
   d'évaluation correspondante.
 
@@ -444,8 +508,9 @@ Le parcours reste :
 - La catégorie de difficulté est obligatoire.
 - Le commentaire du senior est facultatif.
 - La validation rend l'évaluation définitive.
-- Une évaluation validée ne peut plus être modifiée ou supprimée par l'interne,
-  le senior ou l'administrateur.
+- Une évaluation validée ne peut plus être modifiée ou supprimée individuellement
+  par l'interne, le senior ou l'administrateur. Elle est toutefois effacée avec
+  l'intervention lors de la suppression définitive d'un profil participant.
 - L'interne voit immédiatement les notes, le commentaire éventuel et le score sur
   le web et l'application.
 
@@ -546,7 +611,9 @@ Difficulté :
 - Un trophée désactivé disparaît des collections et des compteurs, sans supprimer
   sa définition.
 - Un trophée déjà activé ne peut jamais être supprimé physiquement. Il peut
-  seulement être désactivé.
+  seulement être désactivé. Cette règle concerne la définition partagée du
+  trophée ; les attributions d'un profil sont effacées avec sa suppression
+  définitive.
 - Seul un brouillon jamais activé peut être supprimé définitivement.
 - Modifier une règle ou un seuil recalcule rétroactivement les trophées de tous
   les internes.
@@ -610,7 +677,8 @@ Difficulté :
 - Un message Administrateur conservé après lecture reste visible avec un style
   atténué jusqu'à sa suppression manuelle.
 - La suppression est logique : le message disparaît pour l'utilisateur, tandis
-  qu'une trace minimale reste conservée pour l'audit.
+  qu'une trace minimale reste conservée pour l'audit, sauf si le profil concerné
+  fait ensuite l'objet d'une suppression définitive.
 - « Tout marquer comme lu » applique à chaque message sa propre règle de cycle de
   vie.
 
@@ -628,14 +696,17 @@ Difficulté :
   au moment réel de l'envoi. Les comptes désactivés sont toujours exclus.
 - Le formulaire exige un titre, un message et les destinataires.
 - L'envoi peut être immédiat ou programmé à une date et une heure.
-- Un bouton facultatif peut contenir un libellé et un lien interne ou externe.
-  Un lien externe est clairement signalé et s'ouvre séparément dans le
-  navigateur.
+- Un bouton facultatif peut contenir un libellé et un lien externe sécurisé en
+  `https://`. Les messages Administrateur ne proposent aucun lien interne vers
+  une page de l'application. Le lien externe est clairement signalé et s'ouvre
+  séparément dans le navigateur.
 - Un aperçu final indique notamment le nombre de destinataires avant la
   confirmation.
+- Avant tout envoi immédiat ou toute programmation, une fenêtre récapitulative
+  demande une confirmation explicite de l'Administrateur.
 - Un message programmé peut être modifié ou annulé jusqu'à son envoi.
-- Après l'envoi, son contenu et ses destinataires deviennent immuables.
-  L'Administrateur peut néanmoins le retirer des centres de notifications.
+- Dès sa distribution, le message et ses destinataires deviennent définitifs et
+  il ne peut plus être retiré des centres de notifications par l'Administrateur.
 - Le suivi Administrateur affiche seulement le nombre de destinataires, le
   nombre de messages non lus et le nombre de messages lus.
 
@@ -694,6 +765,9 @@ Difficulté :
   attente, validation d'une évaluation, changement d'établissement, désactivation
   de compte, publication de formule et modification de trophée.
 - Le journal est accessible uniquement aux administrateurs.
+- La suppression définitive d'un profil efface les traces d'audit rattachées à
+  ce profil, y compris celles qui décrivent son activité ou le prennent pour
+  cible. Aucun libellé nominatif de remplacement n'est créé.
 
 ### 12.2 Sauvegardes
 
@@ -710,6 +784,10 @@ Difficulté :
 - Une sauvegarde supplémentaire est créée avant chaque migration sensible.
 - Avant toute migration pouvant modifier ou supprimer des données, il faut une
   sauvegarde, une simulation sans écriture et une validation explicite.
+- Une suppression définitive retire immédiatement les données de la base active
+  et des sauvegardes créées ensuite. Les archives chiffrées déjà constituées
+  restent soumises à leur rétention maximale de trente jours et ne peuvent être
+  utilisées comme moyen de réactiver sélectivement un profil supprimé.
 
 ### 12.3 Production
 
@@ -757,207 +835,105 @@ version avant de modifier le code mobile.
 
 ## 15. État de conformité et écarts encore ouverts
 
-Cette liste distingue les écarts encore ouverts des règles désormais conformes.
-Elle est informative et ne doit jamais être traitée comme une autorisation de
-modifier le code, la production ou les données. Les preuves détaillées restent
-conservées dans les rapports versionnés du dossier `docs`.
+Cette liste distingue les fonctions conformes des écarts qui nécessitent encore
+une action. Elle est informative et ne constitue jamais une autorisation de
+modifier la production ou les données. Les preuves détaillées restent conservées
+dans les rapports versionnés du dossier `docs`.
 
-1. **Présentation web transitoire** : la version application Interne/Senior est
-   aujourd'hui la référence visuelle et fonctionnelle la plus avancée, proche de
-   la version mobile définitive souhaitée. Le web reprend encore largement cette
-   présentation pensée comme une application. La prochaine étape consistera à
-   adapter l'interface web à un véritable usage sur ordinateur, sans modifier les
-   fonctions, les données ni les règles communes avec l'application.
-2. **Accès Senior — backend et correctif client actifs** : la migration
-   `202607200001_atomic_intervention_realtime_authorization.sql` applique la même
-   règle dans les politiques Supabase du projet principal depuis le 20 juillet
-   2026. Les lectures authentifiées de la recette réelle du 20 juillet 2026 ont
-   confirmé qu'un Senior voit tous les Internes de son établissement dans
-   Supabase, indépendamment de « Mes internes ». La version de production testée
-   ne montrait qu'un filtre cyclique initialisé sur « Relations récentes » : un
-   Senior autorisé pouvait donc obtenir « Aucun interne disponible » sans voir
-   immédiatement la vue complète. Le code source conserve désormais les trois
-   filtres mais restaure, à la demande du propriétaire, leur carte cyclique
-   historique. « Tous les internes » reste la vue initiale, puis la carte permet
-   de passer à « Mes internes » et « Relations récentes ». Le conteneur mobile qui
-   sélectionne « Mes internes » après sa configuration a été adapté à ce cycle.
-   Les tests, les contrôles TypeScript web et mobile et la compilation web
-   réussissent. La préversion Vercel `dpl_RQr3dA7NCBUSX82hnRCwD8gwo92K` a été
-   vérifiée puis promue en production sous
-   `dpl_Bq1xX25qoVKhWnHdQxPMm4NB3FQG` le 20 juillet 2026.
-   `https://monjournaldebloc.fr` sert désormais le bundle contenant ce visuel. Le
-   conteneur mobile consomme cette interface web commune, mais toute nouvelle
-   diffusion native en boutique reste une opération distincte.
-3. **Stockage local — conforme avec récupération historique contrôlée** :
-   aucune collection métier active ni aucun jeton Supabase n'est chargé ou écrit
-   dans le stockage persistant du navigateur. Au démarrage, le client supprime
-   les anciennes clés connues de profils, interventions, évaluations, trophées,
-   journaux, retours de test et sessions. Seule une ancienne copie de bloc-notes
-   encore valide peut être conservée temporairement afin que l'Interne choisisse
-   explicitement de la restaurer dans Supabase ou de conserver la version
-   Supabase. Cette clé est supprimée après la décision ; une copie illisible est
-   supprimée automatiquement. La session web reste gérée côté serveur et la
-   session mobile uniquement dans SecureStore/Keychain/Keystore.
-4. **Interventions — suppression en attente active en production** : depuis le
-   20 juillet 2026, la migration
-   `202607200002_pending_intervention_deletion.sql` réserve la suppression à
-   l'Interne propriétaire tant que l'intervention n'a reçu aucune évaluation.
-   La fonction Supabase supprime atomiquement l'intervention et sa demande
-   d'évaluation, écrit une trace d'audit et refuse les Seniors, l'Administrateur
-   et toute suppression directe. Dans le client commun, l'action se trouve dans
-   `Paramètres > Mes données > Interventions en attente` ; les cartes en attente
-   restent verrouillées dans l'historique. Une recette authentifiée sur le site
-   public a confirmé l'enregistrement, la visibilité pour tous les Seniors du
-   même établissement, l'absence d'accès depuis un autre établissement, la
-   suppression après confirmation Supabase et l'ouverture d'une nouvelle saisie
-   vierge. Les comptes et données synthétiques ont ensuite été supprimés et les
-   compteurs de production sont revenus exactement à leur état initial.
-5. **Évaluations — backend et client web actifs** : le client réserve désormais
-   la validation au senior désigné. La migration versionnée bloque les écritures
-   directes, retire ce droit à l'administrateur et rend la validation atomique et
-   non modifiable. Ces règles ont réussi le parcours d'intégration sur le projet
-   isolé puis sur le projet principal dans une transaction entièrement annulée.
-   Elles sont actives en production depuis le 20 juillet 2026. Leur diffusion en
-   boutique mobile reste soumise à la procédure propre à chaque plateforme.
-6. **Historique des checklists et formule — conforme** : chaque nouvelle
-   intervention reçoit dans la transaction atomique un instantané versionné de
-   sa définition et de ses étapes applicables. Les anciennes interventions ont
-   reçu un instantané « historique hérité » après rapport, validation et
-   sauvegarde. Le score est calculé exclusivement côté serveur avec une formule
-   officielle versionnée. Les migrations `202607270006`, `202607270007` et
-   `202607270008` sont actives en production.
-7. **Trophées surprises** : le code affiche actuellement des cartes génériques
-   « Trophée secret ». La cible les rend entièrement invisibles avant obtention.
-8. **Trophées actifs** : la suppression et l'édition directe doivent être
-   remplacées par la désactivation et la publication versionnée.
-9. **Authentification initiale — conforme** : l'Administrateur crée le compte
-   avec un identifiant et une clé provisoire aléatoire au format `XXXX-XXXX`,
-   générée côté serveur et affichée une seule fois. À la première connexion,
-   l'utilisateur confirme son adresse e-mail et remplace la clé par son mot de
-   passe. Une clé régénérée invalide immédiatement la précédente.
-10. **Sessions web — actives en production** : le code utilise désormais un
-    registre serveur et un cookie non persistant `HttpOnly`, `Secure`,
-    `SameSite`, avec expiration atomique après trente minutes d'inactivité. La
-    déconnexion volontaire et la désactivation révoquent toutes les sessions.
-    Les migrations `202607270004` et `202607270005` ont été appliquées en deux
-    étapes le 27 juillet 2026 autour du déploiement Vercel
-    `dpl_4ddUnCg5wCNade9NhmE9YjtMwSbo`. Une recette réelle avec deux sessions web
-    et deux sessions mobiles a confirmé la coexistence, l'expiration isolée et
-    la révocation globale. Un second scénario réel a confirmé que la
-    désactivation administrative révoque immédiatement les sessions web et
-    mobile du compte. Les données synthétiques ont ensuite été supprimées.
-11. **Biométrie — code prêt mais non diffusé en nouvelle version native** : la coque mobile active conserve
-    uniquement le jeton opaque dans SecureStore et propose Face ID, Touch ID ou
-    la biométrie Android après une connexion classique. La WebView est
-    éphémère et son script injecté ne contient plus de logique métier. Les
-    contrôles TypeScript réussissent, mais une nouvelle version native et des
-    essais sur appareils physiques restent nécessaires.
-12. **Notifications** : les notifications push pour évaluations et trophées ne
-    sont pas encore garanties par le socle actuel.
-13. **Support — fonction conforme, adresse définitive encore à configurer** :
-    les espaces Interne, Senior et Administrateur ouvrent l'application de
-    messagerie avec destinataire, objet et corps préremplis, sans stocker le
-    message dans Project1. L'adresse est centralisée et configurable ; l'adresse
-    définitive décidée par le propriétaire devra être renseignée lorsqu'elle
-    existera. L'ancienne fonctionnalité « Remarques de test » n'est plus
-    référencée par le client ni par les scripts opérationnels. La migration
-    `202607270009_retire_test_feedback_operations.sql`, appliquée le 27 juillet
-    2026, retire ses droits et mécanismes applicatifs tout en conservant la table
-    et tous les anciens enregistrements.
-14. **Établissements — conforme** : le référentiel officiel `institutions`
-    possède des identifiants stables, un nom officiel, un statut et une date
-    d'archivage. L'Administrateur crée, renomme, archive et sélectionne les
-    établissements dans cette liste. Le déplacement d'un compte est atomique,
-    audité et révoque les anciens accès Senior. Les politiques Senior comparent
-    les identifiants stables et non les anciens textes.
-15. **Cohérence Interne-Senior — backend et interface web conformes** : le
-    client attend désormais la confirmation de la fonction atomique Supabase avant
-    d'afficher le succès. La production actuelle écoute Realtime et recharge les
-    données au retour au premier plan. Le Lot 3 déployé le 27 juillet 2026 remplace
-    l'exposition d'un jeton Realtime dans le navigateur par une réconciliation
-    serveur automatique toutes les cinq secondes, ainsi qu'au focus, au retour
-    du réseau et au retour de l'application. La publication Realtime et les politiques associées sont dans la
-    migration versionnée. Le parcours croisé réel, y compris le changement
-    d'établissement et la révocation des anciens accès, a réussi le 20 juillet 2026
-    sur `project1-integration-test`. Après sauvegarde supplémentaire, simulation et
-    autorisation explicite du propriétaire, la migration a été appliquée au projet
-    principal le 20 juillet 2026. Les tables, fonctions, politiques et publications
-    Realtime attendues ont été contrôlées. Le même parcours croisé a ensuite réussi
-    dans une transaction de production entièrement annulée. Les trois comptes,
-    trois profils, trois interventions et trois évaluations réels sont restés
-    intacts et aucun compte, profil ou acte synthétique ne subsiste. Le client web
-    correspondant a été déployé le 20 juillet 2026 sur
-    `https://monjournaldebloc.fr` après préversion, compilation distante et
-    contrôles HTTP et visuels sur ordinateur et téléphone. Le premier binaire
-    Android de production, version `1.0.0 (2)`, a également été construit et son
-    intégrité vérifiée, mais il n'est pas encore soumis à Google Play. Aucun
-    binaire iOS n'existe encore : le compte Apple du propriétaire a été accepté
-    par l'assistant EAS mais n'est associé à aucune équipe Apple Developer. La
-    création du premier fichier signé exige donc d'abord une adhésion active à
-    l'Apple Developer Program ou une invitation dans l'équipe d'une organisation
-    déjà inscrite. Le 20 juillet 2026, le propriétaire a décidé de rester sans
-    abonnement Apple pour le moment. Aucun nouveau build iOS ni aucune opération
-    TestFlight/App Store ne doit donc être lancé sans une nouvelle décision
-    explicite. Le web est actif ; la diffusion mobile en boutique reste incomplète
-    et ne doit pas être présentée comme terminée. Une recette réelle supplémentaire
-    a été exécutée le 20 juillet 2026 sur le site de production, après une nouvelle
-    sauvegarde externe, avec quatre comptes et une intervention entièrement
-    synthétiques. L'enregistrement atomique, l'évaluation par le Senior désigné,
-    la restitution du score à l'Interne, les droits RLS du même établissement, le
-    déplacement d'établissement et la révocation des anciens accès ont réussi.
-    Cette recette a toutefois révélé deux écarts bloquants : l'interface Senior
-    masquait les Internes autorisés lorsqu'ils ne figuraient pas dans ses relations
-    récentes, et l'Interne ne peut pas supprimer sa propre intervention avant
-    évaluation. Le premier écart a été corrigé dans le code source le 20 juillet
-    2026 en conservant les trois filtres dans une carte cyclique et « Tous les
-    internes » comme vue initiale. La préversion vérifiée a été promue sur
-    `https://monjournaldebloc.fr` le 20 juillet 2026 et le bundle public a été
-    contrôlé. Le second écart a été corrigé dans le code source le 20 juillet
-    2026 : une fonction Supabase atomique réserve la suppression à l'Interne
-    propriétaire tant que l'intervention n'est pas évaluée, supprime aussi la
-    demande d'évaluation, écrit une trace d'audit et retire tout droit de
-    suppression directe, notamment à l'Administrateur. Dans l'interface, cette
-    action se trouve dans `Paramètres > Mes données > Interventions en attente` ;
-    l'historique conserve ses cartes en attente verrouillées. Après sauvegarde
-    externe fraîche, simulation SQL et autorisation explicite du propriétaire,
-    la migration a été appliquée au projet principal le 20 juillet 2026. Le test
-    transactionnel complet de production a réussi puis a été annulé. Le même
-    client a été construit en préversion, contrôlé puis promu sans reconstruction
-    sur `https://monjournaldebloc.fr`. Une recette authentifiée supplémentaire a
-    ensuite confirmé dans l'interface publique l'enregistrement atomique, la
-    visibilité simultanée pour le Senior désigné et l'autre Senior du même
-    établissement, l'absence d'accès depuis un autre établissement, le
-    verrouillage de l'historique et la suppression depuis `Mes données`. Après
-    cette suppression, Supabase contenait zéro intervention et zéro demande
-    d'évaluation synthétiques. Le nettoyage final a ramené exactement les comptes
-    Auth, profils, interventions, évaluations et demandes à leurs compteurs
-    initiaux, sans résidu synthétique. Les preuves figurent dans
-    `docs/RAPPORT_SUPPRESSION_INTERVENTION_2026-07-20.md` et
-    `docs/RAPPORT_RECETTE_PRODUCTION_2026-07-20.md`.
-16. **Sauvegardes Supabase — mécanisme externe actif** : le projet Supabase
-    principal utilise l'offre gratuite, qui ne fournit ni sauvegarde planifiée ni
-    restauration vers un nouveau projet. Depuis le 20 juillet 2026, le mécanisme
-    externe chiffré couvre PostgreSQL, Auth, les fichiers Storage et les migrations
-    avec une rétention de trente jours. La destination iCloud a été explicitement
-    autorisée, deux archives de production ont été créées et vérifiées, et l'agent
-    quotidien est actif à 03 h 15. Un exercice d'effacement-restauration utilisant
-    uniquement des données synthétiques a réussi deux fois sur le projet isolé,
-    y compris la reconnexion avec le mot de passe d'origine et le contrôle du
-    fichier Storage. Aucune donnée de production n'a été copiée dans ce projet de
-    test. La clé reste protégée dans le Trousseau macOS et le propriétaire a
-    confirmé le 20 juillet 2026 en avoir conservé une copie de récupération sur un
-    support séparé du Mac et d'iCloud. Le blocage propre aux sauvegardes est donc
-    levé. Toute migration de production reste néanmoins soumise à une demande
-    explicite distincte, une simulation sans écriture et une validation finale.
-17. **Fonctions restantes du Lot 7 — conformes sur le web commun** : le Senior
-    peut exporter les données pédagogiques de tous les Internes actifs de son
-    établissement, indépendamment des filtres d'affichage. Cet export exclut les
-    e-mails, identifiants de connexion, bloc-notes et secrets. L'Administrateur
-    dispose d'une vue historique en lecture seule des comptes désactivés. Le
-    client a été construit, vérifié en préversion puis promu sans reconstruction
-    le 27 juillet 2026. Le déploiement de production
-    `dpl_HzB1EiBif83RiRJj3YnFHVZkqkLU` sert `https://monjournaldebloc.fr` et
-    `https://www.monjournaldebloc.fr`.
+1. **Socle métier Supabase — conforme, contrôle croisé restauré** :
+   l'enregistrement atomique des interventions, les autorisations par
+   établissement, l'évaluation réservée au Senior désigné, l'immutabilité des
+   évaluations, les instantanés historiques et le calcul serveur du score sont
+   actifs. Le test croisé automatisé reste obligatoire. Le projet isolé
+   `project1-integration-test-20260811` et ses comptes synthétiques permettent
+   de nouveau de l'exécuter sans toucher à la production. Le parcours connecté
+   Interne–Seniors, l'évaluation par le Senior désigné et le changement
+   d'établissement ont été validés le 11 août 2026.
+2. **Web et logique commune — conformes sur les parcours publics testés** :
+   la présentation web a été adaptée à l'ordinateur tout en conservant la même
+   logique métier que l'application. Les tests publics passent sous Chrome,
+   Edge, Firefox et WebKit, y compris WebKit sur macOS. Une validation manuelle
+   périodique sur les appareils et navigateurs réels reste nécessaire pour les
+   évolutions visuelles importantes.
+3. **Authentification, sessions, comptes et établissements — conformes** :
+   la session web est gérée côté serveur, la session mobile dans le stockage
+   sécurisé natif, la déconnexion et la désactivation révoquent les sessions,
+   la finalisation de la première connexion révoque toutes les sessions
+   provisoires puis crée une nouvelle session standard réservée au client qui
+   l'a terminée. La confirmation de l'adresse e-mail est obligatoire avant la
+   première connexion standard ; la récupération du mot de passe reste
+   indisponible avant cette confirmation et l'interface l'annonce clairement.
+   Les appareils actifs sont consultables et révocables. Le produit ne propose
+   plus de second facteur d'authentification. Si la rotation de session échoue
+   après l'activation, l'utilisateur se reconnecte avec son
+   nouveau mot de passe sans pouvoir réutiliser la clé provisoire. Par ailleurs,
+   la désactivation est réversible lorsque l'identité Auth existe encore, les
+   adresses e-mail sont confirmées et modifiables, et les établissements
+   utilisent un référentiel officiel à identifiants stables.
+4. **Trophées et centre de notifications web — conformes** : les trophées
+   secrets restent invisibles avant obtention, les niveaux sont versionnés et
+   seul le meilleur niveau est utilisé lorsque la règle de présentation le
+   demande. Les notifications automatiques Interne et les messages
+   administratifs ciblés sont disponibles dans le centre commun. Les
+   notifications système Apple et Android lorsque l'application est fermée
+   restent un chantier distinct à réaliser ultérieurement.
+5. **Sauvegarde externe — archive courante et restauration vérifiées** : la
+   sauvegarde chiffrée couvre PostgreSQL, Auth, Storage et les
+   migrations, avec rétention et exécution quotidienne. Le mécanisme réessaie
+   désormais pendant environ une heure. Une archive fraîche du 11 août 2026 a
+   été produite et son intégrité vérifiée. Elle a été restaurée intégralement le
+   11 août 2026 dans le projet Supabase isolé
+   `project1-integration-test-20260811` : 1 222 lignes applicatives et 9 objets
+   Storage ont été contrôlés. Aucune restauration d'exercice ne doit viser la
+   production.
+6. **Dépendances web et mobiles — conformes** : les audits npm du 10 septembre
+   2026 ne signalent aucune vulnérabilité. Les versions Expo SDK 57 et React
+   Native sont alignées sur les versions compatibles recommandées. La mise à
+   jour de Metro a retiré `image-size` de l'arbre mobile ; son ancien correctif
+   local a donc été supprimé, tandis que les tests dédiés vérifient désormais
+   soit son absence, soit le maintien des protections comportementales si cette
+   dépendance réapparaît. Le correctif de compatibilité Ruby 2.6 pour
+   `expo-modules-autolinking` reste versionné.
+7. **Diffusion mobile — incomplète** : le code Expo passe le typage, le contrôle
+   de configuration et la vérification des versions. La validation Android sur
+   appareil réel et la soumission en boutique restent à faire. La production
+   d'un binaire iOS signé et toute publication TestFlight ou App Store restent
+   différées tant que le propriétaire ne dispose pas d'une équipe Apple
+   Developer active.
+8. **Qualité et CI — socle actif, environnement connecté rétabli** :
+   ESLint, les tests, le typage, les compilations, les audits de dépendances et
+   les contrôles Expo sont exécutés par la CI. Au 11 août 2026, ces contrôles et
+   les cinq emplois navigateur réussissent. La base isolée et les comptes de
+   test ont été recréés. Le test Supabase croisé connecté réussit localement ;
+   les secrets GitHub et l'adresse du déploiement E2E isolé doivent rester
+   valides pour que les emplois connectés soient obligatoires et verts dans la
+   CI. Les mutations complètes (création, relecture et suppression de la donnée
+   synthétique) disposent d'un emploi séparé, manuel et rattaché à
+   l'environnement GitHub protégé `isolated-e2e` ; elles restent interdites sur
+   le domaine de production.
+9. **Dette de maintenance — réduction commencée** : ESLint ne signale aucune
+   erreur bloquante mais conserve un ensemble d'avertissements historiques à
+   traiter progressivement. Les premières extractions ont été réalisées dans
+   `src/styles.css`, l'ancienne implémentation `mobile/App.tsx`,
+   `src/screens/AdminScreen.tsx` et `src/context/AppContext.tsx`. Les modèles
+   analytiques, le modèle de contexte et la vue de sécurité du compte sont
+   désormais séparés. Les deux fichiers principaux restent volumineux et doivent
+   continuer à être découpés par petits lots testés, sans réécriture globale
+   risquée.
+10. **Exports — contenu à valider avec le propriétaire** : les exports existants
+    respectent les exclusions de secrets et de données privées déjà définies,
+    mais la liste exacte des colonnes utiles pour les exports Interne, Senior et
+    Administrateur doit encore être relue et validée fonction par fonction.
+11. **Support — mécanisme conforme, destinataire définitif à confirmer** : les
+    demandes ouvrent l'application de messagerie avec destinataire, objet et
+    corps préremplis sans conserver le message dans Project1. L'adresse de
+    support reste configurable et devra être remplacée par l'adresse définitive
+    décidée par le propriétaire.
+12. **Exécution locale du web — limite connue** : le serveur Vite seul ne fournit
+    pas les fonctions `/api` de Vercel. Les parcours d'authentification complets
+   doivent être vérifiés avec `vercel dev`, une préversion Vercel ou un
+   environnement équivalent relié à une base de test, jamais en utilisant la
+   production comme environnement E2E automatisé.
 
 ## 16. Sujet futur non bloquant
 

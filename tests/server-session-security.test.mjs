@@ -28,6 +28,9 @@ const logoutApi = readSource('../api/auth-logout.js');
 const sessionApi = readSource('../api/auth-session.js');
 const adminUsersApi = readSource('../api/admin-users.js');
 const backendApi = readSource('../api/backend.js');
+const pushSubscriptionApi = readSource('../api/push-subscription.js');
+const trophyImageApi = readSource('../api/trophy-image.js');
+const authPasswordApi = readSource('../api/auth-password.js');
 const mobileBootstrapApi = readSource('../api/auth-mobile-bootstrap.js');
 const mobileShell = readSource('../mobile/WebAppShell.tsx');
 const mobileEntry = readSource('../mobile/index.ts');
@@ -65,8 +68,11 @@ test('le jeton Data API ES256 est signé avec la clé privée importée et expir
     const token = createSupabaseApplicationJwt({
       profile: {
         auth_user_id: '00000000-0000-4000-8000-000000000001',
+        is_active: true,
+        must_change_password: false,
       },
       session: {
+        auth_context: 'standard',
         session_id: '00000000-0000-4000-8000-000000000002',
       },
     });
@@ -157,6 +163,86 @@ test('les accès Supabase du navigateur passent par le serveur sans jeton JavaSc
     enforcementMigration,
     /auth\.jwt\(\) ->> 'app_session_id'[\s\S]*session_row\.revoked_at is null/i
   );
+});
+
+test('seule une session standard d’un profil actif et configuré accède aux routes métier', () => {
+  const {
+    createSupabaseApplicationJwt,
+    isBusinessApplicationSession,
+  } = require('../src/serverAuth.cjs');
+  const identity = {
+    profile: {
+      auth_user_id: '00000000-0000-4000-8000-000000000001',
+      is_active: true,
+      must_change_password: false,
+    },
+    session: {
+      auth_context: 'standard',
+      session_id: '00000000-0000-4000-8000-000000000002',
+    },
+  };
+
+  assert.equal(isBusinessApplicationSession(identity), true);
+  assert.equal(
+    isBusinessApplicationSession({
+      ...identity,
+      profile: { ...identity.profile, is_active: false },
+    }),
+    false
+  );
+  assert.equal(
+    isBusinessApplicationSession({
+      ...identity,
+      profile: { ...identity.profile, must_change_password: true },
+    }),
+    false
+  );
+  assert.equal(
+    isBusinessApplicationSession({
+      ...identity,
+      session: { ...identity.session, auth_context: 'recovery' },
+    }),
+    false
+  );
+  assert.throws(
+    () =>
+      createSupabaseApplicationJwt({
+        ...identity,
+        session: { ...identity.session, auth_context: 'recovery' },
+      }),
+    (error) => error?.code === 'BUSINESS_SESSION_REQUIRED' && error.status === 403
+  );
+
+  assert.match(serverAuth, /async function authenticateBusinessApplicationSession/);
+  assert.match(
+    serverAuth,
+    /async function requireAdmin[\s\S]*authenticateBusinessApplicationSession\(request\)/
+  );
+  assert.match(
+    backendApi,
+    /!isBusinessApplicationSession\(identity\)[\s\S]*sendJson\(response, 403/
+  );
+  assert.match(
+    pushSubscriptionApi,
+    /!isBusinessApplicationSession\(identity\)[\s\S]*sendJson\(response, 403/
+  );
+  assert.match(
+    trophyImageApi,
+    /!isBusinessApplicationSession\(identity\)[\s\S]*sendJson\(response, 403/
+  );
+});
+
+test('les parcours de configuration, récupération et déconnexion gardent la session restreinte', () => {
+  for (const source of [
+    sessionApi,
+    authPasswordApi,
+    logoutApi,
+    mobileBootstrapApi,
+  ]) {
+    assert.match(source, /authenticate(?:ApplicationSession|Request)/);
+    assert.doesNotMatch(source, /authenticateBusinessApplicationSession/);
+    assert.doesNotMatch(source, /isBusinessApplicationSession/);
+  }
 });
 
 test('la déconnexion et la désactivation révoquent toutes les sessions', () => {

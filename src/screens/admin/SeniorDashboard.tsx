@@ -3,11 +3,13 @@ import {
   ChevronLeft,
   ChevronRight,
   FileDown,
+  FileText,
   LogOut,
   Mail,
   Pencil,
   RefreshCw,
   Settings,
+  ShieldCheck,
   UserRound,
   Users,
   X,
@@ -22,11 +24,13 @@ import {
 } from 'react';
 
 import { ApproachIcon } from '../../components/ApproachIcon';
+import { AccountSecurityPanel } from '../../components/AccountSecurityPanel';
 import { NotificationAvatarButton } from '../../components/NotificationAvatarButton';
 import { NotificationCenter } from '../../components/NotificationCenter';
 import { PrimaryButton } from '../../components/PrimaryButton';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { SectionCard } from '../../components/SectionCard';
+import { LEGAL_INFORMATION_PATH } from '../../legalRoutes';
 import { buildSupportMailto } from '../../supportConfig';
 import {
   formatDisplayName,
@@ -70,6 +74,7 @@ export function SeniorDashboard({
   onEvaluate,
   onLogout,
   refreshBackendData,
+  recordActivity,
   savedInterventions,
   selectableSeniors,
   selectedSenior,
@@ -88,6 +93,11 @@ export function SeniorDashboard({
   onEvaluate: (interventionId: string) => void;
   onLogout: () => void;
   refreshBackendData: () => Promise<void>;
+  recordActivity: (
+    action: string,
+    targetType: string,
+    targetLabel: string
+  ) => void;
   savedInterventions: SavedIntervention[];
   selectableSeniors: Senior[];
   selectedSenior: Senior;
@@ -123,6 +133,7 @@ export function SeniorDashboard({
     useState(false);
   const [isPasswordSheetOpen, setIsPasswordSheetOpen] = useState(false);
   const [isEmailSheetOpen, setIsEmailSheetOpen] = useState(false);
+  const [isSecuritySheetOpen, setIsSecuritySheetOpen] = useState(false);
   const [isPendingEvaluationsSheetOpen, setIsPendingEvaluationsSheetOpen] =
     useState(false);
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
@@ -160,7 +171,10 @@ export function SeniorDashboard({
   const populationChangeScrollYRef = useRef<number | null>(null);
 
   const refreshedInternalProfiles = internalProfiles;
-  const refreshedManagedInternalIds = selectedSenior.managedInternalIds ?? [];
+  const refreshedManagedInternalIds = useMemo(
+    () => selectedSenior.managedInternalIds ?? [],
+    [selectedSenior.managedInternalIds]
+  );
   const refreshedSavedInterventions = savedInterventions;
   const refreshedAdminEvaluations = adminEvaluations;
   const refreshedCustomSurgicalInterventions = customSurgicalInterventions;
@@ -280,6 +294,7 @@ export function SeniorDashboard({
 
     return relatedProfilesByRecency;
   }, [
+    alphabeticalProfiles,
     managedProfiles,
     populationFilter,
     relatedProfilesByRecency,
@@ -401,12 +416,12 @@ export function SeniorDashboard({
     }
   };
 
-  const handleInstitutionExport = () => {
+  const handleInstitutionExport = async () => {
     setIsSettingsMenuOpen(false);
     setExportFeedback(null);
 
     try {
-      const exportedCount = downloadSeniorInstitutionInterventionsExcel(
+      const exportedCount = await downloadSeniorInstitutionInterventionsExcel(
         selectedSenior,
         refreshedSavedInterventions,
         refreshedInternalProfiles,
@@ -414,6 +429,16 @@ export function SeniorDashboard({
         refreshedAdminEvaluations,
         selectableSeniors
       );
+
+      if (exportedCount > 0) {
+        recordActivity(
+          'Export XLSX',
+          "Statistiques de l'établissement",
+          `Même lieu de stage · ${exportedCount} intervention${
+            exportedCount > 1 ? 's' : ''
+          }`
+        );
+      }
 
       setExportFeedback(
         exportedCount > 0
@@ -780,6 +805,18 @@ export function SeniorDashboard({
         </button>
         <button
           className="senior-settings__menu-item"
+          onClick={() => {
+            setIsSettingsMenuOpen(false);
+            setIsSecuritySheetOpen(true);
+          }}
+          role="menuitem"
+          type="button"
+        >
+          <ShieldCheck aria-hidden="true" />
+          <span>Sécurité et appareils</span>
+        </button>
+        <button
+          className="senior-settings__menu-item"
           onClick={handleInstitutionExport}
           role="menuitem"
           type="button"
@@ -798,6 +835,15 @@ export function SeniorDashboard({
           <Mail aria-hidden="true" />
           <span>Contacter le support</span>
         </button>
+        <a
+          className="senior-settings__menu-item"
+          href={LEGAL_INFORMATION_PATH}
+          onClick={() => setIsSettingsMenuOpen(false)}
+          role="menuitem"
+        >
+          <FileText aria-hidden="true" />
+          <span>Informations légales et confidentialité</span>
+        </a>
         {includeLogout ? (
           <button
             className={`senior-settings__menu-item senior-settings__menu-item--danger ${
@@ -1030,6 +1076,11 @@ export function SeniorDashboard({
               onPress={onLogout}
               variant="danger"
             />
+          </div>
+          <div className="legal-inline-links">
+            <a href={LEGAL_INFORMATION_PATH}>
+              Informations légales et confidentialité
+            </a>
           </div>
         </SectionCard>
       ) : null}
@@ -1279,7 +1330,10 @@ export function SeniorDashboard({
             <div className="account-sheet__stack">
               <p className="account-sheet__text">
                 Adresse actuelle :{' '}
-                <strong>{selectedSenior.contactEmail || 'Non renseignée'}</strong>
+                <strong>
+                  {selectedSenior.contactEmail ||
+                    'En attente de confirmation — récupération indisponible'}
+                </strong>
               </p>
               <label className="account-sheet__field">
                 <span>Nouvelle adresse e-mail</span>
@@ -1338,6 +1392,39 @@ export function SeniorDashboard({
         </div>
       ) : null}
 
+      {isSecuritySheetOpen ? (
+        <div
+          className="account-sheet-backdrop"
+          onClick={() => setIsSecuritySheetOpen(false)}
+        >
+          <div
+            aria-labelledby="senior-security-title"
+            aria-modal="true"
+            className="account-sheet senior-account-sheet"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+          >
+            <div className="account-sheet__header">
+              <div className="account-sheet__heading">
+                <h3 id="senior-security-title">Sécurité et appareils</h3>
+                <p className="account-sheet__text">
+                  Renforcez la connexion et contrôlez les sessions actives.
+                </p>
+              </div>
+              <button
+                aria-label="Fermer la fenêtre de sécurité"
+                className="account-sheet__close"
+                onClick={() => setIsSecuritySheetOpen(false)}
+                type="button"
+              >
+                <X aria-hidden="true" />
+              </button>
+            </div>
+            <AccountSecurityPanel />
+          </div>
+        </div>
+      ) : null}
+
       {isPendingEvaluationsSheetOpen ? (
         <div
           className="account-sheet-backdrop"
@@ -1388,14 +1475,7 @@ export function SeniorDashboard({
         notifications={userNotifications}
         onClose={() => setIsNotificationCenterOpen(false)}
         onDelete={deleteUserNotification}
-        onNavigate={(notification) => {
-          if (
-            notification.actionType === 'internal_path' &&
-            notification.actionTarget === '/profil'
-          ) {
-            setIsSettingsMenuOpen(true);
-          }
-        }}
+        onNavigate={() => undefined}
         onRead={markUserNotificationRead}
         onReadAll={markAllUserNotificationsRead}
       />

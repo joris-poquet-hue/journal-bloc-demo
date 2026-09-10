@@ -128,6 +128,18 @@ test('la résolution explicite conserve seulement les copies valides des autres 
 });
 
 test('le démarrage nettoie les collections métier mais préserve le bloc-notes récupérable', () => {
+  for (const historicalKey of [
+    'journal-bord:saved-obstetric-gestures:v1',
+    'journal-bord:notebook-notes:v1',
+    'journal-bord:senior-last-logins:v1',
+    'journal-bord:senior-managed-internals:v1',
+  ]) {
+    assert.ok(
+      KNOWN_LEGACY_BUSINESS_STORAGE_KEYS.includes(historicalKey),
+      `${historicalKey} doit être supprimée au démarrage`
+    );
+  }
+
   const fakeWindow = installFakeWindow([
     ...KNOWN_LEGACY_BUSINESS_STORAGE_KEYS.map((key) => [key, 'secret historique']),
     [LEGACY_NOTEBOOK_DOCUMENTS_STORAGE_KEY, JSON.stringify([localDocument])],

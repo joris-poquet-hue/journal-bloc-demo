@@ -190,7 +190,7 @@ test('l’Interne supprime une intervention en attente depuis Mes données', () 
 test('la lecture Senior utilise tous les internes visibles de son établissement', () => {
   assert.match(
     backendRepository,
-    /const seniorInternalIds =[\s\S]*loadBackendVisibleInternalProfiles\(signal\)/
+    /profile\.role === 'senior'[\s\S]*loadBackendVisibleInternalProfiles\(signal\)[\s\S]*const seniorInternalIds =[\s\S]*directoryProfiles\.map/
   );
   assert.match(
     backendRepository,

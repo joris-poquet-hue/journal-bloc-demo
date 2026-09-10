@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   Highlighter,
+  History,
   List,
   ListOrdered,
   LoaderCircle,
@@ -13,7 +14,15 @@ import {
   Underline,
   X,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ClipboardEvent as ReactClipboardEvent,
+  type DragEvent as ReactDragEvent,
+  type MouseEvent,
+} from 'react';
 
 import { useAppContext } from '../context/AppContext';
 import {
@@ -21,11 +30,21 @@ import {
   formatDisplayName,
   getChoiceLabel,
 } from '../data/mockData';
-import type { NotebookDocument, SavedIntervention, Senior } from '../types';
+import {
+  loadBackendNotebookVersions,
+  restoreBackendNotebookVersion,
+} from '../services/backendRepository';
+import type {
+  NotebookDocument,
+  NotebookDocumentVersion,
+  SavedIntervention,
+  Senior,
+} from '../types';
 import {
   readLegacyNotebookRecovery,
   resolveLegacyNotebookRecovery,
 } from '../utils/legacyNotebookRecovery';
+import { sanitizeNotebookHtml } from '../utils/notebookHtml';
 
 function formatLongDate(value: string) {
   const [year, month, day] = value.split('-').map(Number);
@@ -124,6 +143,7 @@ export function NotebookScreen() {
     selectableSeniors,
     surgicalProcedureOptions,
     backToWelcome,
+    refreshBackendData,
     updateNotebookDocument,
     clearNotebookDocument,
   } = useAppContext();
@@ -134,18 +154,25 @@ export function NotebookScreen() {
   const activeSaveCountRef = useRef(0);
   const saveAttemptRef = useRef(0);
   const saveTimerRef = useRef<number | null>(null);
+  const editorDocumentVersionRef = useRef(0);
+  const remoteConflictRef = useRef<NotebookDocument | null>(null);
   const isMountedRef = useRef(true);
   const updateNotebookDocumentRef = useRef(updateNotebookDocument);
   updateNotebookDocumentRef.current = updateNotebookDocument;
   const [isInterventionPanelOpen, setIsInterventionPanelOpen] = useState(false);
+  const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useState(false);
+  const [historyVersions, setHistoryVersions] = useState<NotebookDocumentVersion[]>([]);
+  const [historyState, setHistoryState] = useState<'error' | 'idle' | 'loading'>('idle');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>(
     'idle'
   );
   const [editorAlert, setEditorAlert] = useState<string | null>(null);
+  const [remoteConflict, setRemoteConflict] =
+    useState<NotebookDocument | null>(null);
   const [legacyNotebookRecovery, setLegacyNotebookRecovery] =
     useState<NotebookDocument | null>(null);
   const [legacyRecoveryState, setLegacyRecoveryState] = useState<
-    'idle' | 'keeping-supabase' | 'restoring'
+    'idle' | 'keeping-server' | 'restoring'
   >('idle');
   const [legacyRecoveryFeedback, setLegacyRecoveryFeedback] = useState<{
     kind: 'error' | 'success';
@@ -193,11 +220,65 @@ export function NotebookScreen() {
       return;
     }
 
-    const contentHtml = notebookDocument?.contentHtml ?? '';
-    editor.innerHTML = contentHtml;
-    confirmedContentRef.current = contentHtml;
-    latestContentRef.current = contentHtml;
-    requestedContentRef.current = contentHtml;
+    const remoteContent = sanitizeNotebookHtml(
+      notebookDocument?.contentHtml ?? ''
+    );
+    const remoteVersion = notebookDocument?.version ?? 0;
+    const localContent = sanitizeNotebookHtml(editor.innerHTML);
+    const remoteDocumentChanged =
+      remoteVersion !== editorDocumentVersionRef.current ||
+      remoteContent !== confirmedContentRef.current;
+
+    if (!remoteDocumentChanged) {
+      return;
+    }
+
+    if (
+      activeSaveCountRef.current > 0 &&
+      requestedContentRef.current === remoteContent
+    ) {
+      confirmedContentRef.current = remoteContent;
+      editorDocumentVersionRef.current = remoteVersion;
+      return;
+    }
+
+    const hasLocalChanges =
+      localContent !== confirmedContentRef.current ||
+      latestContentRef.current !== confirmedContentRef.current ||
+      saveTimerRef.current !== null ||
+      activeSaveCountRef.current > 0;
+
+    if (hasLocalChanges && localContent !== remoteContent) {
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+
+      saveAttemptRef.current += 1;
+      const conflictDocument: NotebookDocument = {
+        ...(notebookDocument ?? {
+          internalId: selectedInternal.id,
+          updatedAt: new Date().toISOString(),
+          version: remoteVersion,
+        }),
+        contentHtml: remoteContent,
+      };
+      remoteConflictRef.current = conflictDocument;
+      setRemoteConflict(conflictDocument);
+      setSaveState('error');
+      setEditorAlert(
+        'Une version plus récente existe sur un autre appareil. Choisis la version à conserver avant de continuer.'
+      );
+      return;
+    }
+
+    editor.innerHTML = remoteContent;
+    confirmedContentRef.current = remoteContent;
+    latestContentRef.current = remoteContent;
+    requestedContentRef.current = remoteContent;
+    editorDocumentVersionRef.current = remoteVersion;
+    remoteConflictRef.current = null;
+    setRemoteConflict(null);
     saveAttemptRef.current += 1;
 
     if (saveTimerRef.current !== null) {
@@ -207,7 +288,7 @@ export function NotebookScreen() {
 
     setSaveState(notebookDocument?.updatedAt ? 'saved' : 'idle');
     setEditorAlert(null);
-  }, [selectedInternal?.id]);
+  }, [notebookDocument, selectedInternal]);
 
   useEffect(() => {
     if (!selectedInternal) {
@@ -230,7 +311,7 @@ export function NotebookScreen() {
           'La copie locale historique du bloc-notes ne peut pas être lue sur cet appareil.',
       });
     }
-  }, [notebookDocument?.contentHtml, selectedInternal?.id]);
+  }, [notebookDocument?.contentHtml, selectedInternal]);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -246,10 +327,13 @@ export function NotebookScreen() {
       const pendingContent = latestContentRef.current;
 
       if (
+        !remoteConflictRef.current &&
         pendingContent !== confirmedContentRef.current &&
         pendingContent !== requestedContentRef.current
       ) {
-        void updateNotebookDocumentRef.current(pendingContent).catch(() => undefined);
+        void updateNotebookDocumentRef
+          .current(pendingContent, editorDocumentVersionRef.current)
+          .catch(() => undefined);
       }
     };
   }, []);
@@ -335,44 +419,93 @@ export function NotebookScreen() {
     return null;
   }
 
+  const refreshNotebookHistory = async () => {
+    setHistoryState('loading');
+
+    try {
+      setHistoryVersions(
+        await loadBackendNotebookVersions(selectedInternal.id)
+      );
+      setHistoryState('idle');
+    } catch {
+      setHistoryState('error');
+    }
+  };
+
+  const openNotebookHistory = () => {
+    setIsHistoryPanelOpen(true);
+    void refreshNotebookHistory();
+  };
+
   const persistNotebookContent = async (
     contentHtml: string,
     attemptId: number,
     saveDocument: () => Promise<NotebookDocument> = () =>
-      updateNotebookDocument(contentHtml)
+      updateNotebookDocument(contentHtml, editorDocumentVersionRef.current)
   ) => {
     requestedContentRef.current = contentHtml;
     activeSaveCountRef.current += 1;
+    let saveSucceeded = false;
 
     try {
       const confirmedDocument = await saveDocument();
-      confirmedContentRef.current = confirmedDocument.contentHtml;
+      const confirmedContent = sanitizeNotebookHtml(
+        confirmedDocument.contentHtml
+      );
+      confirmedContentRef.current = confirmedContent;
+      editorDocumentVersionRef.current = confirmedDocument.version ?? 0;
+      saveSucceeded = true;
 
       if (!isMountedRef.current || attemptId !== saveAttemptRef.current) {
         return true;
       }
 
-      const currentEditorContent = editorRef.current?.innerHTML ?? '';
-      if (currentEditorContent === confirmedDocument.contentHtml) {
+      const currentEditorContent = sanitizeNotebookHtml(
+        editorRef.current?.innerHTML ?? ''
+      );
+      if (currentEditorContent === confirmedContent) {
         setSaveState('saved');
         setEditorAlert(null);
+        if (isHistoryPanelOpen) {
+          void refreshNotebookHistory();
+        }
       } else {
         setSaveState('saving');
       }
 
       return true;
-    } catch {
-      if (!isMountedRef.current || attemptId !== saveAttemptRef.current) {
+    } catch (error) {
+      if (!isMountedRef.current || remoteConflictRef.current) {
         return false;
       }
 
+      const isVersionConflict =
+        error instanceof Error && error.message.includes('version plus récente');
+
       setSaveState('error');
       setEditorAlert(
-        'Le bloc-notes n’a pas été enregistré dans Supabase. Le contenu reste affiché sur cette page : vérifie la connexion puis réessaie.'
+        isVersionConflict
+          ? 'Une version plus récente du bloc-notes existe sur le serveur. Son contenu va être proposé dès la prochaine synchronisation.'
+          : 'Le bloc-notes n’a pas été enregistré sur le serveur. Le contenu reste affiché sur cette page : vérifie la connexion puis réessaie.'
       );
+
+      if (isVersionConflict) {
+        void refreshBackendData().catch(() => undefined);
+      }
+
       return false;
     } finally {
       activeSaveCountRef.current = Math.max(0, activeSaveCountRef.current - 1);
+
+      if (
+        saveSucceeded &&
+        isMountedRef.current &&
+        activeSaveCountRef.current === 0 &&
+        !remoteConflictRef.current &&
+        latestContentRef.current !== confirmedContentRef.current
+      ) {
+        window.setTimeout(() => persistEditorContent(), 0);
+      }
     }
   };
 
@@ -383,7 +516,12 @@ export function NotebookScreen() {
       return;
     }
 
-    const contentHtml = editor.innerHTML;
+    const contentHtml = sanitizeNotebookHtml(editor.innerHTML);
+
+    if (editor.innerHTML !== contentHtml) {
+      editor.innerHTML = contentHtml;
+    }
+
     latestContentRef.current = contentHtml;
 
     if (saveTimerRef.current !== null) {
@@ -403,8 +541,20 @@ export function NotebookScreen() {
       return;
     }
 
+    if (remoteConflictRef.current) {
+      setSaveState('error');
+      setEditorAlert(
+        'Résous d’abord le conflit avec la version enregistrée sur l’autre appareil.'
+      );
+      return;
+    }
+
     setSaveState('saving');
     setEditorAlert(null);
+
+    if (activeSaveCountRef.current > 0) {
+      return;
+    }
 
     if (immediate) {
       void persistNotebookContent(contentHtml, attemptId);
@@ -529,6 +679,32 @@ export function NotebookScreen() {
     persistEditorContent();
   };
 
+  const insertTransferredContent = (html: string, plainText: string) => {
+    const sanitizedHtml = html ? sanitizeNotebookHtml(html) : '';
+    const safeContent =
+      sanitizedHtml || escapeHtml(plainText).replace(/\r\n?|\n/g, '<br>');
+
+    if (safeContent) {
+      insertHtml(safeContent);
+    }
+  };
+
+  const handleEditorPaste = (event: ReactClipboardEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    insertTransferredContent(
+      event.clipboardData.getData('text/html'),
+      event.clipboardData.getData('text/plain')
+    );
+  };
+
+  const handleEditorDrop = (event: ReactDragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    insertTransferredContent(
+      event.dataTransfer.getData('text/html'),
+      event.dataTransfer.getData('text/plain')
+    );
+  };
+
   const insertFreeNote = () => {
     const now = new Date();
     const caretMarkerId = `notebook-caret-${Date.now()}-${Math.random()
@@ -612,19 +788,21 @@ export function NotebookScreen() {
     saveAttemptRef.current = attemptId;
     setSaveState('saving');
     setEditorAlert(null);
-    void persistNotebookContent('', attemptId, clearNotebookDocument);
+    void persistNotebookContent('', attemptId, () =>
+      clearNotebookDocument(editorDocumentVersionRef.current)
+    );
   };
 
   const retryNotebookSave = () => {
     persistEditorContent(true);
   };
 
-  const keepSupabaseNotebook = () => {
+  const keepServerNotebook = () => {
     if (!legacyNotebookRecovery || legacyRecoveryState !== 'idle') {
       return;
     }
 
-    setLegacyRecoveryState('keeping-supabase');
+    setLegacyRecoveryState('keeping-server');
     setLegacyRecoveryFeedback(null);
 
     try {
@@ -633,13 +811,13 @@ export function NotebookScreen() {
       setLegacyRecoveryFeedback({
         kind: 'success',
         message:
-          'La version Supabase est conservée. L’ancienne copie locale de ce bloc-notes a été supprimée.',
+          'La version enregistrée sur le serveur est conservée. L’ancienne copie locale de ce bloc-notes a été supprimée.',
       });
     } catch {
       setLegacyRecoveryFeedback({
         kind: 'error',
         message:
-          'La version Supabase reste inchangée, mais l’ancienne copie locale n’a pas pu être supprimée.',
+          'La version enregistrée sur le serveur reste inchangée, mais l’ancienne copie locale n’a pas pu être supprimée.',
       });
     } finally {
       setLegacyRecoveryState('idle');
@@ -655,7 +833,7 @@ export function NotebookScreen() {
 
     if (
       !window.confirm(
-        'Restaurer cette ancienne copie locale ? Le contenu actuel du bloc-notes Supabase sera remplacé uniquement après confirmation du serveur.'
+        'Restaurer cette ancienne copie locale ? Le contenu actuel du bloc-notes enregistré sur le serveur sera remplacé uniquement après confirmation.'
       )
     ) {
       return;
@@ -666,11 +844,15 @@ export function NotebookScreen() {
       saveTimerRef.current = null;
     }
 
+    const sanitizedLegacyContent = sanitizeNotebookHtml(
+      legacyDocument.contentHtml
+    );
+
     if (editorRef.current) {
-      editorRef.current.innerHTML = legacyDocument.contentHtml;
+      editorRef.current.innerHTML = sanitizedLegacyContent;
     }
 
-    latestContentRef.current = legacyDocument.contentHtml;
+    latestContentRef.current = sanitizedLegacyContent;
     const attemptId = saveAttemptRef.current + 1;
     saveAttemptRef.current = attemptId;
     setLegacyRecoveryState('restoring');
@@ -679,7 +861,7 @@ export function NotebookScreen() {
     setEditorAlert(null);
 
     const wasRestored = await persistNotebookContent(
-      legacyDocument.contentHtml,
+      sanitizedLegacyContent,
       attemptId
     );
 
@@ -693,17 +875,134 @@ export function NotebookScreen() {
       setLegacyRecoveryFeedback({
         kind: 'success',
         message:
-          'L’ancienne copie locale a été restaurée dans Supabase puis supprimée de cet appareil.',
+          'L’ancienne copie locale a été restaurée sur le serveur puis supprimée de cet appareil.',
       });
     } catch {
       setLegacyRecoveryFeedback({
         kind: 'error',
         message:
-          'La restauration Supabase a réussi, mais l’ancienne copie locale n’a pas pu être supprimée de cet appareil.',
+          'La restauration sur le serveur a réussi, mais l’ancienne copie locale n’a pas pu être supprimée de cet appareil.',
       });
     } finally {
       setLegacyNotebookRecovery(null);
       setLegacyRecoveryState('idle');
+    }
+  };
+
+  const loadRemoteConflictVersion = () => {
+    const conflict = remoteConflictRef.current;
+    const editor = editorRef.current;
+
+    if (!conflict || !editor) {
+      return;
+    }
+
+    const remoteContent = sanitizeNotebookHtml(conflict.contentHtml);
+    editor.innerHTML = remoteContent;
+    confirmedContentRef.current = remoteContent;
+    latestContentRef.current = remoteContent;
+    requestedContentRef.current = remoteContent;
+    editorDocumentVersionRef.current = conflict.version ?? 0;
+    remoteConflictRef.current = null;
+    setRemoteConflict(null);
+    saveAttemptRef.current += 1;
+    setSaveState(conflict.updatedAt ? 'saved' : 'idle');
+    setEditorAlert(null);
+  };
+
+  const keepLocalConflictVersion = () => {
+    const conflict = remoteConflictRef.current;
+    const editor = editorRef.current;
+
+    if (!conflict || !editor) {
+      return;
+    }
+
+    if (activeSaveCountRef.current > 0) {
+      setEditorAlert(
+        'La sauvegarde précédente se termine. Réessaie dans un instant.'
+      );
+      return;
+    }
+
+    const localContent = sanitizeNotebookHtml(editor.innerHTML);
+    const expectedVersion = conflict.version ?? 0;
+    confirmedContentRef.current = sanitizeNotebookHtml(conflict.contentHtml);
+    latestContentRef.current = localContent;
+    editorDocumentVersionRef.current = expectedVersion;
+    remoteConflictRef.current = null;
+    setRemoteConflict(null);
+    const attemptId = saveAttemptRef.current + 1;
+    saveAttemptRef.current = attemptId;
+    setSaveState('saving');
+    setEditorAlert(null);
+    void persistNotebookContent(localContent, attemptId, () =>
+      updateNotebookDocument(localContent, expectedVersion)
+    );
+  };
+
+  const mergeConflictVersions = () => {
+    const conflict = remoteConflictRef.current;
+    const editor = editorRef.current;
+
+    if (!conflict || !editor || activeSaveCountRef.current > 0) {
+      return;
+    }
+
+    const localContent = sanitizeNotebookHtml(editor.innerHTML);
+    const remoteContent = sanitizeNotebookHtml(conflict.contentHtml);
+    const mergedContent = sanitizeNotebookHtml(
+      `${localContent}<hr class="notebook-separator"><section class="notebook-entry"><p class="notebook-entry__date">Version reçue de l’autre appareil</p>${remoteContent}</section>`
+    );
+    const expectedVersion = conflict.version ?? 0;
+
+    editor.innerHTML = mergedContent;
+    confirmedContentRef.current = remoteContent;
+    latestContentRef.current = mergedContent;
+    editorDocumentVersionRef.current = expectedVersion;
+    remoteConflictRef.current = null;
+    setRemoteConflict(null);
+    const attemptId = saveAttemptRef.current + 1;
+    saveAttemptRef.current = attemptId;
+    setSaveState('saving');
+    setEditorAlert(null);
+    void persistNotebookContent(mergedContent, attemptId, () =>
+      updateNotebookDocument(mergedContent, expectedVersion)
+    );
+  };
+
+  const restoreHistoryVersion = async (version: NotebookDocumentVersion) => {
+    const editor = editorRef.current;
+
+    if (
+      !editor ||
+      saveState === 'saving' ||
+      !window.confirm(
+        `Restaurer la version du ${formatSaveTimestamp(version.sourceUpdatedAt) ?? 'jour indiqué'} ? La version actuelle restera accessible dans l’historique.`
+      )
+    ) {
+      return;
+    }
+
+    const restoredContent = sanitizeNotebookHtml(version.contentHtml);
+    const expectedVersion = notebookDocument?.version ?? editorDocumentVersionRef.current;
+    editor.innerHTML = restoredContent;
+    latestContentRef.current = restoredContent;
+    remoteConflictRef.current = null;
+    setRemoteConflict(null);
+    const attemptId = saveAttemptRef.current + 1;
+    saveAttemptRef.current = attemptId;
+    setSaveState('saving');
+    setEditorAlert(null);
+    const wasRestored = await persistNotebookContent(
+      restoredContent,
+      attemptId,
+      () => restoreBackendNotebookVersion(version.id, expectedVersion)
+    );
+
+    if (wasRestored) {
+      await refreshBackendData().catch(() => undefined);
+      setIsHistoryPanelOpen(false);
     }
   };
 
@@ -749,7 +1048,7 @@ export function NotebookScreen() {
                   Ancienne copie locale détectée
                 </h2>
                 <p>
-                  Elle est différente de la version Supabase et ne sera jamais
+                  Elle est différente de la version serveur et ne sera jamais
                   réimportée sans ton accord.
                 </p>
               </div>
@@ -764,7 +1063,7 @@ export function NotebookScreen() {
                 </strong>
               </span>
               <span>
-                Supabase :{' '}
+                Version serveur :{' '}
                 <strong>{lastSavedLabel ?? 'bloc-notes vide'}</strong>
               </span>
             </div>
@@ -777,12 +1076,12 @@ export function NotebookScreen() {
               <button
                 className="notebook-recovery-card__button notebook-recovery-card__button--secondary"
                 disabled={legacyRecoveryState !== 'idle' || saveState === 'saving'}
-                onClick={keepSupabaseNotebook}
+                onClick={keepServerNotebook}
                 type="button"
               >
-                {legacyRecoveryState === 'keeping-supabase'
+                {legacyRecoveryState === 'keeping-server'
                   ? 'Suppression…'
-                  : 'Conserver Supabase'}
+                  : 'Conserver la version serveur'}
               </button>
               <button
                 className="notebook-recovery-card__button notebook-recovery-card__button--primary"
@@ -805,6 +1104,61 @@ export function NotebookScreen() {
           >
             {legacyRecoveryFeedback.message}
           </div>
+        ) : null}
+
+        {remoteConflict ? (
+          <section
+            aria-labelledby="notebook-conflict-title"
+            className="notebook-recovery-card"
+          >
+            <div className="notebook-recovery-card__heading">
+              <span className="notebook-recovery-card__icon" aria-hidden="true">
+                <ArchiveRestore />
+              </span>
+              <div>
+                <h2 id="notebook-conflict-title">
+                  Modification détectée sur un autre appareil
+                </h2>
+                <p>
+                  La sauvegarde automatique est suspendue pour ne remplacer
+                  aucune version sans ton accord.
+                </p>
+              </div>
+            </div>
+            <div className="notebook-conflict-comparison">
+              <article>
+                <strong>Ma saisie sur cet appareil</strong>
+                <p>{getNotebookTextPreview(editorRef.current?.innerHTML ?? '')}</p>
+              </article>
+              <article>
+                <strong>Version enregistrée à distance</strong>
+                <p>{getNotebookTextPreview(remoteConflict.contentHtml)}</p>
+              </article>
+            </div>
+            <div className="notebook-recovery-card__actions">
+              <button
+                className="notebook-recovery-card__button notebook-recovery-card__button--secondary"
+                onClick={loadRemoteConflictVersion}
+                type="button"
+              >
+                Charger la version serveur
+              </button>
+              <button
+                className="notebook-recovery-card__button notebook-recovery-card__button--secondary"
+                onClick={mergeConflictVersions}
+                type="button"
+              >
+                Fusionner les deux versions
+              </button>
+              <button
+                className="notebook-recovery-card__button notebook-recovery-card__button--primary"
+                onClick={keepLocalConflictVersion}
+                type="button"
+              >
+                Conserver ma version
+              </button>
+            </div>
+          </section>
         ) : null}
 
         <div className="notebook-workspace">
@@ -871,6 +1225,14 @@ export function NotebookScreen() {
               <div className="notebook-toolbar__actions">
                 <button
                   className="notebook-insert-button"
+                  onClick={openNotebookHistory}
+                  type="button"
+                >
+                  <History aria-hidden="true" />
+                  Historique
+                </button>
+                <button
+                  className="notebook-insert-button"
                   onClick={() => setIsInterventionPanelOpen(true)}
                   type="button"
                 >
@@ -892,11 +1254,14 @@ export function NotebookScreen() {
               aria-label="Zone de texte du bloc-notes"
               className="notebook-editor"
               contentEditable
+              data-testid="notebook-editor"
               onBlur={() => persistEditorContent(true)}
+              onDrop={handleEditorDrop}
               onFocus={syncActiveFormats}
               onInput={() => persistEditorContent()}
               onKeyUp={syncActiveFormats}
               onMouseUp={syncActiveFormats}
+              onPaste={handleEditorPaste}
               ref={editorRef}
               role="textbox"
               suppressContentEditableWarning
@@ -906,6 +1271,7 @@ export function NotebookScreen() {
               <div className="notebook-editor-footer__meta">
                 <span
                   className={`notebook-save-indicator notebook-save-indicator--${saveState}`}
+                  data-testid="notebook-save-status"
                   role="status"
                 >
                   {saveState === 'saving' ? (
@@ -1033,6 +1399,70 @@ export function NotebookScreen() {
             ) : (
               <p className="notebook-panel__empty">
                 Aucune intervention enregistrée pour le moment.
+              </p>
+            )}
+          </div>
+        </div>
+      ) : null}
+
+      {isHistoryPanelOpen ? (
+        <div className="notebook-panel" role="dialog" aria-modal="true" aria-labelledby="notebook-history-title">
+          <div className="notebook-panel__sheet notebook-history-sheet">
+            <header className="notebook-panel__header">
+              <div>
+                <span>Récupération</span>
+                <h2 id="notebook-history-title">Historique du bloc-notes</h2>
+              </div>
+              <button
+                aria-label="Fermer"
+                className="notebook-panel__close"
+                onClick={() => setIsHistoryPanelOpen(false)}
+                type="button"
+              >
+                <X aria-hidden="true" />
+              </button>
+            </header>
+
+            <p className="notebook-history-current">
+              Version actuelle : <strong>{lastSavedLabel ?? 'bloc-notes vide'}</strong>
+            </p>
+
+            {historyState === 'loading' ? (
+              <p className="notebook-panel__empty" role="status">
+                <LoaderCircle aria-hidden="true" /> Chargement de l’historique…
+              </p>
+            ) : historyState === 'error' ? (
+              <div className="notebook-history-error" role="alert">
+                <p>L’historique ne peut pas être chargé pour le moment.</p>
+                <button className="notebook-retry-button" onClick={() => void refreshNotebookHistory()} type="button">
+                  Réessayer
+                </button>
+              </div>
+            ) : historyVersions.length ? (
+              <div className="notebook-history-list">
+                {historyVersions.map((version) => (
+                  <article className="notebook-history-item" key={version.id}>
+                    <div>
+                      <strong>
+                        {formatSaveTimestamp(version.sourceUpdatedAt) ?? 'Date inconnue'}
+                      </strong>
+                      <small>Version {version.sourceVersion}</small>
+                    </div>
+                    <p>{getNotebookTextPreview(version.contentHtml)}</p>
+                    <button
+                      className="notebook-recovery-card__button notebook-recovery-card__button--secondary"
+                      disabled={saveState === 'saving'}
+                      onClick={() => void restoreHistoryVersion(version)}
+                      type="button"
+                    >
+                      Restaurer cette version
+                    </button>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="notebook-panel__empty">
+                Aucune version antérieure n’est encore disponible.
               </p>
             )}
           </div>

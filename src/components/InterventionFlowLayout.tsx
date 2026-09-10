@@ -1,6 +1,8 @@
 import { ArrowLeft } from 'lucide-react';
 import { MouseEvent, ReactNode } from 'react';
 
+import { useAppContext } from '../context/AppContext';
+
 type InterventionFlowLayoutProps = {
   step: 1 | 2 | 3;
   title: string;
@@ -31,6 +33,13 @@ export function InterventionFlowLayout({
   onTrackInteraction,
   children,
 }: InterventionFlowLayoutProps) {
+  const {
+    discardOfflineInterventionDraft,
+    isOnline,
+    offlineDraftRecovery,
+    offlineDraftStatus,
+    restoreOfflineInterventionDraft,
+  } = useAppContext();
   const handleInteractionCapture = (event: MouseEvent<HTMLElement>) => {
     if (!onTrackInteraction || !isTrackableInteractionTarget(event.target)) {
       return;
@@ -68,6 +77,52 @@ export function InterventionFlowLayout({
         </header>
 
         <div className="screen-body intervention-flow__body">
+          <div
+            className={`offline-draft-status offline-draft-status--${
+              isOnline ? offlineDraftStatus : 'offline'
+            }`}
+            role="status"
+          >
+            <span aria-hidden="true" className="offline-draft-status__dot" />
+            {!isOnline
+              ? 'Hors ligne · brouillon chiffré conservé sur cet appareil'
+              : offlineDraftStatus === 'saving'
+                ? 'Sauvegarde locale chiffrée…'
+                : offlineDraftStatus === 'saved'
+                  ? 'Brouillon chiffré sauvegardé sur cet appareil'
+                  : offlineDraftStatus === 'error'
+                    ? 'La sauvegarde locale est indisponible'
+                    : 'Connexion disponible'}
+          </div>
+
+          {offlineDraftRecovery ? (
+            <section className="offline-draft-recovery" aria-labelledby="offline-draft-title">
+              <div>
+                <strong id="offline-draft-title">Brouillon retrouvé</strong>
+                <p>
+                  Une saisie non terminée du{' '}
+                  {new Date(offlineDraftRecovery.updatedAt).toLocaleString('fr-FR', {
+                    dateStyle: 'medium',
+                    timeStyle: 'short',
+                  })}{' '}
+                  est disponible sur cet appareil.
+                </p>
+              </div>
+              <div className="offline-draft-recovery__actions">
+                <button className="flow-button flow-button--primary" onClick={restoreOfflineInterventionDraft} type="button">
+                  Reprendre le brouillon
+                </button>
+                <button
+                  className="flow-button flow-button--secondary"
+                  onClick={() => void discardOfflineInterventionDraft()}
+                  type="button"
+                >
+                  Supprimer le brouillon
+                </button>
+              </div>
+            </section>
+          ) : null}
+
           <div className="intervention-flow__progress-block" aria-hidden="true">
             <div className="intervention-flow__progress">
               <span className="intervention-flow__progress-line" />

@@ -17,11 +17,11 @@ const legacyRepairMigration = readSource(
 );
 const backendRepository = readSource('../src/services/backendRepository.ts');
 const appContext = readSource('../src/context/AppContext.tsx');
+const appContextModel = readSource('../src/context/appContextModel.ts');
 const adminScreen = readSource('../src/screens/AdminScreen.tsx');
 const trophyDisplay = readSource('../src/utils/trophyDisplay.ts');
 const trophiesScreen = readSource('../src/screens/TrophiesScreen.tsx');
 const trophyRules = readSource('../src/utils/adminTrophies.ts');
-const legacyMobile = readSource('../mobile/App.tsx');
 const imageApi = readSource('../api/trophy-image.js');
 const backendApi = readSource('../api/backend.js');
 const pushApi = readSource('../api/push-subscription.js');
@@ -73,7 +73,7 @@ test('la progression par connexions vient du compteur serveur partagé', () => {
     /create function public\.list_visible_internal_directory\(\)[\s\S]*login_count integer[\s\S]*from public\.activity_log activity/
   );
   assert.match(backendRepository, /loginCount: getProfileLoginCount/);
-  assert.match(appContext, /loginCount: profile\.loginCount/);
+  assert.match(appContextModel, /loginCount: profile\.loginCount/);
 });
 
 test('les secrets sont absents du catalogue, des compteurs et du mobile avant obtention', () => {
@@ -85,8 +85,8 @@ test('les secrets sont absents du catalogue, des compteurs et du mobile avant ob
     trophyDisplay,
     /trophy\.visibility === 'surprise' && !isEarned[\s\S]*return null/
   );
-  assert.doesNotMatch(legacyMobile, /Trophée secret/);
-  assert.doesNotMatch(legacyMobile, /section:\s*'secret'/);
+  assert.doesNotMatch(mobileShell, /Trophée secret/);
+  assert.doesNotMatch(mobileShell, /section:\s*'secret'/);
   assert.match(
     migration,
     /drop policy if exists "trophy_images_public_read" on storage\.objects/

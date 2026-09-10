@@ -175,6 +175,46 @@ function isMobileApplicationRequest(request) {
   );
 }
 
+function getDeviceLabel(request) {
+  if (isMobileApplicationRequest(request)) {
+    const userAgent = String(request.headers['user-agent'] ?? '');
+
+    if (/Android/i.test(userAgent)) {
+      return 'Application Android';
+    }
+
+    if (/iPhone|iPad|iOS/i.test(userAgent)) {
+      return 'Application iOS';
+    }
+
+    return 'Application mobile';
+  }
+
+  const userAgent = String(request.headers['user-agent'] ?? '');
+  const browser = /Edg\//i.test(userAgent)
+    ? 'Edge'
+    : /Firefox\//i.test(userAgent)
+      ? 'Firefox'
+      : /Chrome\//i.test(userAgent)
+        ? 'Chrome'
+        : /Safari\//i.test(userAgent)
+          ? 'Safari'
+          : 'Navigateur web';
+  const operatingSystem = /Windows/i.test(userAgent)
+    ? 'Windows'
+    : /Android/i.test(userAgent)
+      ? 'Android'
+      : /iPhone|iPad|iOS/i.test(userAgent)
+        ? 'iOS'
+        : /Mac OS|Macintosh/i.test(userAgent)
+          ? 'macOS'
+          : /Linux/i.test(userAgent)
+            ? 'Linux'
+            : null;
+
+  return operatingSystem ? `${browser} sur ${operatingSystem}` : browser;
+}
+
 function appendSetCookie(response, value) {
   const currentValue = response.getHeader('Set-Cookie');
 
@@ -303,10 +343,34 @@ async function authAdminRequest(path, options = {}) {
         payload?.message ||
         payload?.error_description ||
         payload?.error ||
-        `Supabase Auth error ${response.status}`
+        `Authentication service error ${response.status}`
     );
     error.status = response.status;
     error.details = payload;
+    throw error;
+  }
+
+  return payload;
+}
+
+async function signInAuthUserWithPassword(email, password, request) {
+  const { payload, response } = await supabaseRequest(
+    `${SUPABASE_URL}/auth/v1/token?grant_type=password`,
+    {
+      body: JSON.stringify({ email, password }),
+      headers: {
+        apikey: SUPABASE_SERVICE_ROLE_KEY,
+        Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+        'Content-Type': 'application/json',
+        ...(request ? getForwardedAuthHeaders(request) : {}),
+      },
+      method: 'POST',
+    }
+  );
+
+  if (!response.ok || !payload?.access_token) {
+    const error = new Error('Invalid credentials.');
+    error.status = 401;
     throw error;
   }
 
@@ -334,7 +398,7 @@ async function getProfileByLoginId(loginId) {
       login_id: `eq.${loginId}`,
       is_active: 'eq.true',
       select:
-        'id,auth_user_id,role,first_name,last_name,login_id,institution,institution_id,metadata,must_change_password,is_active,version,updated_at,updated_by_profile_id',
+        'id,auth_user_id,role,first_name,last_name,login_id,institution,institution_id,metadata,must_change_password,is_active,avatar_image_src,created_at,last_login_at,promotion,semester,version,updated_at,updated_by_profile_id',
     },
   });
 
@@ -348,7 +412,7 @@ async function getProfileByAuthUserId(authUserId) {
       is_active: 'eq.true',
       limit: '1',
       select:
-        'id,auth_user_id,role,first_name,last_name,login_id,institution,institution_id,metadata,must_change_password,is_active,version,updated_at,updated_by_profile_id',
+        'id,auth_user_id,role,first_name,last_name,login_id,institution,institution_id,metadata,must_change_password,is_active,avatar_image_src,created_at,last_login_at,promotion,semester,version,updated_at,updated_by_profile_id',
     },
   });
 
@@ -374,6 +438,7 @@ async function createApplicationSession(profile, request, options = {}) {
       auth_context:
         options.authContext === 'recovery' ? 'recovery' : 'standard',
       client_kind: clientKind,
+      device_label: getDeviceLabel(request),
       idle_timeout_seconds:
         clientKind === 'web' ? WEB_IDLE_TIMEOUT_SECONDS : null,
       profile_id: profile.id,
@@ -388,7 +453,7 @@ async function createApplicationSession(profile, request, options = {}) {
     method: 'POST',
     searchParams: {
       select:
-        'id,profile_id,auth_user_id,client_kind,auth_context,idle_timeout_seconds,created_at,last_seen_at',
+        'id,profile_id,auth_user_id,client_kind,auth_context,idle_timeout_seconds,created_at,last_seen_at,device_label',
     },
   });
   const session = rows?.[0] ?? null;
@@ -461,6 +526,20 @@ async function authenticateApplicationSession(request, options = {}) {
   );
 }
 
+function isBusinessApplicationSession(identity) {
+  return Boolean(
+    identity?.profile?.is_active === true &&
+      identity.profile.must_change_password === false &&
+      identity?.session?.auth_context === 'standard'
+  );
+}
+
+async function authenticateBusinessApplicationSession(request, options = {}) {
+  const identity = await authenticateApplicationSession(request, options);
+
+  return isBusinessApplicationSession(identity) ? identity : null;
+}
+
 async function authenticateRequest(request, options = {}) {
   const identity = await authenticateApplicationSession(request, options);
 
@@ -475,9 +554,16 @@ async function authenticateRequest(request, options = {}) {
 }
 
 async function requireAdmin(request) {
-  const identity = await authenticateRequest(request);
+  const identity = await authenticateBusinessApplicationSession(request);
 
-  return identity?.profile?.role === 'admin' ? identity : null;
+  if (identity?.profile?.role !== 'admin') {
+    return null;
+  }
+
+  return {
+    ...identity,
+    user: await getAuthUser(identity.profile.auth_user_id),
+  };
 }
 
 async function revokeAllApplicationSessions(profileId, reason) {
@@ -505,6 +591,15 @@ function base64UrlJson(value) {
 }
 
 function createSupabaseApplicationJwt(identity) {
+  if (!isBusinessApplicationSession(identity)) {
+    const error = new Error(
+      'A standard activated application session is required for protected data access.'
+    );
+    error.code = 'BUSINESS_SESSION_REQUIRED';
+    error.status = 403;
+    throw error;
+  }
+
   const now = Math.floor(Date.now() / 1000);
   const payload = base64UrlJson({
     app_session_id: identity.session.session_id,
@@ -521,7 +616,7 @@ function createSupabaseApplicationJwt(identity) {
     try {
       privateJwk = JSON.parse(SUPABASE_SIGNING_PRIVATE_JWK);
     } catch {
-      throw new Error('SUPABASE_SIGNING_PRIVATE_JWK must be valid JSON.');
+      throw new Error('The application signing key must be valid JSON.');
     }
 
     if (
@@ -531,7 +626,7 @@ function createSupabaseApplicationJwt(identity) {
       !privateJwk?.kid
     ) {
       throw new Error(
-        'SUPABASE_SIGNING_PRIVATE_JWK must be an ES256 P-256 private JWK with a kid.'
+        'The application signing key must be an ES256 P-256 private JWK with a kid.'
       );
     }
 
@@ -554,7 +649,7 @@ function createSupabaseApplicationJwt(identity) {
 
   if (!SUPABASE_JWT_SECRET) {
     throw new Error(
-      'A Supabase application JWT signing key is required for protected data access.'
+      'An application JWT signing key is required for protected data access.'
     );
   }
 
@@ -600,7 +695,7 @@ async function checkRateLimit(scope) {
       retryAfterSeconds: Math.max(0, Math.ceil(retryAfterMs / 1000)),
     };
   } catch (error) {
-    console.warn('Persistent auth rate limit unavailable; Supabase limits remain active.', error);
+    console.warn('Persistent auth rate limit unavailable; upstream limits remain active.', error);
     return { allowed: true, retryAfterSeconds: 0 };
   }
 }
@@ -666,21 +761,36 @@ function getForwardedAuthHeaders(request) {
 }
 
 function toPublicProfile(profile) {
+  const rawLoginCount = profile.metadata?.loginCount;
+  const loginCount =
+    typeof rawLoginCount === 'number'
+      ? rawLoginCount
+      : typeof rawLoginCount === 'string' && /^\d+$/.test(rawLoginCount)
+        ? Number(rawLoginCount)
+        : 0;
+
   return {
     authUserId: profile.auth_user_id,
+    avatarImageSrc: profile.avatar_image_src ?? null,
     contactEmail:
       typeof profile.metadata?.contactEmail === 'string'
         ? profile.metadata.contactEmail
         : null,
+    createdAt: profile.created_at,
     firstName: profile.first_name,
     id: profile.id,
     institution: profile.institution ?? null,
     institutionId: profile.institution_id ?? null,
     isActive: profile.is_active !== false,
     lastName: profile.last_name,
+    lastLoginAt: profile.last_login_at ?? null,
+    loginCount:
+      Number.isSafeInteger(loginCount) && loginCount >= 0 ? loginCount : 0,
     loginId: profile.login_id,
     mustChangePassword: profile.must_change_password,
+    promotion: profile.promotion ?? null,
     role: profile.role,
+    semester: profile.semester ?? null,
     updatedAt: profile.updated_at,
     updatedByProfileId: profile.updated_by_profile_id ?? null,
     version: Number(profile.version ?? 1),
@@ -696,6 +806,7 @@ module.exports = {
   SUPABASE_URL,
   authAdminRequest,
   authenticateApplicationSession,
+  authenticateBusinessApplicationSession,
   authenticateRequest,
   buildRateLimitScope,
   checkRateLimit,
@@ -707,12 +818,15 @@ module.exports = {
   getAuthUser,
   getApplicationSessionToken,
   getForwardedAuthHeaders,
+  getDeviceLabel,
+  getProfileByAuthUserId,
   getProfileByLoginId,
   getRequestBody,
   hashApplicationSessionToken,
   isConfigured,
   isApplicationJwtConfigured,
   isApplicationSessionConfigured,
+  isBusinessApplicationSession,
   isMobileApplicationRequest,
   isValidEmail,
   logoutSupabaseAccessToken,
@@ -726,6 +840,7 @@ module.exports = {
   revokeAllApplicationSessions,
   sendJson,
   serviceHeaders,
+  signInAuthUserWithPassword,
   setApplicationSessionCookie,
   supabaseRequest,
   toPublicProfile,

@@ -20,7 +20,13 @@ import type {
 import { calculateAutonomyScore } from './autonomyScore';
 import { getAuthoritativeChecklist } from './evaluationChecklist';
 import {
+  getCalendarDayDifference,
+  getHourDifference,
+  hasCompleteEvaluation,
+} from './exportMetrics';
+import {
   createXlsxBlob,
+  deliverDownloadableFile,
   type XlsxCell,
   type XlsxCellStyle,
   type XlsxCellValue,
@@ -35,12 +41,13 @@ type PeriodAnalyticsSummary = {
   averageEvaluationDelayMs: number | null;
   averageInterventionFormClickCount: number | null;
   averageInterventionFormDurationMs: number | null;
-  averageRecordingDelayMs: number | null;
+  averageRecordingDelayDays: number | null;
   averageSeniorEvaluationClickCount: number | null;
   averageSeniorEvaluationDurationMs: number | null;
   evaluationRate: number;
+  evaluatedRecordedCount: number;
+  evaluationsPerformedCount: number;
   recentActivityCount: number;
-  recentEvaluatedCount: number;
   recentRecordedCount: number;
 };
 
@@ -48,7 +55,7 @@ type AllTimeCycleSummary = {
   averageEvaluationDelayMs: number | null;
   averageInterventionFormClickCount: number | null;
   averageInterventionFormDurationMs: number | null;
-  averageRecordingDelayMs: number | null;
+  averageRecordingDelayDays: number | null;
   averageSeniorEvaluationClickCount: number | null;
   averageSeniorEvaluationDurationMs: number | null;
   completedInterventionFormCount: number;
@@ -139,28 +146,6 @@ function percentageCell(value: number | null) {
     : cell(value, 'percentage');
 }
 
-function getHourDifference(startAt: string, endAt: string) {
-  const start = new Date(startAt).getTime();
-  const end = new Date(endAt).getTime();
-
-  if (Number.isNaN(start) || Number.isNaN(end) || end < start) {
-    return null;
-  }
-
-  return (end - start) / 3_600_000;
-}
-
-function getRecordingDelayHours(intervention: SavedIntervention) {
-  const operationDate = parseDateOnly(intervention.date);
-
-  if (!operationDate) {
-    return null;
-  }
-
-  operationDate.setHours(12, 0, 0, 0);
-  return getHourDifference(operationDate.toISOString(), intervention.savedAt);
-}
-
 function getProcedureLabel(
   intervention: SavedIntervention,
   customDefinitions: SurgicalInterventionDefinition[]
@@ -208,10 +193,6 @@ function getIndicationComparisonKey(intervention: SavedIntervention) {
 
 function getApproachLabel(intervention: SavedIntervention) {
   return getChoiceLabel(approachOptions, intervention.approach, '');
-}
-
-function hasCompleteEvaluation(evaluation: AdminInterventionEvaluation | undefined) {
-  return Boolean(evaluation?.globalPerformance && evaluation.categoryDifficulty);
 }
 
 function getAutonomyScore(
@@ -268,25 +249,62 @@ function buildAutonomyScoreEvolutions(input: AnalyticsExportInput) {
   return evolutionByInterventionId;
 }
 
-function getInternalLoginId(input: AnalyticsExportInput, internalId: string | null) {
-  if (!internalId) {
-    return '';
-  }
+type ExportIdentity = {
+  firstName: string;
+  lastName: string;
+  stageLocation: string;
+};
 
-  return (
-    input.internalProfiles.find((profile) => profile.id === internalId)?.loginId ??
-    'Identifiant indisponible'
-  );
+function getInternalIdentity(
+  input: AnalyticsExportInput,
+  internalId: string | null | undefined
+): ExportIdentity {
+  const profile = internalId
+    ? input.internalProfiles.find((candidate) => candidate.id === internalId)
+    : null;
+
+  return profile
+    ? {
+        firstName: profile.firstName,
+        lastName: profile.lastName,
+        stageLocation: profile.institution,
+      }
+    : { firstName: 'Profil indisponible', lastName: '', stageLocation: '' };
 }
 
-function getSeniorLoginId(input: AnalyticsExportInput, seniorId: string | null) {
-  if (!seniorId || seniorId === 'sen-other') {
-    return 'Non renseigné';
-  }
+function getSeniorIdentity(
+  input: AnalyticsExportInput,
+  seniorId: string | null | undefined
+): ExportIdentity {
+  const senior =
+    seniorId && seniorId !== 'sen-other'
+      ? input.selectableSeniors.find((candidate) => candidate.id === seniorId)
+      : null;
 
-  return (
-    input.selectableSeniors.find((senior) => senior.id === seniorId)?.loginId ??
-    'Identifiant indisponible'
+  return senior
+    ? {
+        firstName: senior.firstName,
+        lastName: senior.lastName,
+        stageLocation: senior.institution,
+      }
+    : { firstName: 'Non renseigné', lastName: '', stageLocation: '' };
+}
+
+function getActorIdentity(
+  input: AnalyticsExportInput,
+  entry: ActivityLogEntry
+) {
+  return entry.actorRole === 'internal'
+    ? getInternalIdentity(input, entry.actorId)
+    : getSeniorIdentity(input, entry.actorId);
+}
+
+function buildInterventionReferences(interventions: SavedIntervention[]) {
+  return new Map(
+    interventions.map((intervention, index) => [
+      intervention.id,
+      `BLOC-${String(index + 1).padStart(6, '0')}`,
+    ])
   );
 }
 
@@ -380,20 +398,30 @@ function buildSummaryWorksheet(input: AnalyticsExportInput): XlsxWorksheet {
     ["Nombre total d'activités", period.recentActivityCount],
     ["Nombre d'internes actifs", period.activeInternalCount],
     ['Nombre de seniors actifs', period.activeSeniorCount],
-    ['Interventions enregistrées', period.recentRecordedCount],
-    ['Interventions évaluées', period.recentEvaluatedCount],
-    ["Taux d'évaluation", percentageCell(period.evaluationRate / 100)],
-    ['Délai moyen intervention → saisie (heures)', metricValue(period.averageRecordingDelayMs, 3_600_000)],
+    ['Interventions enregistrées pendant la période', period.recentRecordedCount],
+    [
+      'Interventions de la période évaluées à la date de l’export',
+      period.evaluatedRecordedCount,
+    ],
+    [
+      "Taux d'évaluation des interventions enregistrées pendant la période",
+      percentageCell(period.evaluationRate / 100),
+    ],
+    [
+      'Évaluations réalisées pendant la période',
+      period.evaluationsPerformedCount,
+    ],
+    ['Délai moyen intervention → saisie (jours calendaires)', metricValue(period.averageRecordingDelayDays)],
     ['Délai moyen saisie → évaluation (heures)', metricValue(period.averageEvaluationDelayMs, 3_600_000)],
     ["Durée moyenne de saisie d'une intervention (secondes)", metricValue(period.averageInterventionFormDurationMs, 1_000)],
     ["Clics moyens pour saisir une intervention", metricValue(period.averageInterventionFormClickCount)],
     ["Durée moyenne d'une évaluation senior (secondes)", metricValue(period.averageSeniorEvaluationDurationMs, 1_000)],
     ["Clics moyens pour réaliser une évaluation", metricValue(period.averageSeniorEvaluationClickCount)],
     [],
-    [cell('Cycle des interventions — Toutes les données', 'section'), cell('Valeur', 'section')],
+    [cell('Indicateurs toutes périodes confondues', 'section'), cell('Valeur', 'section')],
     ['Blocs enregistrés', allTime.recordedCount],
     ['Évaluations enregistrées', allTime.evaluatedCount],
-    ['Délai moyen intervention → saisie (heures)', metricValue(allTime.averageRecordingDelayMs, 3_600_000)],
+    ['Délai moyen intervention → saisie (jours calendaires)', metricValue(allTime.averageRecordingDelayDays)],
     ['Délai moyen saisie → évaluation (heures)', metricValue(allTime.averageEvaluationDelayMs, 3_600_000)],
     ["Durée moyenne de saisie d'une intervention (secondes)", metricValue(allTime.averageInterventionFormDurationMs, 1_000)],
     ['Formulaires intervention terminés', allTime.completedInterventionFormCount],
@@ -412,15 +440,17 @@ function buildSummaryWorksheet(input: AnalyticsExportInput): XlsxWorksheet {
 
 function buildInterventionsWorksheet(
   input: AnalyticsExportInput,
-  interventions: SavedIntervention[]
+  interventions: SavedIntervention[],
+  references: Map<string, string>
 ): XlsxWorksheet {
   const headers = [
-    'intervention_id',
-    'Identifiant interne',
-    'Identifiant senior',
+    'Référence',
+    'Prénom interne',
+    'Nom interne',
+    'Lieu de stage',
+    'Prénom senior évaluateur',
+    'Nom senior évaluateur',
     "Date de l'intervention",
-    "Heure de début de l'intervention",
-    'Durée opératoire (minutes)',
     "Date et heure d'enregistrement",
     'Procédure',
     'Indication',
@@ -438,7 +468,7 @@ function buildInterventionsWorksheet(
     'Performance globale (1-5)',
     'Difficulté senior (1-3)',
     'Commentaire senior',
-    'Délai intervention → saisie (heures)',
+    'Délai intervention → saisie (jours calendaires)',
     'Délai saisie → évaluation (heures)',
   ];
   const autonomyScoreEvolutions = buildAutonomyScoreEvolutions(input);
@@ -446,14 +476,20 @@ function buildInterventionsWorksheet(
     const evaluation = input.adminEvaluations[intervention.id];
     const isEvaluated = hasCompleteEvaluation(evaluation);
     const autonomyScore = getAutonomyScore(input, intervention);
+    const internal = getInternalIdentity(input, intervention.internalId);
+    const senior = getSeniorIdentity(
+      input,
+      evaluation?.seniorProfileId ?? intervention.seniorId
+    );
 
     return [
-      intervention.id,
-      getInternalLoginId(input, intervention.internalId),
-      getSeniorLoginId(input, intervention.seniorId),
+      references.get(intervention.id) ?? '',
+      internal.firstName,
+      internal.lastName,
+      internal.stageLocation,
+      senior.firstName,
+      senior.lastName,
       dateCell(intervention.date),
-      intervention.startTime ?? '',
-      intervention.operativeDurationMinutes ?? null,
       dateTimeCell(intervention.savedAt),
       getProcedureLabel(intervention, input.customSurgicalInterventions),
       getIndicationLabel(intervention),
@@ -473,7 +509,7 @@ function buildInterventionsWorksheet(
       evaluation?.globalPerformance ? Number(evaluation.globalPerformance) : null,
       evaluation?.categoryDifficulty ? Number(evaluation.categoryDifficulty) : null,
       cell(evaluation?.seniorComment ?? '', 'wrap'),
-      decimalCell(getRecordingDelayHours(intervention)),
+      getCalendarDayDifference(intervention.date, intervention.savedAt),
       decimalCell(
         evaluation?.updatedAt
           ? getHourDifference(intervention.savedAt, evaluation.updatedAt)
@@ -484,7 +520,7 @@ function buildInterventionsWorksheet(
 
   return {
     autoFilter: true,
-    columnWidths: [22, 20, 20, 15, 16, 20, 22, 24, 30, 20, 20, 14, 14, 22, 16, 48, 18, 28, 14, 22, 22, 20, 48, 24, 24],
+    columnWidths: [18, 18, 18, 28, 22, 22, 15, 22, 28, 28, 22, 24, 16, 16, 22, 16, 54, 20, 22, 16, 22, 20, 20, 54, 24, 24],
     freezeHeader: true,
     name: 'Interventions',
     rows: [headerRow(headers), ...rows],
@@ -493,12 +529,16 @@ function buildInterventionsWorksheet(
 
 function buildOperativeStepsWorksheet(
   input: AnalyticsExportInput,
-  interventions: SavedIntervention[]
+  interventions: SavedIntervention[],
+  references: Map<string, string>
 ): XlsxWorksheet {
   const headers = [
-    'intervention_id',
-    'Identifiant interne',
-    'Identifiant senior',
+    'Référence',
+    'Prénom interne',
+    'Nom interne',
+    'Lieu de stage',
+    'Prénom senior évaluateur',
+    'Nom senior évaluateur',
     'Procédure',
     'Indication',
     "Voie d'abord",
@@ -508,9 +548,15 @@ function buildOperativeStepsWorksheet(
     'Étape applicable',
   ];
   const rows = interventions.flatMap<XlsxCellValue[]>((intervention) => {
+    const evaluation = input.adminEvaluations[intervention.id];
+    const internal = getInternalIdentity(input, intervention.internalId);
+    const senior = getSeniorIdentity(
+      input,
+      evaluation?.seniorProfileId ?? intervention.seniorId
+    );
     const checklist = getAuthoritativeChecklist(
       intervention,
-      input.adminEvaluations[intervention.id]
+      evaluation
     );
     const steps = getHistoricalChecklistSteps(
       intervention,
@@ -527,9 +573,12 @@ function buildOperativeStepsWorksheet(
       const numericLevel = level === 'NA' ? null : Number(level);
 
       return [[
-        intervention.id,
-        getInternalLoginId(input, intervention.internalId),
-        getSeniorLoginId(input, intervention.seniorId),
+        references.get(intervention.id) ?? '',
+        internal.firstName,
+        internal.lastName,
+        internal.stageLocation,
+        senior.firstName,
+        senior.lastName,
         getProcedureLabel(intervention, input.customSurgicalInterventions),
         getIndicationLabel(intervention),
         getApproachLabel(intervention),
@@ -543,7 +592,7 @@ function buildOperativeStepsWorksheet(
 
   return {
     autoFilter: true,
-    columnWidths: [22, 24, 24, 24, 24, 20, 46, 20, 23, 18],
+    columnWidths: [18, 20, 20, 28, 24, 24, 24, 24, 20, 46, 20, 23, 18],
     freezeHeader: true,
     name: 'Étapes opératoires',
     rows: [headerRow(headers), ...rows],
@@ -562,26 +611,49 @@ function getMeasurementType(entry: ActivityLogEntry) {
   return '';
 }
 
-function buildUsageRows(activities: ActivityLogEntry[]): XlsxCellValue[][] {
-  return activities.map((entry) => [
-    dateTimeCell(entry.createdAt),
-    entry.actorId ?? '',
-    entry.actorRole === 'internal' ? 'Interne' : 'Senior',
-    entry.action,
-    entry.targetType,
-    entry.targetLabel,
-    getMeasurementType(entry),
-    entry.analyticsEvent ? decimalCell(entry.analyticsEvent.durationMs / 1_000) : null,
-    entry.analyticsEvent?.clickCount ?? null,
-    dateTimeCell(entry.analyticsEvent?.completedAt),
-    entry.analyticsEvent ? 'Oui' : '',
-  ]);
+function getMeasurementAnalyticsEvent(entry: ActivityLogEntry) {
+  const event = entry.analyticsEvent;
+
+  return event?.kind === 'intervention_form' || event?.kind === 'senior_evaluation'
+    ? event
+    : null;
 }
 
-function buildUsageWorksheet(activities: ActivityLogEntry[]): XlsxWorksheet {
+function buildUsageRows(
+  input: AnalyticsExportInput,
+  activities: ActivityLogEntry[]
+): XlsxCellValue[][] {
+  return activities.map((entry) => {
+    const measurement = getMeasurementAnalyticsEvent(entry);
+    const actor = getActorIdentity(input, entry);
+
+    return [
+      dateTimeCell(entry.createdAt),
+      actor.firstName,
+      actor.lastName,
+      actor.stageLocation,
+      entry.actorRole === 'internal' ? 'Interne' : 'Senior',
+      entry.action,
+      entry.targetType,
+      entry.targetLabel,
+      getMeasurementType(entry),
+      measurement ? decimalCell(measurement.durationMs / 1_000) : null,
+      measurement?.clickCount ?? null,
+      dateTimeCell(measurement?.completedAt),
+      measurement ? 'Oui' : '',
+    ];
+  });
+}
+
+function buildUsageWorksheet(
+  input: AnalyticsExportInput,
+  activities: ActivityLogEntry[]
+): XlsxWorksheet {
   const headers = [
     'Date et heure',
-    'actor_id',
+    'Prénom',
+    'Nom',
+    'Lieu de stage',
     'Rôle',
     'Action réalisée',
     "Type d'élément concerné",
@@ -595,10 +667,10 @@ function buildUsageWorksheet(activities: ActivityLogEntry[]): XlsxWorksheet {
 
   return {
     autoFilter: true,
-    columnWidths: [22, 20, 14, 34, 24, 38, 24, 20, 18, 22, 20],
+    columnWidths: [22, 20, 20, 28, 14, 34, 24, 38, 24, 20, 18, 22, 20],
     freezeHeader: true,
     name: 'Usage',
-    rows: [headerRow(headers), ...buildUsageRows(activities)],
+    rows: [headerRow(headers), ...buildUsageRows(input, activities)],
   };
 }
 
@@ -607,7 +679,9 @@ function buildProfilesWorksheet(
   periodData: AnalyticsPeriodData
 ): XlsxWorksheet {
   const headers = [
-    'Identifiant de connexion',
+    'Prénom',
+    'Nom',
+    'Lieu de stage',
     'Rôle',
     'Promotion',
     'Semestre',
@@ -618,7 +692,9 @@ function buildProfilesWorksheet(
   const internalRows = input.internalProfiles
     .filter((profile) => periodData.internalIds.has(profile.id))
     .map<XlsxCellValue[]>((profile) => [
-      profile.loginId,
+      profile.firstName,
+      profile.lastName,
+      profile.institution,
       'Interne',
       profile.promotion,
       profile.semester,
@@ -640,7 +716,9 @@ function buildProfilesWorksheet(
       ).length;
 
       return [
-        senior.loginId ?? 'Identifiant indisponible',
+        senior.firstName,
+        senior.lastName,
+        senior.institution,
         'Senior',
         '',
         '',
@@ -652,33 +730,11 @@ function buildProfilesWorksheet(
 
   return {
     autoFilter: true,
-    columnWidths: [26, 14, 16, 14, 22, 22, 26],
+    columnWidths: [20, 20, 28, 14, 16, 14, 22, 22, 26],
     freezeHeader: true,
     name: 'Profils concernés',
     rows: [headerRow(headers), ...internalRows, ...seniorRows],
   };
-}
-
-function escapeCsvCell(value: string) {
-  return `"${value.replace(/"/g, '""')}"`;
-}
-
-function buildCsvContent(headers: string[], rows: string[][]) {
-  return [headers, ...rows]
-    .map((row) => row.map((value) => escapeCsvCell(value)).join(';'))
-    .join('\n');
-}
-
-function downloadBlob(blob: Blob, filename: string) {
-  const url = window.URL.createObjectURL(blob);
-  const link = document.createElement('a');
-
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  window.URL.revokeObjectURL(url);
 }
 
 function getPeriodFilenameLabel(period: AnalyticsExportPeriod) {
@@ -688,65 +744,26 @@ function getPeriodFilenameLabel(period: AnalyticsExportPeriod) {
 export function downloadAnalyticsExcel(input: AnalyticsExportInput) {
   const dateStamp = input.generatedAtIso.slice(0, 10);
 
-  downloadBlob(
+  return deliverDownloadableFile(
     createAnalyticsWorkbookBlob(input),
     `export-donnees-${getPeriodFilenameLabel(input.period)}-${dateStamp}.xlsx`
   );
 }
 
 export function createAnalyticsWorkbookBlob(input: AnalyticsExportInput) {
+  return createXlsxBlob(buildAnalyticsWorksheets(input));
+}
+
+export function buildAnalyticsWorksheets(input: AnalyticsExportInput) {
   const periodData = getPeriodData(input);
+  const references = buildInterventionReferences(periodData.interventions);
   const worksheets: XlsxWorksheet[] = [
     buildSummaryWorksheet(input),
-    buildInterventionsWorksheet(input, periodData.interventions),
-    buildOperativeStepsWorksheet(input, periodData.interventions),
-    buildUsageWorksheet(periodData.activities),
+    buildInterventionsWorksheet(input, periodData.interventions, references),
+    buildOperativeStepsWorksheet(input, periodData.interventions, references),
+    buildUsageWorksheet(input, periodData.activities),
     buildProfilesWorksheet(input, periodData),
   ];
 
-  return createXlsxBlob(worksheets);
-}
-
-export function downloadAnalyticsUsageCsv(input: AnalyticsExportInput) {
-  const csvContent = createAnalyticsUsageCsvContent(input);
-  const blob = new Blob([`\uFEFF${csvContent}`], {
-    type: 'text/csv;charset=utf-8;',
-  });
-  const dateStamp = input.generatedAtIso.slice(0, 10);
-
-  downloadBlob(
-    blob,
-    `usage-${getPeriodFilenameLabel(input.period)}-${dateStamp}.csv`
-  );
-}
-
-export function createAnalyticsUsageCsvContent(input: AnalyticsExportInput) {
-  const periodData = getPeriodData(input);
-  const headers = [
-    'date_heure',
-    'actor_id',
-    'role',
-    'action',
-    'type_element',
-    'libelle_element',
-    'type_mesure',
-    'duree_secondes',
-    'nombre_clics',
-    'date_heure_fin',
-    'formulaire_termine',
-  ];
-  const rows = periodData.activities.map((entry) => [
-    entry.createdAt,
-    entry.actorId ?? '',
-    entry.actorRole === 'internal' ? 'Interne' : 'Senior',
-    entry.action,
-    entry.targetType,
-    entry.targetLabel,
-    getMeasurementType(entry),
-    entry.analyticsEvent ? `${entry.analyticsEvent.durationMs / 1_000}` : '',
-    entry.analyticsEvent ? `${entry.analyticsEvent.clickCount}` : '',
-    entry.analyticsEvent?.completedAt ?? '',
-    entry.analyticsEvent ? 'Oui' : '',
-  ]);
-  return buildCsvContent(headers, rows);
+  return worksheets;
 }

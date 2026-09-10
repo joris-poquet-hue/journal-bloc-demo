@@ -133,17 +133,17 @@ test('l’adresse d’assistance web est centralisée et configurable', () => {
     '../src/screens/admin/SeniorDashboard.tsx'
   );
   const adminScreen = readSource('../src/screens/AdminScreen.tsx');
-  const mobileSupportConfig = readSource('../mobile/supportConfig.ts');
-  const mobileApp = readSource('../mobile/App.tsx');
 
   assert.match(supportConfig, /import\.meta\.env\.VITE_SUPPORT_EMAIL/);
-  assert.match(mobileSupportConfig, /EXPO_PUBLIC_SUPPORT_EMAIL/);
+  assert.equal(
+    existsSync(new URL('../mobile/supportConfig.ts', import.meta.url)),
+    false
+  );
 
   for (const source of [
     profileScreen,
     seniorDashboard,
     adminScreen,
-    mobileApp,
   ]) {
     assert.match(source, /buildSupportMailto/);
     assert.doesNotMatch(source, /mailto:contact@monjournaldebloc\.fr/);
@@ -153,4 +153,15 @@ test('l’adresse d’assistance web est centralisée et configurable', () => {
   assert.match(seniorDashboard, /Espace : Senior/);
   assert.match(adminScreen, /Je rencontre le problème suivant/);
   assert.match(adminScreen, /Espace : Administrateur/);
+});
+
+test('le mobile ne conserve plus l’ancienne implémentation native inactive', () => {
+  const mobileEntry = readSource('../mobile/index.ts');
+
+  assert.equal(existsSync(new URL('../mobile/App.tsx', import.meta.url)), false);
+  assert.equal(
+    existsSync(new URL('../mobile/supportConfig.ts', import.meta.url)),
+    false
+  );
+  assert.match(mobileEntry, /import App from '\.\/WebAppShell'/);
 });

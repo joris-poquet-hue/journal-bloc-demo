@@ -159,7 +159,7 @@ export function AdminInterventionsManager({
   ) => Promise<void>;
 }) {
   const [view, setView] = useState<InterventionManagerView>('list');
-  useScrollResetOnChange([view]);
+  useScrollResetOnChange(view);
   const [editorMode, setEditorMode] = useState<InterventionEditorMode>('create');
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<InterventionListFilter>('all');
@@ -218,9 +218,13 @@ export function AdminInterventionsManager({
         null
       : null;
 
-  const previewApproachOptions =
-    draft?.approachConfigs?.filter((config) => config.active).map((config) => config.approach) ??
-    [];
+  const previewApproachOptions = useMemo(
+    () =>
+      draft?.approachConfigs
+        ?.filter((config) => config.active)
+        .map((config) => config.approach) ?? [],
+    [draft?.approachConfigs]
+  );
   const previewConfig =
     draft && previewApproach
       ? draft.approachConfigs?.find(
